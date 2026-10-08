@@ -1,4 +1,9 @@
-"""Check attempt-private scratch and port ownership across tasks and missions."""
+"""Check that simultaneous task attempts cannot reuse one another's resources.
+
+The tests allocate separate temporary folders and local ports, replace an attempt,
+and reject writes or cleanup by its old owner. They do not test process supervision
+or a production sandbox.
+"""
 
 import json
 

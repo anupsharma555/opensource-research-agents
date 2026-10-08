@@ -1,4 +1,7 @@
-// Generate the React snapshot type from the canonical research schema, or check for drift.
+/* Create TypeScript types for the research snapshot displayed by the React app.
+   The script reads JSON rules generated from Python record definitions and saves
+   a matching client type. With --check, it reports an outdated saved type without
+   editing the file. */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

@@ -1,4 +1,9 @@
-"""The foundation receipt must not call a dirty working tree a tested commit."""
+"""Check that an offline test receipt says which source state was really tested.
+
+Temporary repositories simulate clean, edited, staged, and untracked files while
+the foundation skill runs. A check over changed files must not claim to prove only
+the clean commit; no research provider is involved.
+"""
 
 import hashlib
 import json

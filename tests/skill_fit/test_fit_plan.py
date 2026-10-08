@@ -1,4 +1,9 @@
-"""Offline checks before the bounded selected-model calls."""
+"""Check the four planned skill prompts before spending on model calls.
+
+The tests confirm that paired variants see matched synthetic sources, answer
+references stay hidden, and the estimated cost is bounded. A fake network
+response checks the one-call result path without contacting the provider.
+"""
 
 from __future__ import annotations
 
@@ -22,7 +27,7 @@ def test_four_fixed_selected_model_requests() -> None:
         assert request["model"] == "openai/gpt-oss-120b"
         assert request["reasoning_effort"] == "high"
         assert request["include_reasoning"] is False
-        assert request["max_completion_tokens"] == 4096
+        assert request["max_completion_tokens"] == 8192
         assert "tools" not in request
         assert "response_format" not in request
 
@@ -54,6 +59,42 @@ def test_appraisal_input_is_only_a1() -> None:
     assert [source["source_id"] for source in packet["sources"]] == ["A1"]
 
 
+def test_peer_revision_preserves_sources_and_selected_model() -> None:
+    request = fit.request_for("X1")
+    prior = {"schema": "ora.skill_fit.result.v1", "blind_id": "X1", "model_requested": fit.MODEL,
+             "model_returned": fit.MODEL,
+             "request_sha256": fit.digest(request), "finish_reason": "stop",
+             "final_content": "Synthetic earlier answer",
+             "final_content_sha256": fit.digest("Synthetic earlier answer")}
+    revised = fit.revision_request("X1", prior, "Check the interpretation against the counts.")
+    assert revised["messages"][:2] == request["messages"]
+    assert [m["role"] for m in revised["messages"]] == ["system", "user", "assistant", "user"]
+    assert revised["model"] == request["model"]
+    assert revised["reasoning_effort"] == request["reasoning_effort"]
+    assert revised["max_completion_tokens"] == request["max_completion_tokens"]
+    assert revised["messages"][2]["content"] == prior["final_content"]
+    for changed in ({"schema": "wrong"}, {"phase": "peer_revision"},
+                    {"blind_id": "X2"}, {"model_requested": "different-model"},
+                    {"model_returned": "different-model"},
+                    {"request_sha256": "wrong"}, {"finish_reason": "length"},
+                    {"final_content": ""}, {"final_content": "Edited earlier answer"}):
+        with pytest.raises(ValueError):
+            fit.revision_request("X1", {**prior, **changed}, "Review this case.")
+    # Historical experiment receipts predate content hashes and remain identified
+    # by the whole-parent hash; the result labels their content hash as not recorded.
+    legacy = {k: v for k, v in prior.items() if k != "final_content_sha256"}
+    assert fit.revision_request("X1", legacy, "Review this case.")["model"] == fit.MODEL
+
+
+def test_raw_results_cannot_be_saved_in_source_tree(monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden_key_read():
+        raise AssertionError("Rejected output must not read credentials")
+
+    monkeypatch.setattr(fit, "_key", forbidden_key_read)
+    with pytest.raises(ValueError, match="below .local"):
+        fit.run_one("X1", output_dir=ROOT / "experiments" / "skill_fit" / "results")
+
+
 def test_one_attempt_discards_reasoning_and_refuses_repeat(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeResponse:
         def __enter__(self):
@@ -73,7 +114,8 @@ def test_one_attempt_discards_reasoning_and_refuses_repeat(tmp_path: Path, monke
     captured = []
 
     def fake_urlopen(request, timeout):
-        captured.append((request.full_url, timeout, request.get_header("Authorization")))
+        captured.append((request.full_url, timeout, request.get_header("Authorization"),
+                         request.get_header("User-agent")))
         return FakeResponse()
 
     monkeypatch.setattr(fit, "OUT", tmp_path)
@@ -82,11 +124,13 @@ def test_one_attempt_discards_reasoning_and_refuses_repeat(tmp_path: Path, monke
     summary = fit.run_one("X1")
     assert summary["reasoning_returned"] is True
     assert "final_content" not in summary
-    assert captured == [(fit.URL, 120, "Bearer synthetic-test-key")]
+    assert captured == [(fit.URL, 120, "Bearer synthetic-test-key",
+                         "OpenSourceResearchAgents/0.1 skill-fit")]
     saved = (tmp_path / "X1.json").read_text()
     assert "Synthetic final answer" in saved
     assert "private reasoning must be discarded" not in saved
     assert "synthetic-test-key" not in saved
+    assert json.loads(saved)["final_content_sha256"] == fit.digest("Synthetic final answer")
     with pytest.raises(RuntimeError, match="already been attempted"):
         fit.run_one("X1")
     assert len(captured) == 1

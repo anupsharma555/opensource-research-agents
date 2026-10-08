@@ -1,4 +1,9 @@
-"""Shared positive and negative wire fixtures, consumed in Python and JavaScript."""
+"""Create sample research records that should either pass or fail validation.
+
+The cases cover commands, events, evidence, and delayed job results so Python and
+JavaScript can check the same allowed record shapes. They are synthetic examples,
+not observations from a live mission.
+"""
 
 import copy
 import json

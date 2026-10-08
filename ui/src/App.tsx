@@ -1,5 +1,7 @@
-// Render the scripted research snapshot with linked findings, work, sources, and diagnostics.
-// Request receipts and annotations here are local previews; no research host is connected.
+/* Display a saved research question and let a reviewer follow its evidence trail.
+   The React views link findings to source passages, peer requests, task attempts,
+   and separate diagnostics. Follow-up receipts and notes are local previews over
+   synthetic data; no research host receives a command. */
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { ResearchSnapshot } from './generated/contracts';

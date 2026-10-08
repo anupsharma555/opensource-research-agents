@@ -1,4 +1,9 @@
-"""Offline, synthetic benchmark packets for OpenSource Research Agents."""
+"""Give callers one import point for the synthetic research benchmark.
+
+It exposes ways to load a question and its sources, hand a reduced packet to a
+tested worker, and check saved run records. Answer references are loaded separately
+for evaluators, and these checks do not grade scientific quality.
+"""
 
 from .catalog import (
     BenchmarkError,

@@ -1,4 +1,9 @@
-"""Apply the shared wire examples to Python and check generated schema freshness."""
+"""Check whether Python accepts and rejects the shared sample research records.
+
+The cases include valid and invalid commands, events, evidence, and job results;
+JavaScript checks the same examples separately. A second check reports when saved
+JSON rules no longer match the Python definitions that produced them.
+"""
 
 import json
 from pathlib import Path

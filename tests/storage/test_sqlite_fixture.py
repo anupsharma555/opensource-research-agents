@@ -1,4 +1,9 @@
-"""Behavioral checks for the Stage 1 storage decision fixture."""
+"""Check whether the local storage example keeps research links after failures.
+
+The tests interrupt metadata writes, remove saved bytes, open concurrent readers,
+and restore a backup while checking claims still point to their source copies.
+They do not prove power-loss durability or cloud storage behavior.
+"""
 
 from __future__ import annotations
 

@@ -1,7 +1,8 @@
-"""Prepare a source-linked claim for independent semantic support review.
+"""Build a candidate link between a research claim and one saved source passage.
 
-This pure helper validates identity and locator membership. It cannot determine
-whether the cited passage entails a claim; a qualified reviewer must do that.
+The helper checks that the named passage belongs to the supplied evidence copy
+and carries the source file's ID, version, and hash into the result. A reviewer
+must still decide whether the passage actually supports or challenges the claim.
 """
 
 from __future__ import annotations

@@ -1,7 +1,8 @@
-"""Small, synthetic SQLite/file-store fixture for the Stage 1 storage decision.
+"""Show how a local database can link research records to exact saved file bytes.
 
-This is evidence for a design choice, not the application's storage layer. All
-paths are supplied by the caller; the command-line run uses a temporary folder.
+This synthetic example writes content-addressed files before accepting a source
+copy, peer message, claim, and artifact reference in SQLite. It probes rollback,
+missing files, backup, and lookup growth; it is not the application's storage host.
 """
 
 from __future__ import annotations

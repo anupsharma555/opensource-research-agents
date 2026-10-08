@@ -1,6 +1,8 @@
-"""Expose offline contract, benchmark, skill, and sample-inspection commands.
+"""Let a developer inspect sample research data and run offline foundation checks.
 
-Production mission commands report unavailable; this CLI does not start a host.
+The terminal commands call the shared contract, benchmark, and skill modules and
+print their results. Commands for a production mission state that they are
+unavailable instead of starting a research host.
 """
 
 import argparse

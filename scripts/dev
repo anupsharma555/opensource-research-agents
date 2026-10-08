@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Run pinned setup, generation, checks, and sample-app commands in each environment.
+"""Give developers one command for setting up and checking this repository.
 
-This wrapper does not load .env or invoke research providers.
+It selects the pinned Python and Node tools, generates shared contracts, runs
+offline checks, and opens or builds the sample app. It keeps downloaded tools and
+caches local to the checkout and never loads .env or calls a research provider.
 """
 
 import argparse

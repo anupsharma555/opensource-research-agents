@@ -1,4 +1,9 @@
-"""Offline role/skill package behavior and failure isolation."""
+"""Check that agent roles can load their declared skills without sharing work state.
+
+The tests catch missing or changed instruction files, wrong helper versions, and
+unavailable optional capabilities; they also inspect synthetic helper outputs.
+They do not show whether a selected model uses a skill well.
+"""
 
 from __future__ import annotations
 
@@ -181,7 +186,7 @@ class RuntimeSkillTests(unittest.TestCase):
             for variant in case["variants"]:
                 self.assertTrue(registry.render_instructions(case["skill_id"], variant).strip())
             attempt = registry.start_skill_attempt(case["role_id"], case["skill_id"], "qualification-fixture")
-            self.assertEqual(attempt.skill_version, "1.0.0")
+            self.assertEqual(attempt.skill_version, "1.0.1")
 
 
 if __name__ == "__main__":

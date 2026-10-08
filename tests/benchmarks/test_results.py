@@ -1,4 +1,9 @@
-"""Run records preserve proof boundaries and cannot inherit stale passes."""
+"""Check that a saved comparison result names the evidence it actually used.
+
+The tests reject unknown citations, missing source access, impossible resource
+values, and old passes presented as current after an input or build change. They
+do not decide whether a cited passage supports the written conclusion.
+"""
 
 from __future__ import annotations
 

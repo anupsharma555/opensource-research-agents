@@ -1,4 +1,7 @@
-// Check navigation and evidence review in the scripted sample; no host is involved.
+/* Check whether a reviewer can navigate the saved research sample.
+   These browser-like tests follow a finding to its cited passage, inspect peer
+   requests and attempts, preview follow-up work, and use the keyboard. They use
+   fixed data and do not contact a research backend. */
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';

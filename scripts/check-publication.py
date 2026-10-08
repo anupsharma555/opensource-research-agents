@@ -1,6 +1,8 @@
-"""Screen staged Git blobs for private paths and credential-shaped content.
+"""Check what Git would publish before a source change is committed.
 
-Read the index bytes that would be committed, without opening local credential files.
+It reads the staged copy of each tracked file and flags forbidden local paths or
+credential-shaped text, even if the working copy was edited afterward. It does
+not open local credential files and is only a supplement to manual review.
 """
 
 import re

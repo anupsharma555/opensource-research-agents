@@ -1,4 +1,9 @@
-"""Ordered replay with explicit gaps; receiving an event is not acknowledging it."""
+"""Rebuild a current view of one mission from its saved change events.
+
+This in-memory reader waits for missing sequence numbers and rejects conflicting
+events so a client can detect when it needs to fetch earlier changes. It does not
+save the view or acknowledge a client's durable progress.
+"""
 
 from .models import Event
 

@@ -1,4 +1,6 @@
-/* Layout and visual states for the scripted research review app. */
+/* Give the sample research-review app a readable desktop layout.
+   These rules style navigation, cited passages, peer work, diagnostics, and
+   simulated loading or failure states. They do not control research execution. */
 :root {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #173029;

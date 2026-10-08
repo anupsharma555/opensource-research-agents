@@ -1,4 +1,9 @@
-"""Actual Microsoft Agent Framework two-executor workflow with file checkpoints."""
+"""Run one scripted peer task through Microsoft Agent Framework.
+
+Two workflow steps pass the task and return its proposed action, saving framework
+checkpoints as files. The shared research board still decides whether the action
+becomes an accepted artifact or peer message.
+"""
 
 from __future__ import annotations
 

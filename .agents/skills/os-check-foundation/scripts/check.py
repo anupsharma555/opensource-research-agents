@@ -1,4 +1,9 @@
-"""Portable Codex-skill helper; uses the repository's shared check entrypoints."""
+"""Check whether this checkout's offline development foundation works.
+
+The Codex skill calls either focused checks or the full shared suite, then saves
+each command's result and the tested Git source state in a local receipt. It does
+not start a research mission or call a provider.
+"""
 
 import argparse
 import hashlib

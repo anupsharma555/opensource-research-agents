@@ -1,8 +1,8 @@
-"""Versioned synthetic scenarios and the evaluator/worker packet boundary.
+"""Load fixed synthetic research questions with exact source passages.
 
-The functions enforce packet shape and hashes. Filesystem permissions are still
-the host's responsibility: tested agents must receive the exported worker JSON,
-not a mount of this repository's withheld reference directory.
+This file checks packet versions, content hashes, quoted spans, and future events,
+then builds a worker input that excludes the answer reference. A tested agent must
+receive only that exported input; this code does not secure the repository files.
 """
 
 from __future__ import annotations

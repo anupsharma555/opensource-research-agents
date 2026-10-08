@@ -1,7 +1,8 @@
-"""Shared, provider-free peer-work fixture for the runtime comparison.
+"""Create the same miniature research collaboration for each runtime candidate.
 
-The SQLite board is deliberately application-owned. A framework checkpoint is
-never treated as an atomic substitute for an accepted artifact and peer message.
+Scripted peers collect two sources, ask for a check, repair one invalid action,
+and propose a synthesis while other work continues. Its SQLite board records the
+accepted work; a framework checkpoint alone cannot accept an artifact or message.
 """
 
 from __future__ import annotations

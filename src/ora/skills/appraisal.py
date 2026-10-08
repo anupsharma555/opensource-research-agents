@@ -1,4 +1,10 @@
-"""Prepare a result-scoped appraisal record without grading science by rule."""
+"""Build a methods-review record for one exact study result.
+
+The caller supplies the study design, comparison, outcome, time point, chosen
+review method, and separate judgments about reporting, bias, applicability, and
+precision. This helper ties them to a saved source passage but cannot judge their
+scientific correctness.
+"""
 
 from __future__ import annotations
 

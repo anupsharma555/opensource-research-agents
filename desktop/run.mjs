@@ -1,4 +1,7 @@
-// Start the local Tauri CLI from the desktop project so its config and build paths resolve.
+/* Start or build the sample Mac app from the correct desktop folder.
+   This wrapper passes command arguments to Tauri and returns its exit status so
+   the desktop config and React asset paths resolve. It does not start a Python
+   research host. */
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

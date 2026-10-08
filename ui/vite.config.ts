@@ -1,4 +1,7 @@
-// Share the React renderer configuration between the Vite app and its DOM tests.
+/* Define how the sample React interface runs and gets tested.
+   Vite serves it on a fixed local port for development, and Vitest uses a
+   browser-like DOM for component tests. The same React configuration builds
+   the static assets used by the desktop shell. */
 import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vitest/config';
