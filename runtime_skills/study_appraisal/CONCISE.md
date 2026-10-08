@@ -1,0 +1,3 @@
+# Study appraisal · concise
+
+Use for an independent first-pass methods review of an inspected study result. Read the preserved source copy without the synthesis author's conclusion. Choose a method appropriate to the study design and name its version. For the exact outcome, comparison and time point, keep reporting completeness, risk of bias, applicability and precision as separate judgments with source locators and reasons. Unknown abstract-only methods remain unknown. Record disagreement and request targeted source work rather than inferring validity from a fluent report. `prepare_result_appraisal` checks completeness and lineage, not scientific correctness.

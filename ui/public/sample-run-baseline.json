@@ -1,0 +1,235 @@
+{
+  "schemaVersion": "1.0",
+  "snapshotId": "syn-abstract-disagreement-baseline-snapshot",
+  "sampleVersion": "1.0.1",
+  "capturedAt": "2026-10-08T14:08:00Z",
+  "mission": {
+    "id": "mission-fictional-adult-baseline",
+    "version": 1,
+    "question": "For adults with fictional Condition Y, what do the available synthetic studies say about Lantern Brief Skills versus attention control at six weeks?",
+    "scope": "Published abstracts only; verify population, comparator and time point. Do not infer inaccessible methods or adverse events.",
+    "status": "waiting",
+    "latencyClass": "very_long",
+    "latencyBasis": "Initial abstract reading while a separate adult comparison is pending; no deadline.",
+    "startedAt": "2026-10-08T14:00:00Z",
+    "reportArtifactId": "report-v1"
+  },
+  "agents": [
+    {
+      "id": "agent-synthesis",
+      "name": "Synthesis peer",
+      "role": "evidence synthesis",
+      "status": "active"
+    },
+    {
+      "id": "agent-acquisition",
+      "name": "Acquisition peer",
+      "role": "source acquisition",
+      "status": "waiting"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-root",
+      "title": "Synthesize adult six-week evidence",
+      "status": "waiting",
+      "latencyClass": "long",
+      "latencyBasis": "Compare abstracts and revise supported claims.",
+      "activeOrWaiting": "waiting",
+      "attemptIds": [
+        "attempt-synthesis"
+      ],
+      "firstUsefulAt": "2026-10-08T14:07:00Z"
+    },
+    {
+      "id": "task-a1",
+      "title": "Inspect first adult abstract",
+      "status": "completed",
+      "latencyClass": "medium",
+      "latencyBasis": "One available abstract and exact passage spans.",
+      "activeOrWaiting": "active",
+      "attemptIds": [
+        "attempt-a1"
+      ],
+      "firstUsefulAt": "2026-10-08T14:04:00Z",
+      "parentTaskId": "task-root"
+    },
+    {
+      "id": "task-a2",
+      "title": "Find an independent adult comparison",
+      "status": "waiting",
+      "latencyClass": "medium",
+      "latencyBasis": "Parallel acquisition and relevance check.",
+      "activeOrWaiting": "waiting",
+      "attemptIds": [
+        "attempt-a2"
+      ],
+      "firstUsefulAt": null,
+      "parentTaskId": "task-root"
+    }
+  ],
+  "attempts": [
+    {
+      "id": "attempt-a1",
+      "taskId": "task-a1",
+      "agentId": "agent-acquisition",
+      "status": "completed",
+      "startedAt": "2026-10-08T14:01:00Z",
+      "endedAt": "2026-10-08T14:04:00Z",
+      "toolCalls": [
+        {
+          "name": "Read scripted abstract A1",
+          "provider": "Synthetic benchmark packet",
+          "status": "completed"
+        }
+      ],
+      "selectedModel": null,
+      "skillVersions": [],
+      "resultSummary": "Saved exact abstract spans A1-pop, A1-result and A1-gap.",
+      "returnedReasoning": {
+        "availability": "absent"
+      }
+    },
+    {
+      "id": "attempt-a2",
+      "taskId": "task-a2",
+      "agentId": "agent-acquisition",
+      "status": "waiting",
+      "startedAt": "2026-10-08T14:02:00Z",
+      "endedAt": null,
+      "toolCalls": [],
+      "selectedModel": null,
+      "skillVersions": [],
+      "resultSummary": "Independent comparison has not yet been returned in this sample run.",
+      "returnedReasoning": {
+        "availability": "absent"
+      }
+    },
+    {
+      "id": "attempt-synthesis",
+      "taskId": "task-root",
+      "agentId": "agent-synthesis",
+      "status": "waiting",
+      "startedAt": "2026-10-08T14:04:00Z",
+      "endedAt": null,
+      "toolCalls": [],
+      "selectedModel": null,
+      "skillVersions": [],
+      "resultSummary": "Initial abstract report saved; waiting for the requested separate study.",
+      "returnedReasoning": {
+        "availability": "restricted"
+      }
+    }
+  ],
+  "messages": [
+    {
+      "id": "message-a2-1",
+      "requestId": "request-a2",
+      "status": "requested",
+      "summary": "Find an independent adult attention-control study at six weeks.",
+      "createdAt": "2026-10-08T14:02:00Z",
+      "fromAgentId": "agent-synthesis",
+      "toAgentId": "agent-acquisition",
+      "taskId": "task-a2"
+    },
+    {
+      "id": "message-a2-2",
+      "requestId": "request-a2",
+      "status": "delivered",
+      "summary": "Request reached the acquisition peer.",
+      "createdAt": "2026-10-08T14:02:10Z",
+      "fromAgentId": "agent-synthesis",
+      "toAgentId": "agent-acquisition",
+      "taskId": "task-a2"
+    },
+    {
+      "id": "message-a2-3",
+      "requestId": "request-a2",
+      "status": "acknowledged",
+      "summary": "Acquisition peer accepted the question.",
+      "createdAt": "2026-10-08T14:02:30Z",
+      "fromAgentId": "agent-synthesis",
+      "toAgentId": "agent-acquisition",
+      "taskId": "task-a2"
+    }
+  ],
+  "sources": [
+    {
+      "id": "A1",
+      "copyId": "A1-copy-v1",
+      "version": 1,
+      "title": "Adult study A · Lantern Brief Skills vs attention control",
+      "accessState": "abstract_only",
+      "retrievalStatus": "available",
+      "provider": "Synthetic benchmark packet",
+      "contentHash": "2bfa1e78a58139bf2ee923123a169bbb0ed6ca2b01a8900e02b017e30aa26975",
+      "passages": [
+        {
+          "spanId": "A1-pop",
+          "locator": "Abstract, sentence 2",
+          "text": "80 adults with Condition Y, 40 received Lantern Brief Skills and 40 received attention control"
+        },
+        {
+          "spanId": "A1-result",
+          "locator": "Abstract, sentence 3",
+          "text": "At six weeks, response occurred in 18 of 40 versus 12 of 40 participants; the synthetic risk-difference interval was -4 to 34 percentage points"
+        },
+        {
+          "spanId": "A1-gap",
+          "locator": "Abstract, sentence 4",
+          "text": "Adverse events and subgroup outcomes were not reported in this abstract"
+        }
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "id": "claim-benefit-v1",
+      "version": 1,
+      "text": "A1 reports 18 of 40 versus 12 of 40 responses at six weeks; this favorable point direction does not establish benefit.",
+      "disposition": "provisional",
+      "supports": [
+        {
+          "sourceId": "A1",
+          "spanId": "A1-result"
+        }
+      ],
+      "taskId": "task-root"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "report-v1",
+      "version": 1,
+      "kind": "report",
+      "title": "Early abstract reading",
+      "body": "The first synthetic adult abstract reports a favorable response direction, 18/40 versus 12/40 at six weeks. The interval includes no difference, so benefit is not established.",
+      "citations": [
+        {
+          "sourceId": "A1",
+          "spanId": "A1-result"
+        }
+      ],
+      "limitations": [
+        "Only one abstract had been included in this saved view; methods and adverse events were unavailable."
+      ]
+    }
+  ],
+  "events": [
+    {
+      "id": "event-1",
+      "time": "2026-10-08T14:00:00Z",
+      "kind": "mission_started",
+      "summary": "Synthetic mission opened."
+    },
+    {
+      "id": "event-2",
+      "time": "2026-10-08T14:02:00Z",
+      "kind": "parallel_work",
+      "summary": "A separate adult comparison was requested but had not returned.",
+      "taskId": "task-a2",
+      "agentId": "agent-acquisition"
+    }
+  ],
+  "diagnostics": []
+}

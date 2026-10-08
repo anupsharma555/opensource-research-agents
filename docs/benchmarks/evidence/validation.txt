@@ -1,0 +1,23 @@
+test_catalog_checks_pinned_sources_spans_and_profiles (test_packets.PacketTests.test_catalog_checks_pinned_sources_spans_and_profiles) ... ok
+test_changed_source_or_reference_fails_frozen_manifest (test_packets.PacketTests.test_changed_source_or_reference_fails_frozen_manifest) ... ok
+test_export_is_a_single_key_free_packet_and_refuses_overwrite (test_packets.PacketTests.test_export_is_a_single_key_free_packet_and_refuses_overwrite) ... ok
+test_native_condition_keeps_question_but_not_fixed_source_snapshots (test_packets.PacketTests.test_native_condition_keeps_question_but_not_fixed_source_snapshots) ... ok
+test_result_map_tracks_current_packets_without_claiming_future_proof (test_packets.PacketTests.test_result_map_tracks_current_packets_without_claiming_future_proof) ... ok
+test_route_recovery_reference_cites_its_denominators (test_packets.PacketTests.test_route_recovery_reference_cites_its_denominators) ... ok
+test_span_corruption_fails_even_if_someone_tries_to_rehash (test_packets.PacketTests.test_span_corruption_fails_even_if_someone_tries_to_rehash) ... ok
+test_worker_packet_cannot_grow_reference_fields (test_packets.PacketTests.test_worker_packet_cannot_grow_reference_fields) ... ok
+test_worker_receives_initial_sources_but_no_future_events_or_answers (test_packets.PacketTests.test_worker_receives_initial_sources_but_no_future_events_or_answers) ... ok
+test_changed_packet_build_or_config_does_not_inherit_pass (test_results.ResultTests.test_changed_packet_build_or_config_does_not_inherit_pass) ... ok
+test_controlled_model_run_needs_predeclared_test_allowance (test_results.ResultTests.test_controlled_model_run_needs_predeclared_test_allowance) ... ok
+test_error_and_null_fixture_remain_distinct (test_results.ResultTests.test_error_and_null_fixture_remain_distinct) ... ok
+test_inference_must_name_an_existing_premise (test_results.ResultTests.test_inference_must_name_an_existing_premise) ... ok
+test_resource_units_remain_separate_and_unknown_is_not_zero (test_results.ResultTests.test_resource_units_remain_separate_and_unknown_is_not_zero) ... ok
+test_scored_rating_requires_frozen_reference_and_reviewer (test_results.ResultTests.test_scored_rating_requires_frozen_reference_and_reviewer) ... ok
+test_structural_checker_does_not_pretend_to_judge_support (test_results.ResultTests.test_structural_checker_does_not_pretend_to_judge_support) ... ok
+test_unhashed_configuration_cannot_masquerade_as_pinned (test_results.ResultTests.test_unhashed_configuration_cannot_masquerade_as_pinned) ... ok
+test_unknown_or_unencountered_citation_is_rejected (test_results.ResultTests.test_unknown_or_unencountered_citation_is_rejected) ... ok
+
+----------------------------------------------------------------------
+Ran 18 tests in 0.028s
+
+OK

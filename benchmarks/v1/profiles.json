@@ -1,0 +1,30 @@
+{
+  "schema": "ora.benchmark.profiles.v1",
+  "profiles": [
+    {
+      "profile_id": "provider_only",
+      "purpose": "Measure route availability, errors, usage, and recovery without grading scientific prose.",
+      "output": "Provider attempts and typed outcomes; scientific claims are not required."
+    },
+    {
+      "profile_id": "retrieval_only",
+      "purpose": "Measure distinct useful source discovery, access depth, contrary coverage, and partial search windows.",
+      "output": "Source IDs, encountered routes, inspected spans, access states, and unresolved gaps."
+    },
+    {
+      "profile_id": "single_role",
+      "purpose": "Measure one agent's supported answer without peer exchange.",
+      "output": "A bounded answer with source-span citations and uncertainty."
+    },
+    {
+      "profile_id": "peer_exchange",
+      "purpose": "Measure whether a targeted peer message changes a justified source or claim decision.",
+      "output": "Message, response, changed decision, and the supporting source IDs."
+    },
+    {
+      "profile_id": "complete_workflow",
+      "purpose": "Measure source-to-report behavior, including useful partial results and recovery.",
+      "output": "Versioned evidence, claim, critique, revision, and reader-facing report artifacts."
+    }
+  ]
+}

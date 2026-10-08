@@ -1,0 +1,116 @@
+{
+  "applicability_demonstration": "Offline tests make a changed scenario/profile/arm/condition/rubric/reference/build/config record historical_untested_for_current; no previous model or pilot pass is asserted.",
+  "code_bundle_hash_method": "SHA-256 of canonical JSON mapping relative code/test paths to raw-file SHA-256 digests",
+  "code_bundle_scope": [
+    "src/ora/benchmarks/__init__.py",
+    "src/ora/benchmarks/catalog.py",
+    "src/ora/benchmarks/results.py",
+    "tests/benchmarks/test_packets.py",
+    "tests/benchmarks/test_results.py"
+  ],
+  "local_code_bundle_sha256": "58cb64d5d1bd7fcd5d5cd8f98a23c003f8070efe0715c1f6f8f55bd0f4b323d0",
+  "packet_set_version": "1.0.4",
+  "proof_boundary": "No live provider, selected model, independent human panel, interface, or endurance run was performed.",
+  "scenario_results": [
+    {
+      "consumers": [
+        {
+          "artifact": "docs/benchmarks/evidence/validation.txt",
+          "assertions": "Frozen hash, exact span, worker/reference separation and structural run-record checks as applicable; see named tests.",
+          "consumer": "benchmark packet contract",
+          "proof_type": "fixture",
+          "status": "passed",
+          "tested_code_sha256": "58cb64d5d1bd7fcd5d5cd8f98a23c003f8070efe0715c1f6f8f55bd0f4b323d0"
+        },
+        {
+          "artifact": null,
+          "assertions": null,
+          "consumer": "selected-model role qualification",
+          "proof_type": null,
+          "status": "untested",
+          "tested_code_sha256": null
+        },
+        {
+          "artifact": null,
+          "assertions": null,
+          "consumer": "integrated source-to-report pilot",
+          "proof_type": null,
+          "status": "untested",
+          "tested_code_sha256": null
+        }
+      ],
+      "reference_sha256": "63bd642f0460fce3b39ced42606a7744e25f15936206ed566175004928a72c14",
+      "rubric_sha256": "f5dda5277315a1281b2a1eed308ed2a3c2406816486d601413369381dbdb6ba3",
+      "scenario_id": "syn-abstract-disagreement",
+      "scenario_sha256": "2688edc336bbc3b94dc897d6cd90378b6555149edd39022dbc4f7c24ae75bdb6",
+      "scenario_version": "1.0.1"
+    },
+    {
+      "consumers": [
+        {
+          "artifact": "docs/benchmarks/evidence/validation.txt",
+          "assertions": "Frozen hash, exact span, worker/reference separation and structural run-record checks as applicable; see named tests.",
+          "consumer": "benchmark packet contract",
+          "proof_type": "fixture",
+          "status": "passed",
+          "tested_code_sha256": "58cb64d5d1bd7fcd5d5cd8f98a23c003f8070efe0715c1f6f8f55bd0f4b323d0"
+        },
+        {
+          "artifact": null,
+          "assertions": null,
+          "consumer": "selected-model role qualification",
+          "proof_type": null,
+          "status": "untested",
+          "tested_code_sha256": null
+        },
+        {
+          "artifact": null,
+          "assertions": null,
+          "consumer": "integrated source-to-report pilot",
+          "proof_type": null,
+          "status": "untested",
+          "tested_code_sha256": null
+        }
+      ],
+      "reference_sha256": "2a261f58ab31f5680a6781b04b3fb1ee0d596085e0cefbf10e780cacd7cd0d73",
+      "rubric_sha256": "f5dda5277315a1281b2a1eed308ed2a3c2406816486d601413369381dbdb6ba3",
+      "scenario_id": "syn-null-versus-error",
+      "scenario_sha256": "0ee9618dc86372877533db7a259636ba7dd060f659ecf56982583e27a92ec2e8",
+      "scenario_version": "1.0.1"
+    },
+    {
+      "consumers": [
+        {
+          "artifact": "docs/benchmarks/evidence/validation.txt",
+          "assertions": "Frozen hash, exact span, worker/reference separation and structural run-record checks as applicable; see named tests.",
+          "consumer": "benchmark packet contract",
+          "proof_type": "fixture",
+          "status": "passed",
+          "tested_code_sha256": "58cb64d5d1bd7fcd5d5cd8f98a23c003f8070efe0715c1f6f8f55bd0f4b323d0"
+        },
+        {
+          "artifact": null,
+          "assertions": null,
+          "consumer": "selected-model role qualification",
+          "proof_type": null,
+          "status": "untested",
+          "tested_code_sha256": null
+        },
+        {
+          "artifact": null,
+          "assertions": null,
+          "consumer": "integrated source-to-report pilot",
+          "proof_type": null,
+          "status": "untested",
+          "tested_code_sha256": null
+        }
+      ],
+      "reference_sha256": "eca0ea3aef7dc39fa105dce5d043c902ac7c12634816a83caa6fcd5a568fc443",
+      "rubric_sha256": "f5dda5277315a1281b2a1eed308ed2a3c2406816486d601413369381dbdb6ba3",
+      "scenario_id": "syn-route-recovery",
+      "scenario_sha256": "b6028bcb6559de2a49df1daafb1609a48eee04f5257705d818cd201aa2cd6bcc",
+      "scenario_version": "1.0.2"
+    }
+  ],
+  "schema": "ora.benchmark.scenario-results.v1"
+}

@@ -1,0 +1,142 @@
+{
+  "family": "fictional youth program follow-up",
+  "initial_source_ids": [
+    "B1"
+  ],
+  "review_type": "source discovery and recovery",
+  "scenario_id": "syn-route-recovery",
+  "scenario_version": "1.0.2",
+  "schema": "ora.benchmark.scenario.v1",
+  "scripted_events": [
+    {
+      "actor": "scholarly_route",
+      "event_id": "B-E1",
+      "kind": "provider_failure",
+      "payload": {
+        "retrieved_source_ids": [],
+        "route": "route_alpha",
+        "state": "temporarily_unavailable"
+      },
+      "step": 1,
+      "target": "acquisition_agent"
+    },
+    {
+      "actor": "alternate_route",
+      "event_id": "B-E2",
+      "kind": "provider_result",
+      "payload": {
+        "known_unvisited": true,
+        "retrieved_source_ids": [
+          "B2",
+          "B3"
+        ],
+        "route": "route_beta",
+        "state": "partial_success"
+      },
+      "step": 2,
+      "target": "acquisition_agent"
+    },
+    {
+      "actor": "independent_critic",
+      "event_id": "B-E3",
+      "kind": "peer_message",
+      "payload": {
+        "source_ids": [
+          "B1",
+          "B2",
+          "B3"
+        ],
+        "text": "The registry has no posted outcomes. Verify whether either abstract reports symptom change rather than retention alone."
+      },
+      "step": 3,
+      "target": "acquisition_agent"
+    }
+  ],
+  "sources": [
+    {
+      "access_state": "metadata_only",
+      "body": "Synthetic registry result. A fictional youth Program P survey registered a twelve-week follow-up question, but this entry has no posted outcome data.",
+      "body_sha256": "7949a7b86c6afef78c7730542488dc274ecf22ac9f68ab850ad3a4d9f75bc925",
+      "rights": "synthetic_project_owned",
+      "source_id": "B1",
+      "source_version": "1.0.0",
+      "spans": [
+        {
+          "end": 148,
+          "locator": "Registry entry, outcome status",
+          "quote": "this entry has no posted outcome data",
+          "span_id": "B1-no-result",
+          "start": 111
+        }
+      ],
+      "surface": "registry_record",
+      "synthetic": true
+    },
+    {
+      "access_state": "abstract_only",
+      "body": "Synthetic publication abstract. A fictional survey of 120 youth Program P participants reported follow-up for 94 participants at twelve weeks. The abstract gives retention only; it does not report a symptom change estimate.",
+      "body_sha256": "98477396a58036e8349f30172acfc3a8e88780444884cf8a323b4368a3470016",
+      "rights": "synthetic_project_owned",
+      "source_id": "B2",
+      "source_version": "1.0.1",
+      "spans": [
+        {
+          "end": 86,
+          "locator": "Abstract, sentence 2, enrolled group",
+          "quote": "120 youth Program P participants",
+          "span_id": "B2-denominator",
+          "start": 54
+        },
+        {
+          "end": 141,
+          "locator": "Abstract, sentence 2",
+          "quote": "follow-up for 94 participants at twelve weeks",
+          "span_id": "B2-retention",
+          "start": 96
+        },
+        {
+          "end": 222,
+          "locator": "Abstract, sentence 3",
+          "quote": "it does not report a symptom change estimate",
+          "span_id": "B2-gap",
+          "start": 178
+        }
+      ],
+      "surface": "published_abstract",
+      "synthetic": true
+    },
+    {
+      "access_state": "abstract_only",
+      "body": "Synthetic publication abstract. A separate fictional survey of 90 youth Program P participants reported follow-up for 68 participants at twelve weeks and a small symptom-score change with wide uncertainty.",
+      "body_sha256": "8e99959ee57b7d90dffe9b9acd57b4fc2f81ab8e99d595046b8879fcae1afdc6",
+      "rights": "synthetic_project_owned",
+      "source_id": "B3",
+      "source_version": "1.0.1",
+      "spans": [
+        {
+          "end": 94,
+          "locator": "Abstract, sentence 2, enrolled group",
+          "quote": "90 youth Program P participants",
+          "span_id": "B3-denominator",
+          "start": 63
+        },
+        {
+          "end": 204,
+          "locator": "Abstract, sentence 2",
+          "quote": "follow-up for 68 participants at twelve weeks and a small symptom-score change with wide uncertainty",
+          "span_id": "B3-result",
+          "start": 104
+        }
+      ],
+      "surface": "published_abstract",
+      "synthetic": true
+    }
+  ],
+  "synthetic": true,
+  "task": {
+    "audience": "research coordinator",
+    "decision": "Return useful available evidence while distinguishing retention from symptom outcomes and an unsearched route from an empty result.",
+    "latency_class": "long",
+    "question": "Which synthetic youth Program P sources report twelve-week follow-up, and what do they actually report?"
+  }
+}

@@ -1,0 +1,857 @@
+{
+  "$defs": {
+    "Actor": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "peer",
+            "host",
+            "user"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind"
+      ],
+      "title": "Actor",
+      "type": "object"
+    },
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "sha256"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    },
+    "FinishOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "finish_operation",
+          "title": "Kind",
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/OperationResult"
+        }
+      },
+      "required": [
+        "kind",
+        "result"
+      ],
+      "title": "FinishOperation",
+      "type": "object"
+    },
+    "JobRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "attemptId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Attemptid",
+          "type": "string"
+        },
+        "expectedOutputs": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Expectedoutputs",
+          "type": "array"
+        },
+        "idempotencyKey": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Idempotencykey",
+          "type": "string"
+        },
+        "inputArtifacts": {
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "title": "Inputartifacts",
+          "type": "array"
+        },
+        "intendedEffects": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Intendedeffects",
+          "type": "array"
+        },
+        "jobId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Jobid",
+          "type": "string"
+        },
+        "leaseExpiresAt": {
+          "minLength": 1,
+          "title": "Leaseexpiresat",
+          "type": "string"
+        },
+        "missionAuthorizationId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Missionauthorizationid",
+          "type": "string"
+        },
+        "missionId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Missionid",
+          "type": "string"
+        },
+        "modelSelection": {
+          "$ref": "#/$defs/ModelSelection"
+        },
+        "operationId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Operationid",
+          "type": "string"
+        },
+        "originatingModelCallId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Originatingmodelcallid",
+          "type": "string"
+        },
+        "ownerToken": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Ownertoken",
+          "type": "string"
+        },
+        "permittedResources": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Permittedresources",
+          "type": "array"
+        },
+        "quotaWakeAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quotawakeat"
+        },
+        "requestTimeoutSeconds": {
+          "exclusiveMinimum": 0,
+          "title": "Requesttimeoutseconds",
+          "type": "number"
+        },
+        "taskId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Taskid",
+          "type": "string"
+        },
+        "toolCallId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Toolcallid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "jobId",
+        "missionId",
+        "taskId",
+        "attemptId",
+        "operationId",
+        "originatingModelCallId",
+        "toolCallId",
+        "idempotencyKey",
+        "ownerToken",
+        "inputArtifacts",
+        "expectedOutputs",
+        "intendedEffects",
+        "permittedResources",
+        "modelSelection",
+        "requestTimeoutSeconds",
+        "leaseExpiresAt",
+        "missionAuthorizationId"
+      ],
+      "title": "JobRequest",
+      "type": "object"
+    },
+    "LatencyRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "activeSeconds": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Activeseconds",
+          "type": "number"
+        },
+        "category": {
+          "enum": [
+            "minimal",
+            "medium",
+            "long",
+            "very_long"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "elapsedSeconds": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Elapsedseconds",
+          "type": "number"
+        },
+        "firstUsefulAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Firstusefulat"
+        },
+        "lastProgressAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lastprogressat"
+        },
+        "nextAction": {
+          "minLength": 1,
+          "title": "Nextaction",
+          "type": "string"
+        },
+        "peerWaitSeconds": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Peerwaitseconds",
+          "type": "number"
+        },
+        "providerWaitSeconds": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Providerwaitseconds",
+          "type": "number"
+        },
+        "queueSeconds": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Queueseconds",
+          "type": "number"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "retryWaitSeconds": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Retrywaitseconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "category",
+        "reason",
+        "nextAction"
+      ],
+      "title": "LatencyRecord",
+      "type": "object"
+    },
+    "ModelSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "changeReason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Changereason"
+        },
+        "configurationHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Configurationhash",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "reasoningEffort": {
+          "title": "Reasoningeffort",
+          "type": "string"
+        },
+        "settings": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          },
+          "title": "Settings",
+          "type": "object"
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "reasoningEffort",
+        "configurationHash"
+      ],
+      "title": "ModelSelection",
+      "type": "object"
+    },
+    "OperationResult": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "uncertain"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "uncertaintySource": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "uncertaintySource"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "waiting"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "nextCheck": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "nextCheck"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "attemptId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Attemptid",
+          "type": "string"
+        },
+        "cancellationRequested": {
+          "default": false,
+          "title": "Cancellationrequested",
+          "type": "boolean"
+        },
+        "nextCheck": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WaitCondition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "operationId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Operationid",
+          "type": "string"
+        },
+        "ownerToken": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Ownertoken",
+          "type": "string"
+        },
+        "progress": {
+          "title": "Progress",
+          "type": "string"
+        },
+        "resultArtifacts": {
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "title": "Resultartifacts",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "running",
+            "waiting",
+            "completed",
+            "failed",
+            "cancelled",
+            "uncertain"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "uncertaintySource": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uncertaintysource"
+        }
+      },
+      "required": [
+        "operationId",
+        "attemptId",
+        "ownerToken",
+        "status",
+        "progress"
+      ],
+      "title": "OperationResult",
+      "type": "object"
+    },
+    "PeerMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "minLength": 1,
+          "title": "Body",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "inReplyTo": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inreplyto"
+        },
+        "kind": {
+          "const": "peer_message",
+          "title": "Kind",
+          "type": "string"
+        },
+        "messageId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Messageid",
+          "type": "string"
+        },
+        "messageType": {
+          "enum": [
+            "request",
+            "invitation",
+            "response",
+            "notification"
+          ],
+          "title": "Messagetype",
+          "type": "string"
+        },
+        "recipientId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Recipientid",
+          "type": "string"
+        },
+        "requestId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requestid"
+        }
+      },
+      "required": [
+        "kind",
+        "messageId",
+        "recipientId",
+        "messageType",
+        "body"
+      ],
+      "title": "PeerMessage",
+      "type": "object"
+    },
+    "ProposeTask": {
+      "additionalProperties": false,
+      "properties": {
+        "dependencyIds": {
+          "items": {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Dependencyids",
+          "type": "array"
+        },
+        "kind": {
+          "const": "propose_task",
+          "title": "Kind",
+          "type": "string"
+        },
+        "latency": {
+          "$ref": "#/$defs/LatencyRecord"
+        },
+        "rationale": {
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        },
+        "taskId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Taskid",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "taskId",
+        "title",
+        "rationale",
+        "latency"
+      ],
+      "title": "ProposeTask",
+      "type": "object"
+    },
+    "StartOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "start_operation",
+          "title": "Kind",
+          "type": "string"
+        },
+        "request": {
+          "$ref": "#/$defs/JobRequest"
+        }
+      },
+      "required": [
+        "kind",
+        "request"
+      ],
+      "title": "StartOperation",
+      "type": "object"
+    },
+    "Transition": {
+      "additionalProperties": false,
+      "properties": {
+        "entityId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Entityid",
+          "type": "string"
+        },
+        "entityKind": {
+          "enum": [
+            "mission",
+            "branch",
+            "task",
+            "attempt",
+            "report",
+            "invitation",
+            "request"
+          ],
+          "title": "Entitykind",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "kind": {
+          "const": "transition",
+          "title": "Kind",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "targetState": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Targetstate",
+          "type": "string"
+        },
+        "terminalAuthorizationId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Terminalauthorizationid"
+        }
+      },
+      "required": [
+        "kind",
+        "entityKind",
+        "entityId",
+        "targetState",
+        "reason"
+      ],
+      "title": "Transition",
+      "type": "object"
+    },
+    "WaitCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "alternativeAction": {
+          "minLength": 1,
+          "title": "Alternativeaction",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "peer",
+            "quota",
+            "operation",
+            "subscription"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "nextCheckAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nextcheckat"
+        },
+        "referenceId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Referenceid",
+          "type": "string"
+        },
+        "wakeEvent": {
+          "minLength": 1,
+          "title": "Wakeevent",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "referenceId",
+        "wakeEvent",
+        "alternativeAction"
+      ],
+      "title": "WaitCondition",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "$ref": "#/$defs/Actor"
+    },
+    "artifactVersions": {
+      "items": {
+        "$ref": "#/$defs/ArtifactRef"
+      },
+      "title": "Artifactversions",
+      "type": "array"
+    },
+    "commandId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Commandid",
+      "type": "string"
+    },
+    "expectedVersion": {
+      "minimum": 0,
+      "title": "Expectedversion",
+      "type": "integer"
+    },
+    "missionId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Missionid",
+      "type": "string"
+    },
+    "payload": {
+      "discriminator": {
+        "mapping": {
+          "finish_operation": "#/$defs/FinishOperation",
+          "peer_message": "#/$defs/PeerMessage",
+          "propose_task": "#/$defs/ProposeTask",
+          "start_operation": "#/$defs/StartOperation",
+          "transition": "#/$defs/Transition"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ProposeTask"
+        },
+        {
+          "$ref": "#/$defs/Transition"
+        },
+        {
+          "$ref": "#/$defs/PeerMessage"
+        },
+        {
+          "$ref": "#/$defs/StartOperation"
+        },
+        {
+          "$ref": "#/$defs/FinishOperation"
+        }
+      ],
+      "title": "Payload"
+    },
+    "schemaVersion": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "taskId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Taskid"
+    }
+  },
+  "required": [
+    "commandId",
+    "actor",
+    "missionId",
+    "expectedVersion",
+    "payload"
+  ],
+  "title": "Command",
+  "type": "object"
+}

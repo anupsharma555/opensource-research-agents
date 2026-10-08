@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+"""One local/CI/cloud command surface. Does not load .env or invoke research providers."""
+
+import argparse
+import hashlib
+import json
+import os
+import platform
+import shutil
+import subprocess
+import sys
+import tarfile
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+UV_VERSION = "0.9.21"
+NODE_VERSION = (ROOT / ".node-version").read_text().strip()
+PYTHON_VERSION = (ROOT / ".python-version").read_text().strip()
+NPM_VERSION = "11.19.0"
+PYTHON = ROOT / ".venv/bin/python"
+LOCKS = ["uv.lock", "package-lock.json", "desktop/src-tauri/Cargo.lock"]
+
+
+class SetupError(Exception):
+    pass
+
+
+def environment():
+    value = os.environ.copy()
+    value["UV_CACHE_DIR"] = str(ROOT / ".local/cache/uv")
+    value["npm_config_cache"] = str(ROOT / ".local/cache/npm")
+    value["PYTHONDONTWRITEBYTECODE"] = "1"
+    return value
+
+
+def capture(command, env=None):
+    result = subprocess.run(
+        [str(c) for c in command],
+        cwd=ROOT,
+        env=env or environment(),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode:
+        raise SetupError(
+            f"{Path(str(command[0])).name} failed: {result.stderr.strip() or result.stdout.strip()}"
+        )
+    return result.stdout.strip()
+
+
+def run(command, env=None):
+    print(
+        "+ "
+        + " ".join(
+            str(c) if not str(c).startswith(str(ROOT)) else str(Path(c).relative_to(ROOT))
+            for c in command
+        ),
+        flush=True,
+    )
+    subprocess.run([str(c) for c in command], cwd=ROOT, env=env or environment(), check=True)
+
+
+def platform_tag():
+    system = {"Darwin": "darwin", "Linux": "linux"}.get(platform.system())
+    architecture = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "x64"}.get(platform.machine())
+    if not system or not architecture:
+        raise SetupError(
+            "Supported setup targets are macOS and Linux on arm64/x64; no global settings were changed."
+        )
+    return system, architecture
+
+
+def node_executable():
+    override = os.environ.get("ORA_NODE_BIN")
+    system, architecture = platform_tag()
+    local = ROOT / f".local/toolchains/node-v{NODE_VERSION}-{system}-{architecture}/bin/node"
+    selected = override or (str(local) if local.exists() else shutil.which("node"))
+    if not selected:
+        raise SetupError(
+            "Node is unavailable. Run scripts/dev bootstrap to install the pinned local toolchain."
+        )
+    version = capture([selected, "--version"])
+    if version != f"v{NODE_VERSION}":
+        raise SetupError(
+            f"Unsupported Node {version}; this checkout is tested with {NODE_VERSION}. Run scripts/dev bootstrap or set ORA_NODE_BIN to that version. Other checks can still run directly in .venv."
+        )
+    return Path(selected)
+
+
+def node_environment():
+    value = environment()
+    value["PATH"] = str(node_executable().parent) + os.pathsep + value.get("PATH", "")
+    return value
+
+
+def uv_executable():
+    local = ROOT / ".local/uv/bin/uv"
+    selected = str(local) if local.exists() else shutil.which("uv")
+    if not selected or capture([selected, "--version"]).split()[1] != UV_VERSION:
+        raise SetupError(
+            f"Use uv {UV_VERSION}; scripts/dev bootstrap installs a project-local copy when needed."
+        )
+    return selected
+
+
+def locks():
+    return {
+        name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
+        for name in LOCKS
+        if (ROOT / name).exists()
+    }
+
+
+def verify_locks(before):
+    if locks() != before:
+        raise SetupError(
+            "Setup changed a lockfile. Inspect the diff; do not silently accept a new dependency resolution."
+        )
+
+
+def bootstrap():
+    """Downloads only exact toolchains from official distribution/registry hosts."""
+    try:
+        uv_executable()
+    except SetupError:
+        local = ROOT / ".local/uv"
+        run([sys.executable, "-m", "venv", local])
+        run([local / "bin/python", "-m", "pip", "install", f"uv=={UV_VERSION}"])
+    try:
+        node_executable()
+        if capture(["npm", "--version"], node_environment()) != NPM_VERSION:
+            raise SetupError("The selected Node installation has a different npm version.")
+        return
+    except SetupError:
+        if os.environ.get("ORA_NODE_BIN"):
+            raise SetupError(
+                "The selected ORA_NODE_BIN toolchain must provide the pinned Node and npm. Unset it to bootstrap the supported local distribution."
+            )
+    system, architecture = platform_tag()
+    name = f"node-v{NODE_VERSION}-{system}-{architecture}.tar.gz"
+    destination = ROOT / ".local/toolchains"
+    destination.mkdir(parents=True, exist_ok=True)
+    base = f"https://nodejs.org/dist/v{NODE_VERSION}/"
+    with urllib.request.urlopen(base + "SHASUMS256.txt", timeout=60) as response:
+        checksums = response.read().decode()
+    expected = next(
+        (line.split()[0] for line in checksums.splitlines() if line.endswith("  " + name)), None
+    )
+    if not expected:
+        raise SetupError("Official checksum list did not contain the requested Node archive.")
+    archive = destination / name
+    with urllib.request.urlopen(base + name, timeout=60) as response, archive.open("wb") as output:
+        shutil.copyfileobj(response, output)
+    if hashlib.sha256(archive.read_bytes()).hexdigest() != expected:
+        raise SetupError("Node checksum mismatch; archive was not extracted.")
+    with tarfile.open(archive) as bundle:
+        for member in bundle.getmembers():
+            resolved = (destination / member.name).resolve()
+            if not resolved.is_relative_to(destination.resolve()) or member.isdev():
+                raise SetupError("Unsafe path in Node archive; extraction refused.")
+            if member.issym():
+                target = (resolved.parent / member.linkname).resolve()
+                if not target.is_relative_to(destination.resolve()):
+                    raise SetupError("Unsafe symbolic link in Node archive; extraction refused.")
+            if member.islnk():
+                target = (destination / member.linkname).resolve()
+                if not target.is_relative_to(destination.resolve()):
+                    raise SetupError("Unsafe hard link in Node archive; extraction refused.")
+        bundle.extractall(destination)
+    print(f"Verified and installed Node {NODE_VERSION} locally; SHA-256 {expected}")
+
+
+def doctor():
+    if not PYTHON.exists():
+        raise SetupError("Project Python is unavailable. Run scripts/dev setup after bootstrap.")
+    python_version = capture([PYTHON, "--version"]).split()[1]
+    if python_version != PYTHON_VERSION:
+        raise SetupError(
+            f"Expected Python {PYTHON_VERSION}, observed {python_version}; recreate only this checkout's .venv using scripts/dev setup."
+        )
+    env = node_environment()
+    npm = capture(["npm", "--version"], env)
+    if npm != NPM_VERSION:
+        raise SetupError(
+            f"Expected npm {NPM_VERSION}, observed {npm}; use the pinned Node distribution."
+        )
+    report = {
+        "python": python_version,
+        "node": capture([node_executable(), "--version"]),
+        "npm": npm,
+        "uv": capture([uv_executable(), "--version"]),
+        "platform": platform.system(),
+        "architecture": platform.machine(),
+        "lockHashes": locks(),
+        "providers": "not invoked; inherited environment is retained, but no .env is loaded",
+    }
+    print(json.dumps(report, indent=2))
+    return report
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "command",
+        choices=["bootstrap", "setup", "doctor", "check", "generate", "ui", "desktop", "inspect"],
+    )
+    parser.add_argument(
+        "--offline", action="store_true", help="Use cached dependencies only during setup"
+    )
+    parser.add_argument("--view", choices=["findings", "sources", "diagnostics"], default="sources")
+    args = parser.parse_args()
+    try:
+        if args.command == "bootstrap":
+            bootstrap()
+            return
+        if args.command == "setup":
+            before = locks()
+            command = [uv_executable(), "sync", "--locked", "--python", PYTHON_VERSION]
+            if args.offline:
+                command.append("--offline")
+            run(command)
+            command = ["npm", "ci", "--no-audit", "--no-fund"]
+            if args.offline:
+                command.append("--offline")
+            run(command, node_environment())
+            verify_locks(before)
+            doctor()
+            return
+        doctor()
+        env = node_environment()
+        if args.command == "check":
+            before = locks()
+            for command in [
+                [PYTHON, "-m", "ora.cli", "contracts", "--check"],
+                [PYTHON, "-m", "ora.cli", "benchmarks"],
+                [PYTHON, "-m", "ora.cli", "skills"],
+                [PYTHON, "-m", "ruff", "check", "src", "tests", "scripts"],
+                [PYTHON, "-m", "pytest", "-q"],
+                ["npm", "run", "contracts:check"],
+                ["npm", "test"],
+                ["npm", "run", "build"],
+            ]:
+                run(command, env)
+            verify_locks(before)
+        elif args.command == "generate":
+            run([PYTHON, "-m", "ora.cli", "contracts"])
+            run(["npm", "run", "generate:types"], env)
+        elif args.command == "ui":
+            run(["npm", "run", "dev"], env)
+        elif args.command == "desktop":
+            if platform.system() != "Darwin":
+                raise SetupError(
+                    "The native Mac prototype is checked on macOS. Use scripts/dev ui for the portable React view."
+                )
+            run(["npm", "run", "desktop:build", "--", "--debug", "--bundles", "app"], env)
+        elif args.command == "inspect":
+            run([PYTHON, "-m", "ora.cli", "inspect-sample", "--view", args.view])
+    except (SetupError, OSError, urllib.error.URLError, subprocess.CalledProcessError) as error:
+        parser.exit(
+            2,
+            f"Setup/check diagnostic: {error}\nAffected command stopped; existing files and unrelated work remain available.\n",
+        )
+
+
+if __name__ == "__main__":
+    main()

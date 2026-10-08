@@ -1,0 +1,394 @@
+{
+  "purpose": "Three synthetic research-screening smoke tests across three hosted Codiv models; not a validated benchmark",
+  "date": "2026-10-03",
+  "endpoint": "https://api.codiv.ai/v1/systemone",
+  "request_headers_without_credentials": {
+    "Content-Type": "application/json",
+    "User-Agent": "ORA-Codiv-Test/0.1"
+  },
+  "method": {
+    "same_questions_across_cases": true,
+    "one_successful_request_per_model_per_case": true,
+    "retries": 0,
+    "direct_effect_threshold_for_report": 0.5,
+    "classification_probability_note": "Probability assigned to the returned label, distinct from the API's entropy-based confidence field and from measured accuracy."
+  },
+  "tests": [
+    {
+      "id": "test_1",
+      "name": "Eligible controlled insomnia intervention",
+      "input": {
+        "state": {
+          "abstract_excerpt": "Synthetic example for testing only. We conducted a 12-week randomized trial of structured sleep-extension coaching in 120 adults with insomnia symptoms. Compared with sleep-education control, the coaching group had a 4.1-point greater reduction on the Insomnia Severity Index (95% CI 1.8–6.3); follow-up was 90%. No serious adverse events were reported."
+        },
+        "questions": {
+          "review_route": {
+            "type": "choice",
+            "instructions": "For a review of controlled non-pharmacologic interventions for adult insomnia with patient-reported symptom outcomes, how should this abstract be routed?",
+            "criteria": {
+              "empirical_evidence": "Controlled empirical intervention results in the target population and outcome.",
+              "background_only": "Relevant topic, but no direct controlled intervention outcome results.",
+              "exclude": "Population, intervention, or outcome is outside the review scope.",
+              "human_screen": "The excerpt is insufficient or ambiguous; send for human screening."
+            }
+          },
+          "reports_direct_effect": {
+            "type": "noul",
+            "instructions": "Does the excerpt directly report a between-group intervention effect on a patient-reported insomnia symptom outcome?"
+          }
+        }
+      },
+      "expected": {
+        "review_route": "empirical_evidence",
+        "reports_direct_effect": true
+      },
+      "results": [
+        {
+          "requested_model": "jevk5-0.2",
+          "status": 200,
+          "elapsed_seconds": 0.703,
+          "response": {
+            "model": "jevk5-0.2",
+            "answers": {
+              "review_route": {
+                "type": "choice",
+                "choice": "empirical_evidence",
+                "probabilities": {
+                  "empirical_evidence": 0.9396545254369594,
+                  "background_only": 0.013500036506201553,
+                  "exclude": 0.028135344385027804,
+                  "human_screen": 0.01871009367181138
+                },
+                "confidence": 0.7897194042667914
+              },
+              "reports_direct_effect": {
+                "type": "noul",
+                "noul": 0.8849146597943182
+              }
+            },
+            "usage": {
+              "input_tokens": 479,
+              "output_tokens": 0
+            }
+          }
+        },
+        {
+          "requested_model": "laya-1.0",
+          "status": 200,
+          "elapsed_seconds": 0.774,
+          "response": {
+            "model": "laya-1.0",
+            "answers": {
+              "review_route": {
+                "type": "choice",
+                "choice": "empirical_evidence",
+                "probabilities": {
+                  "empirical_evidence": 0.625,
+                  "background_only": 0.1445,
+                  "exclude": 0.0898,
+                  "human_screen": 0.1407
+                },
+                "confidence": 0.2312977155441326
+              },
+              "reports_direct_effect": {
+                "type": "noul",
+                "noul": 0.7177
+              }
+            },
+            "usage": {
+              "input_tokens": 321,
+              "output_tokens": 0
+            }
+          }
+        },
+        {
+          "requested_model": "clm-v0.1",
+          "status": 200,
+          "elapsed_seconds": 0.791,
+          "response": {
+            "model": "clm-v0.1",
+            "answers": {
+              "review_route": {
+                "type": "choice",
+                "choice": "background_only",
+                "probabilities": {
+                  "empirical_evidence": 0.0011121947736566261,
+                  "background_only": 0.5345402613924531,
+                  "exclude": 0.4335449283825939,
+                  "human_screen": 0.030802615451296346
+                },
+                "confidence": 0.41433059891062185
+              },
+              "reports_direct_effect": {
+                "type": "noul",
+                "noul": 0.5404127687414041
+              }
+            },
+            "usage": {
+              "input_tokens": 316,
+              "output_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "test_2",
+      "name": "Relevant background without original results",
+      "input": {
+        "state": {
+          "abstract_excerpt": "Synthetic example for testing only. This narrative review describes how circadian timing, cognitive arousal, and sleep habits may contribute to adult insomnia. It discusses sleep education and behavioral treatment approaches and proposes priorities for future research. The article presents no original participant data, randomized comparison, or measured intervention outcomes."
+        },
+        "questions": {
+          "review_route": {
+            "type": "choice",
+            "instructions": "For a review of controlled non-pharmacologic interventions for adult insomnia with patient-reported symptom outcomes, how should this abstract be routed?",
+            "criteria": {
+              "empirical_evidence": "Controlled empirical intervention results in the target population and outcome.",
+              "background_only": "Relevant topic, but no direct controlled intervention outcome results.",
+              "exclude": "Population, intervention, or outcome is outside the review scope.",
+              "human_screen": "The excerpt is insufficient or ambiguous; send for human screening."
+            }
+          },
+          "reports_direct_effect": {
+            "type": "noul",
+            "instructions": "Does the excerpt directly report a between-group intervention effect on a patient-reported insomnia symptom outcome?"
+          }
+        }
+      },
+      "expected": {
+        "review_route": "background_only",
+        "reports_direct_effect": false
+      },
+      "results": [
+        {
+          "requested_model": "jevk5-0.2",
+          "status": 200,
+          "elapsed_seconds": 0.508,
+          "response": {
+            "model": "jevk5-0.2",
+            "answers": {
+              "review_route": {
+                "type": "choice",
+                "choice": "background_only",
+                "probabilities": {
+                  "empirical_evidence": 0.007511579787405882,
+                  "background_only": 0.9255743889026448,
+                  "exclude": 0.021696495771742073,
+                  "human_screen": 0.04521753553820719
+                },
+                "confidence": 0.7609147687428397
+              },
+              "reports_direct_effect": {
+                "type": "noul",
+                "noul": 0.03404940079688244
+              }
+            },
+            "usage": {
+              "input_tokens": 429,
+              "output_tokens": 0
+            }
+          }
+        },
+        {
+          "requested_model": "laya-1.0",
+          "status": 200,
+          "elapsed_seconds": 0.949,
+          "response": {
+            "model": "laya-1.0",
+            "answers": {
+              "review_route": {
+                "type": "choice",
+                "choice": "background_only",
+                "probabilities": {
+                  "empirical_evidence": 0.2149,
+                  "background_only": 0.2866,
+                  "exclude": 0.2432,
+                  "human_screen": 0.2553
+                },
+                "confidence": 0.0038191631481647725
+              },
+              "reports_direct_effect": {
+                "type": "noul",
+                "noul": 0.1944
+              }
+            },
+            "usage": {
+              "input_tokens": 279,
+              "output_tokens": 0
+            }
+          }
+        },
+        {
+          "requested_model": "clm-v0.1",
+          "status": 200,
+          "elapsed_seconds": 0.437,
+          "response": {
+            "model": "clm-v0.1",
+            "answers": {
+              "review_route": {
+                "type": "choice",
+                "choice": "exclude",
+                "probabilities": {
+                  "empirical_evidence": 0.0000516486116921862,
+                  "background_only": 0.26263110250708266,
+                  "exclude": 0.46717809970221963,
+                  "human_screen": 0.2701391491790056
+                },
+                "confidence": 0.23482677682787811
+              },
+              "reports_direct_effect": {
+                "type": "noul",
+                "noul": 0.22074836612428927
+              }
+            },
+            "usage": {
+              "input_tokens": 166,
+              "output_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "test_3",
+      "name": "Controlled study outside the review scope",
+      "input": {
+        "state": {
+          "abstract_excerpt": "Synthetic example for testing only. A randomized, placebo-controlled trial enrolled 90 adolescents aged 12–17 years with attention-deficit/hyperactivity disorder. Participants received methylphenidate or placebo for eight weeks. The primary outcome was teacher-rated attention, which improved more in the medication group. Secondary outcomes were classroom task completion and appetite-related adverse events."
+        },
+        "questions": {
+          "review_route": {
+            "type": "choice",
+            "instructions": "For a review of controlled non-pharmacologic interventions for adult insomnia with patient-reported symptom outcomes, how should this abstract be routed?",
+            "criteria": {
+              "empirical_evidence": "Controlled empirical intervention results in the target population and outcome.",
+              "background_only": "Relevant topic, but no direct controlled intervention outcome results.",
+              "exclude": "Population, intervention, or outcome is outside the review scope.",
+              "human_screen": "The excerpt is insufficient or ambiguous; send for human screening."
+            }
+          },
+          "reports_direct_effect": {
+            "type": "noul",
+            "instructions": "Does the excerpt directly report a between-group intervention effect on a patient-reported insomnia symptom outcome?"
+          }
+        }
+      },
+      "expected": {
+        "review_route": "exclude",
+        "reports_direct_effect": false
+      },
+      "results": [
+        {
+          "requested_model": "jevk5-0.2",
+          "status": 200,
+          "elapsed_seconds": 0.443,
+          "response": {
+            "model": "jevk5-0.2",
+            "answers": {
+              "review_route": {
+                "type": "choice",
+                "choice": "exclude",
+                "probabilities": {
+                  "empirical_evidence": 0.021558859671792066,
+                  "background_only": 0.0058433474434672365,
+                  "exclude": 0.9197029187995527,
+                  "human_screen": 0.052894874085188164
+                },
+                "confidence": 0.7509656514082521
+              },
+              "reports_direct_effect": {
+                "type": "noul",
+                "noul": 0.026855070382128043
+              }
+            },
+            "usage": {
+              "input_tokens": 461,
+              "output_tokens": 0
+            }
+          }
+        },
+        {
+          "requested_model": "laya-1.0",
+          "status": 200,
+          "elapsed_seconds": 0.343,
+          "response": {
+            "model": "laya-1.0",
+            "answers": {
+              "review_route": {
+                "type": "choice",
+                "choice": "empirical_evidence",
+                "probabilities": {
+                  "empirical_evidence": 0.5778,
+                  "background_only": 0.1709,
+                  "exclude": 0.0834,
+                  "human_screen": 0.1679
+                },
+                "confidence": 0.18802433836242494
+              },
+              "reports_direct_effect": {
+                "type": "noul",
+                "noul": 0.3246
+              }
+            },
+            "usage": {
+              "input_tokens": 311,
+              "output_tokens": 0
+            }
+          }
+        },
+        {
+          "requested_model": "clm-v0.1",
+          "status": 200,
+          "elapsed_seconds": 0.337,
+          "response": {
+            "model": "clm-v0.1",
+            "answers": {
+              "review_route": {
+                "type": "choice",
+                "choice": "exclude",
+                "probabilities": {
+                  "empirical_evidence": 0.0001482569475195933,
+                  "background_only": 0.3479941185299816,
+                  "exclude": 0.6356938070527458,
+                  "human_screen": 0.016163817469752956
+                },
+                "confidence": 0.47824341689260086
+              },
+              "reports_direct_effect": {
+                "type": "noul",
+                "noul": 0.10140958665697691
+              }
+            },
+            "usage": {
+              "input_tokens": 198,
+              "output_tokens": 0
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "summary": [
+    {
+      "model": "jevk5-0.2",
+      "route_correct": 3,
+      "direct_effect_correct_at_0_5": 3,
+      "input_tokens": 1369
+    },
+    {
+      "model": "laya-1.0",
+      "route_correct": 2,
+      "direct_effect_correct_at_0_5": 3,
+      "input_tokens": 911
+    },
+    {
+      "model": "clm-v0.1",
+      "route_correct": 1,
+      "direct_effect_correct_at_0_5": 3,
+      "input_tokens": 680
+    }
+  ],
+  "total_input_tokens": 2960,
+  "total_output_tokens": 0
+}

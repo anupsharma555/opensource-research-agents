@@ -1,0 +1,32 @@
+{
+  "schema": "ora.runtime_skill.example.v1",
+  "synthetic": true,
+  "input": {
+    "evidence": {
+      "id": "example-evidence-A1",
+      "version": 1,
+      "kind": "published_evidence",
+      "artifact": {"id": "synthetic-copy-A1", "version": 1, "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+      "locators": ["Abstract, sentence 3"],
+      "validation_record": "synthetic-quality-receipt-A1",
+      "access_surface": "abstract",
+      "summary": "Synthetic A1 reports response counts at six weeks with wide uncertainty.",
+      "limitations": ["Methods table not inspected"]
+    },
+    "claim": "Synthetic A1 reports 18 of 40 versus 12 of 40 responses at six weeks.",
+    "locator": "Abstract, sentence 3",
+    "relation": "supports"
+  },
+  "expected_helper_output": {
+    "claim": "Synthetic A1 reports 18 of 40 versus 12 of 40 responses at six weeks.",
+    "relation": "supports",
+    "evidence_packet_id": "example-evidence-A1",
+    "evidence_packet_version": 1,
+    "evidence_kind": "published_evidence",
+    "artifact_id": "synthetic-copy-A1",
+    "artifact_version": 1,
+    "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "locator": "Abstract, sentence 3",
+    "semantic_support_status": "pending_independent_review"
+  }
+}

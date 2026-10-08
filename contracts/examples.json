@@ -1,0 +1,477 @@
+[
+  {
+    "accepted": true,
+    "name": "peer-proposal",
+    "schema": "command",
+    "value": {
+      "actor": {
+        "id": "peer-synthetic",
+        "kind": "peer"
+      },
+      "commandId": "synthetic-command",
+      "expectedVersion": 0,
+      "missionId": "synthetic-mission",
+      "payload": {
+        "kind": "propose_task",
+        "latency": {
+          "category": "long",
+          "nextAction": "Search another route",
+          "reason": "Iterative retrieval"
+        },
+        "rationale": "Resolve an open methods detail.",
+        "taskId": "synthetic-task",
+        "title": "Check complementary evidence"
+      },
+      "schemaVersion": "1.0"
+    }
+  },
+  {
+    "accepted": false,
+    "name": "incompatible-client",
+    "schema": "command",
+    "value": {
+      "actor": {
+        "id": "peer-synthetic",
+        "kind": "peer"
+      },
+      "commandId": "synthetic-command",
+      "expectedVersion": 0,
+      "missionId": "synthetic-mission",
+      "payload": {
+        "kind": "propose_task",
+        "latency": {
+          "category": "long",
+          "nextAction": "Search another route",
+          "reason": "Iterative retrieval"
+        },
+        "rationale": "Resolve an open methods detail.",
+        "taskId": "synthetic-task",
+        "title": "Check complementary evidence"
+      },
+      "schemaVersion": "0.9"
+    }
+  },
+  {
+    "accepted": false,
+    "name": "negative-version",
+    "schema": "command",
+    "value": {
+      "actor": {
+        "id": "peer-synthetic",
+        "kind": "peer"
+      },
+      "commandId": "synthetic-command",
+      "expectedVersion": -1,
+      "missionId": "synthetic-mission",
+      "payload": {
+        "kind": "propose_task",
+        "latency": {
+          "category": "long",
+          "nextAction": "Search another route",
+          "reason": "Iterative retrieval"
+        },
+        "rationale": "Resolve an open methods detail.",
+        "taskId": "synthetic-task",
+        "title": "Check complementary evidence"
+      },
+      "schemaVersion": "1.0"
+    }
+  },
+  {
+    "accepted": false,
+    "name": "unknown-action",
+    "schema": "command",
+    "value": {
+      "actor": {
+        "id": "peer-synthetic",
+        "kind": "peer"
+      },
+      "commandId": "synthetic-command",
+      "expectedVersion": 0,
+      "missionId": "synthetic-mission",
+      "payload": {
+        "kind": "plan_everything",
+        "latency": {
+          "category": "long",
+          "nextAction": "Search another route",
+          "reason": "Iterative retrieval"
+        },
+        "rationale": "Resolve an open methods detail.",
+        "taskId": "synthetic-task",
+        "title": "Check complementary evidence"
+      },
+      "schemaVersion": "1.0"
+    }
+  },
+  {
+    "accepted": false,
+    "name": "unknown-field",
+    "schema": "command",
+    "value": {
+      "actor": {
+        "id": "peer-synthetic",
+        "kind": "peer"
+      },
+      "commandId": "synthetic-command",
+      "expectedVersion": 0,
+      "missionId": "synthetic-mission",
+      "payload": {
+        "kind": "propose_task",
+        "latency": {
+          "category": "long",
+          "nextAction": "Search another route",
+          "reason": "Iterative retrieval"
+        },
+        "rationale": "Resolve an open methods detail.",
+        "taskId": "synthetic-task",
+        "title": "Check complementary evidence"
+      },
+      "schemaVersion": "1.0",
+      "unrecognized": "must be explicit"
+    }
+  },
+  {
+    "accepted": true,
+    "name": "accepted-event",
+    "schema": "event",
+    "value": {
+      "actor": {
+        "id": "peer-synthetic",
+        "kind": "peer"
+      },
+      "commandId": "synthetic-command",
+      "entityId": "synthetic-task",
+      "entityKind": "task",
+      "id": "synthetic-event",
+      "kind": "propose_task",
+      "missionId": "synthetic-mission",
+      "reason": "Peer proposal accepted",
+      "schemaVersion": "1.0",
+      "sequence": 1,
+      "state": "queued",
+      "version": 1
+    }
+  },
+  {
+    "accepted": false,
+    "name": "invalid-event-order",
+    "schema": "event",
+    "value": {
+      "actor": {
+        "id": "peer-synthetic",
+        "kind": "peer"
+      },
+      "commandId": "synthetic-command",
+      "entityId": "synthetic-task",
+      "entityKind": "task",
+      "id": "synthetic-event",
+      "kind": "propose_task",
+      "missionId": "synthetic-mission",
+      "reason": "Peer proposal accepted",
+      "schemaVersion": "1.0",
+      "sequence": 0,
+      "state": "queued",
+      "version": 1
+    }
+  },
+  {
+    "accepted": true,
+    "name": "immediate-result",
+    "schema": "operation",
+    "value": {
+      "attemptId": "synthetic-attempt",
+      "operationId": "synthetic-operation",
+      "ownerToken": "synthetic-owner",
+      "progress": "Saved a fixture result",
+      "resultArtifacts": [
+        {
+          "id": "synthetic-artifact",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "version": 1
+        }
+      ],
+      "status": "completed"
+    }
+  },
+  {
+    "accepted": true,
+    "name": "deferred-result",
+    "schema": "operation",
+    "value": {
+      "attemptId": "synthetic-attempt",
+      "nextCheck": {
+        "alternativeAction": "Continue a different eligible source route",
+        "kind": "quota",
+        "referenceId": "synthetic-quota",
+        "wakeEvent": "quota available"
+      },
+      "operationId": "synthetic-operation",
+      "ownerToken": "synthetic-owner",
+      "progress": "Saved a fixture result",
+      "resultArtifacts": [
+        {
+          "id": "synthetic-artifact",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "version": 1
+        }
+      ],
+      "status": "waiting"
+    }
+  },
+  {
+    "accepted": false,
+    "name": "wait-without-wake",
+    "schema": "operation",
+    "value": {
+      "attemptId": "synthetic-attempt",
+      "operationId": "synthetic-operation",
+      "ownerToken": "synthetic-owner",
+      "progress": "Saved a fixture result",
+      "resultArtifacts": [
+        {
+          "id": "synthetic-artifact",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "version": 1
+        }
+      ],
+      "status": "waiting"
+    }
+  },
+  {
+    "accepted": false,
+    "name": "wait-with-null-wake",
+    "schema": "operation",
+    "value": {
+      "attemptId": "synthetic-attempt",
+      "nextCheck": null,
+      "operationId": "synthetic-operation",
+      "ownerToken": "synthetic-owner",
+      "progress": "Saved a fixture result",
+      "resultArtifacts": [
+        {
+          "id": "synthetic-artifact",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "version": 1
+        }
+      ],
+      "status": "waiting"
+    }
+  },
+  {
+    "accepted": true,
+    "name": "uncertain-effect",
+    "schema": "operation",
+    "value": {
+      "attemptId": "synthetic-attempt",
+      "operationId": "synthetic-operation",
+      "ownerToken": "synthetic-owner",
+      "progress": "Saved a fixture result",
+      "resultArtifacts": [
+        {
+          "id": "synthetic-artifact",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "version": 1
+        }
+      ],
+      "status": "uncertain",
+      "uncertaintySource": "Remote acknowledgment was not received"
+    }
+  },
+  {
+    "accepted": false,
+    "name": "uncertain-without-source",
+    "schema": "operation",
+    "value": {
+      "attemptId": "synthetic-attempt",
+      "operationId": "synthetic-operation",
+      "ownerToken": "synthetic-owner",
+      "progress": "Saved a fixture result",
+      "resultArtifacts": [
+        {
+          "id": "synthetic-artifact",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "version": 1
+        }
+      ],
+      "status": "uncertain"
+    }
+  },
+  {
+    "accepted": true,
+    "name": "abstract-evidence",
+    "schema": "evidence",
+    "value": {
+      "accessSurface": "abstract",
+      "artifact": {
+        "id": "synthetic-artifact",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "version": 1
+      },
+      "id": "synthetic-packet",
+      "kind": "published_evidence",
+      "locators": [
+        "abstract:results:1"
+      ],
+      "summary": "The abstract explicitly reports these counts.",
+      "validationRecord": "fixture-check-v1",
+      "version": 1
+    }
+  },
+  {
+    "accepted": true,
+    "name": "checked-result",
+    "schema": "evidence",
+    "value": {
+      "accessSurface": "experiment_output",
+      "artifact": {
+        "id": "synthetic-artifact",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "version": 1
+      },
+      "id": "synthetic-packet",
+      "kind": "checked_result",
+      "locators": [
+        "abstract:results:1"
+      ],
+      "summary": "The abstract explicitly reports these counts.",
+      "validationRecord": "fixture-check-v1",
+      "version": 1
+    }
+  },
+  {
+    "accepted": false,
+    "name": "evidence-without-locator",
+    "schema": "evidence",
+    "value": {
+      "accessSurface": "abstract",
+      "artifact": {
+        "id": "synthetic-artifact",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "version": 1
+      },
+      "id": "synthetic-packet",
+      "kind": "published_evidence",
+      "locators": [],
+      "summary": "The abstract explicitly reports these counts.",
+      "validationRecord": "fixture-check-v1",
+      "version": 1
+    }
+  },
+  {
+    "accepted": false,
+    "name": "invalid-copy-hash",
+    "schema": "evidence",
+    "value": {
+      "accessSurface": "abstract",
+      "artifact": {
+        "id": "synthetic-artifact",
+        "sha256": "not-a-content-hash",
+        "version": 1
+      },
+      "id": "synthetic-packet",
+      "kind": "published_evidence",
+      "locators": [
+        "abstract:results:1"
+      ],
+      "summary": "The abstract explicitly reports these counts.",
+      "validationRecord": "fixture-check-v1",
+      "version": 1
+    }
+  },
+  {
+    "accepted": true,
+    "name": "declared-job",
+    "schema": "job",
+    "value": {
+      "attemptId": "synthetic-attempt",
+      "expectedOutputs": [
+        "source copy"
+      ],
+      "idempotencyKey": "synthetic-effect",
+      "inputArtifacts": [
+        {
+          "id": "synthetic-artifact",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "version": 1
+        }
+      ],
+      "intendedEffects": [
+        "read source"
+      ],
+      "jobId": "synthetic-job",
+      "leaseExpiresAt": "2030-01-01T01:00:00Z",
+      "missionAuthorizationId": "synthetic-authorization",
+      "missionId": "synthetic-mission",
+      "modelSelection": {
+        "configurationHash": "784291b2af1bda7244ad33e9286d92747a167ebd5fa108129584a7efa94c9f2c",
+        "model": "scripted-peer",
+        "provider": "fixture",
+        "reasoningEffort": "not_applicable"
+      },
+      "operationId": "synthetic-operation",
+      "originatingModelCallId": "synthetic-call",
+      "ownerToken": "synthetic-owner",
+      "permittedResources": [
+        "synthetic fixture"
+      ],
+      "requestTimeoutSeconds": 30,
+      "taskId": "synthetic-task",
+      "toolCallId": "synthetic-tool-call"
+    }
+  },
+  {
+    "accepted": false,
+    "name": "job-without-origin",
+    "schema": "job",
+    "value": {
+      "attemptId": "synthetic-attempt",
+      "expectedOutputs": [
+        "source copy"
+      ],
+      "idempotencyKey": "synthetic-effect",
+      "inputArtifacts": [
+        {
+          "id": "synthetic-artifact",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "version": 1
+        }
+      ],
+      "intendedEffects": [
+        "read source"
+      ],
+      "jobId": "synthetic-job",
+      "leaseExpiresAt": "2030-01-01T01:00:00Z",
+      "missionAuthorizationId": "synthetic-authorization",
+      "missionId": "synthetic-mission",
+      "modelSelection": {
+        "configurationHash": "784291b2af1bda7244ad33e9286d92747a167ebd5fa108129584a7efa94c9f2c",
+        "model": "scripted-peer",
+        "provider": "fixture",
+        "reasoningEffort": "not_applicable"
+      },
+      "operationId": "synthetic-operation",
+      "ownerToken": "synthetic-owner",
+      "permittedResources": [
+        "synthetic fixture"
+      ],
+      "requestTimeoutSeconds": 30,
+      "taskId": "synthetic-task",
+      "toolCallId": "synthetic-tool-call"
+    }
+  },
+  {
+    "accepted": true,
+    "name": "cursor-query",
+    "schema": "query",
+    "value": {
+      "actor": {
+        "id": "peer-synthetic",
+        "kind": "peer"
+      },
+      "afterCursor": 3,
+      "kind": "events",
+      "missionId": "synthetic-mission",
+      "queryId": "query-a"
+    }
+  }
+]

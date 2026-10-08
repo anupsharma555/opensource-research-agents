@@ -1,0 +1,42 @@
+{
+  "schema": "ora.skill_fit.plan.v1",
+  "synthetic": true,
+  "model": "openai/gpt-oss-120b",
+  "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+  "reasoning_effort": "high",
+  "include_reasoning": false,
+  "completion_cap_each": 4096,
+  "initial_call_count": 4,
+  "pricing_usd_per_million": {
+    "input": 0.15,
+    "output": 0.6
+  },
+  "input_estimate_method": "UTF-8 message bytes plus 1024 wrapper tokens per call as conservative token upper bound",
+  "worst_case_usd": 0.013475,
+  "cases": [
+    {
+      "blind_id": "X1",
+      "request_sha256": "660f5f765338580f590d979f3da87f31ef0e8d9c0db8285771f853f1f3d9db43",
+      "prompt_sha256": "a2cb11fccdb0ed9e21d57a42c0f52f6e0c4e13d1b6b28c28a434e64b6f3dc10a",
+      "prompt_utf8_bytes": 5952
+    },
+    {
+      "blind_id": "X2",
+      "request_sha256": "7c50ec2db1fa7c578cbaabae7a0dc08223727a735ad3f119e55cd62bd82114aa",
+      "prompt_sha256": "9e719ccf4c2408aa07e803da7fc4e8a713bf2c400e4cb9a65dc03d6f35ec1355",
+      "prompt_utf8_bytes": 6715
+    },
+    {
+      "blind_id": "X3",
+      "request_sha256": "bc57df401bd30e65a9204ad99e31d24f6c5f3d7fc0e2a9b506f4cd3f925c7380",
+      "prompt_sha256": "b358b85d2bfdeb20e1f2478958a5be8939b88451e0a3bf4d713c34a6ec8b6ebf",
+      "prompt_utf8_bytes": 3218
+    },
+    {
+      "blind_id": "X4",
+      "request_sha256": "91a29bbca2be738ad65bda2686aab6d82326fb907be1058cb923c036025da5a8",
+      "prompt_sha256": "2a1c89517ccbbbaaf37f356454fe42dbfdc3f32c5ff941ec823a872d645c4cde",
+      "prompt_utf8_bytes": 4318
+    }
+  ]
+}

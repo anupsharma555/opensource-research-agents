@@ -1,0 +1,33 @@
+{
+  "baselines_sha256": "e2aec7162cfc92bad793a674760e95838ef39e210ed00ae609bff2a23cd4610b",
+  "packet_set_version": "1.0.4",
+  "profiles_sha256": "56fbab3e90183ec60329ec50d2b63a1019dae2f052163dc72acdb82125d99a51",
+  "rubric_sha256": "f5dda5277315a1281b2a1eed308ed2a3c2406816486d601413369381dbdb6ba3",
+  "scenarios": [
+    {
+      "reference_path": "withheld/syn-abstract-disagreement.reference.json",
+      "reference_sha256": "63bd642f0460fce3b39ced42606a7744e25f15936206ed566175004928a72c14",
+      "scenario_id": "syn-abstract-disagreement",
+      "scenario_path": "scenarios/syn-abstract-disagreement.json",
+      "scenario_sha256": "2688edc336bbc3b94dc897d6cd90378b6555149edd39022dbc4f7c24ae75bdb6",
+      "scenario_version": "1.0.1"
+    },
+    {
+      "reference_path": "withheld/syn-null-versus-error.reference.json",
+      "reference_sha256": "2a261f58ab31f5680a6781b04b3fb1ee0d596085e0cefbf10e780cacd7cd0d73",
+      "scenario_id": "syn-null-versus-error",
+      "scenario_path": "scenarios/syn-null-versus-error.json",
+      "scenario_sha256": "0ee9618dc86372877533db7a259636ba7dd060f659ecf56982583e27a92ec2e8",
+      "scenario_version": "1.0.1"
+    },
+    {
+      "reference_path": "withheld/syn-route-recovery.reference.json",
+      "reference_sha256": "eca0ea3aef7dc39fa105dce5d043c902ac7c12634816a83caa6fcd5a568fc443",
+      "scenario_id": "syn-route-recovery",
+      "scenario_path": "scenarios/syn-route-recovery.json",
+      "scenario_sha256": "b6028bcb6559de2a49df1daafb1609a48eee04f5257705d818cd201aa2cd6bcc",
+      "scenario_version": "1.0.2"
+    }
+  ],
+  "schema": "ora.benchmark.manifest.v1"
+}

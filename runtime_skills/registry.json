@@ -1,0 +1,20 @@
+{
+  "registry_version": "1.0.0",
+  "roles": {
+    "path": "roles/roles.json",
+    "sha256": "65ed574fd32ae8d9b79c01cb36c7c6347f273b45eca5dcc20c46638c679dac53"
+  },
+  "schema": "ora.runtime_skills.registry.v1",
+  "skills": [
+    {
+      "manifest": "runtime_skills/evidence_linking/manifest.json",
+      "optional": false,
+      "skill_id": "evidence-linking"
+    },
+    {
+      "manifest": "runtime_skills/study_appraisal/manifest.json",
+      "optional": true,
+      "skill_id": "study-appraisal"
+    }
+  ]
+}

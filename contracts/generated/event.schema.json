@@ -1,0 +1,162 @@
+{
+  "$defs": {
+    "Actor": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "peer",
+            "host",
+            "user"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind"
+      ],
+      "title": "Actor",
+      "type": "object"
+    },
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "sha256"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "$ref": "#/$defs/Actor"
+    },
+    "commandId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Commandid",
+      "type": "string"
+    },
+    "entityId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Entityid",
+      "type": "string"
+    },
+    "entityKind": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Entitykind",
+      "type": "string"
+    },
+    "evidence": {
+      "items": {
+        "$ref": "#/$defs/ArtifactRef"
+      },
+      "title": "Evidence",
+      "type": "array"
+    },
+    "id": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Id",
+      "type": "string"
+    },
+    "kind": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Kind",
+      "type": "string"
+    },
+    "missionId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Missionid",
+      "type": "string"
+    },
+    "reason": {
+      "minLength": 1,
+      "title": "Reason",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "sequence": {
+      "minimum": 1,
+      "title": "Sequence",
+      "type": "integer"
+    },
+    "state": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "State",
+      "type": "string"
+    },
+    "taskId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Taskid"
+    },
+    "version": {
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "id",
+    "sequence",
+    "actor",
+    "missionId",
+    "commandId",
+    "entityKind",
+    "entityId",
+    "version",
+    "kind",
+    "state",
+    "reason"
+  ],
+  "title": "Event",
+  "type": "object"
+}

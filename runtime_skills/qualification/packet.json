@@ -1,0 +1,29 @@
+{
+  "schema": "ora.runtime_skill.qualification.v1",
+  "proof_type": "offline_fixture",
+  "synthetic": true,
+  "source": "benchmarks/v1/scenarios/syn-abstract-disagreement.json",
+  "role_skill_cases": [
+    {
+      "role_id": "evidence_preparation_synthesis",
+      "skill_id": "evidence-linking",
+      "variants": ["concise", "rich"],
+      "task": "Link a narrow claim about the A1 six-week response counts to an inspected span while keeping the interval and unreported methods visible.",
+      "structural_checks": ["exact packet and artifact identity", "existing source locator", "pending semantic review", "no invented methods"]
+    },
+    {
+      "role_id": "independent_methods_reviewer_critic",
+      "skill_id": "study-appraisal",
+      "variants": ["concise", "rich"],
+      "task": "Prepare an independent, result-scoped first-pass judgment for A1 from abstract-only evidence.",
+      "structural_checks": ["named method and result context", "separate reporting, bias, applicability and precision", "unknown methods remain unknown", "no scientific-validity certification by helper"]
+    }
+  ],
+  "future_model_comparison": {
+    "selected_model_id": null,
+    "selected_settings": null,
+    "run_status": "not_run",
+    "score_separately": ["source support", "false blocks", "severe errors", "useful coverage", "tokens", "latency"],
+    "note": "This packet prepares matched concise/rich tests; it is not evidence that either instruction variant improves the selected OSS model."
+  }
+}

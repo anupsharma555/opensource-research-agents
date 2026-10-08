@@ -1,0 +1,72 @@
+{
+  "$defs": {
+    "Actor": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "peer",
+            "host",
+            "user"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind"
+      ],
+      "title": "Actor",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "$ref": "#/$defs/Actor"
+    },
+    "cursor": {
+      "minimum": 0,
+      "title": "Cursor",
+      "type": "integer"
+    },
+    "id": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Id",
+      "type": "string"
+    },
+    "missionId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Missionid",
+      "type": "string"
+    },
+    "wakeKinds": {
+      "items": {
+        "maxLength": 160,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Wakekinds",
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "actor",
+    "missionId",
+    "cursor",
+    "wakeKinds"
+  ],
+  "title": "Subscription",
+  "type": "object"
+}

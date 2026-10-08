@@ -1,0 +1,104 @@
+{
+  "$defs": {
+    "Actor": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "peer",
+            "host",
+            "user"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind"
+      ],
+      "title": "Actor",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "$ref": "#/$defs/Actor"
+    },
+    "afterCursor": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Aftercursor",
+      "type": "integer"
+    },
+    "kind": {
+      "enum": [
+        "snapshot",
+        "events",
+        "sources",
+        "operation",
+        "pending_requests"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "missionId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Missionid",
+      "type": "string"
+    },
+    "operationId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Operationid"
+    },
+    "queryId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Queryid",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "taskId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Taskid"
+    }
+  },
+  "required": [
+    "queryId",
+    "actor",
+    "missionId",
+    "kind"
+  ],
+  "title": "Query",
+  "type": "object"
+}

@@ -1,0 +1,596 @@
+{
+  "schemaVersion": "1.0",
+  "snapshotId": "syn-abstract-disagreement-snapshot-v2",
+  "sampleVersion": "1.0.1",
+  "capturedAt": "2026-10-08T14:24:00Z",
+  "mission": {
+    "id": "mission-fictional-adult-review",
+    "version": 2,
+    "question": "For adults with fictional Condition Y, what do the available synthetic studies say about Lantern Brief Skills versus attention control at six weeks?",
+    "scope": "Published abstracts only; verify population, comparator and time point. Do not infer inaccessible methods or adverse events.",
+    "status": "active",
+    "latencyClass": "very_long",
+    "latencyBasis": "Multi-source review with an unresolved methods search; no deadline.",
+    "startedAt": "2026-10-08T14:00:00Z",
+    "reportArtifactId": "report-v2"
+  },
+  "agents": [
+    {
+      "id": "agent-synthesis",
+      "name": "Synthesis peer",
+      "role": "evidence synthesis",
+      "status": "active"
+    },
+    {
+      "id": "agent-acquisition",
+      "name": "Acquisition peer",
+      "role": "source acquisition",
+      "status": "waiting"
+    },
+    {
+      "id": "agent-critique",
+      "name": "Critique peer",
+      "role": "independent critique",
+      "status": "completed"
+    },
+    {
+      "id": "agent-planning",
+      "name": "Planning peer",
+      "role": "project and collaboration planning",
+      "status": "active"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-root",
+      "title": "Synthesize adult six-week evidence",
+      "status": "running",
+      "latencyClass": "long",
+      "latencyBasis": "Compare abstracts and revise supported claims.",
+      "activeOrWaiting": "active",
+      "attemptIds": [
+        "attempt-synthesis"
+      ],
+      "firstUsefulAt": "2026-10-08T14:07:00Z"
+    },
+    {
+      "id": "task-a1",
+      "title": "Inspect first adult abstract",
+      "status": "completed",
+      "latencyClass": "medium",
+      "latencyBasis": "One available abstract and exact passage spans.",
+      "activeOrWaiting": "active",
+      "attemptIds": [
+        "attempt-a1"
+      ],
+      "firstUsefulAt": "2026-10-08T14:04:00Z",
+      "parentTaskId": "task-root"
+    },
+    {
+      "id": "task-a2",
+      "title": "Find an independent adult comparison",
+      "status": "completed",
+      "latencyClass": "medium",
+      "latencyBasis": "Parallel acquisition and relevance check.",
+      "activeOrWaiting": "active",
+      "attemptIds": [
+        "attempt-a2-failed",
+        "attempt-a2"
+      ],
+      "firstUsefulAt": "2026-10-08T14:06:00Z",
+      "parentTaskId": "task-root",
+      "targetArtifactId": "report-v1"
+    },
+    {
+      "id": "task-critique",
+      "title": "Challenge the early benefit reading",
+      "status": "completed",
+      "latencyClass": "minimal",
+      "latencyBasis": "Bounded review of interval and comparator.",
+      "activeOrWaiting": "active",
+      "attemptIds": [
+        "attempt-critique"
+      ],
+      "firstUsefulAt": "2026-10-08T14:09:00Z",
+      "parentTaskId": "task-root"
+    },
+    {
+      "id": "task-methods",
+      "title": "Seek permitted methods and adverse-event detail",
+      "status": "waiting",
+      "latencyClass": "long",
+      "latencyBasis": "Access-limited search may require another route.",
+      "activeOrWaiting": "waiting",
+      "attemptIds": [
+        "attempt-methods-failed",
+        "attempt-methods-wait"
+      ],
+      "firstUsefulAt": null,
+      "parentTaskId": "task-root",
+      "targetArtifactId": "report-v2"
+    },
+    {
+      "id": "task-sibling",
+      "title": "Survey an unaffected alternative angle",
+      "status": "running",
+      "latencyClass": "medium",
+      "latencyBasis": "Independent branch can continue while methods search waits.",
+      "activeOrWaiting": "active",
+      "attemptIds": [
+        "attempt-sibling"
+      ],
+      "firstUsefulAt": "2026-10-08T14:19:00Z",
+      "parentTaskId": "task-root"
+    }
+  ],
+  "attempts": [
+    {
+      "id": "attempt-a1",
+      "taskId": "task-a1",
+      "agentId": "agent-acquisition",
+      "status": "completed",
+      "startedAt": "2026-10-08T14:01:00Z",
+      "endedAt": "2026-10-08T14:04:00Z",
+      "toolCalls": [
+        {
+          "name": "Read scripted abstract A1",
+          "provider": "Synthetic benchmark packet",
+          "status": "completed"
+        }
+      ],
+      "selectedModel": null,
+      "skillVersions": [],
+      "resultSummary": "Saved exact abstract spans A1-pop, A1-result and A1-gap.",
+      "returnedReasoning": {
+        "availability": "absent"
+      }
+    },
+    {
+      "id": "attempt-a2-failed",
+      "taskId": "task-a2",
+      "agentId": "agent-acquisition",
+      "status": "failed",
+      "startedAt": "2026-10-08T14:02:00Z",
+      "endedAt": "2026-10-08T14:03:00Z",
+      "toolCalls": [
+        {
+          "name": "Read unavailable scripted route",
+          "provider": "Synthetic benchmark packet",
+          "status": "failed"
+        }
+      ],
+      "selectedModel": null,
+      "skillVersions": [],
+      "resultSummary": "First route returned no accessible adult comparison. The peer tried another permitted source route.",
+      "returnedReasoning": {
+        "availability": "absent"
+      }
+    },
+    {
+      "id": "attempt-a2",
+      "taskId": "task-a2",
+      "agentId": "agent-acquisition",
+      "status": "completed",
+      "startedAt": "2026-10-08T14:03:00Z",
+      "endedAt": "2026-10-08T14:06:00Z",
+      "toolCalls": [
+        {
+          "name": "Read scripted abstract A2",
+          "provider": "Synthetic benchmark packet",
+          "status": "completed"
+        }
+      ],
+      "selectedModel": null,
+      "skillVersions": [],
+      "resultSummary": "Found a separate adult study with no clear difference.",
+      "returnedReasoning": {
+        "availability": "returned",
+        "text": "Illustrative fixture content: A2 is a separate adult attention-control study at six weeks. Its reported result does not establish a benefit."
+      }
+    },
+    {
+      "id": "attempt-synthesis",
+      "taskId": "task-root",
+      "agentId": "agent-synthesis",
+      "status": "completed",
+      "startedAt": "2026-10-08T14:04:00Z",
+      "endedAt": "2026-10-08T14:12:00Z",
+      "toolCalls": [],
+      "selectedModel": null,
+      "skillVersions": [],
+      "resultSummary": "Revised the answer after critique; retained supported counts and uncertainty.",
+      "returnedReasoning": {
+        "availability": "restricted"
+      }
+    },
+    {
+      "id": "attempt-critique",
+      "taskId": "task-critique",
+      "agentId": "agent-critique",
+      "status": "completed",
+      "startedAt": "2026-10-08T14:07:00Z",
+      "endedAt": "2026-10-08T14:09:00Z",
+      "toolCalls": [],
+      "selectedModel": null,
+      "skillVersions": [],
+      "resultSummary": "Flagged that A1 interval crosses no difference and A2 does not support a strong benefit claim.",
+      "returnedReasoning": {
+        "availability": "truncated",
+        "text": "Illustrative cut-off fixture excerpt: The first interval crosses no difference, and the second adult study..."
+      }
+    },
+    {
+      "id": "attempt-methods-failed",
+      "taskId": "task-methods",
+      "agentId": "agent-acquisition",
+      "status": "failed",
+      "startedAt": "2026-10-08T14:13:00Z",
+      "endedAt": "2026-10-08T14:15:00Z",
+      "toolCalls": [
+        {
+          "name": "Request scripted methods table",
+          "provider": "Synthetic benchmark packet",
+          "status": "failed"
+        }
+      ],
+      "selectedModel": null,
+      "skillVersions": [],
+      "resultSummary": "Methods table unavailable in this packet. No adverse-event result was inferred.",
+      "returnedReasoning": {
+        "availability": "absent"
+      }
+    },
+    {
+      "id": "attempt-methods-wait",
+      "taskId": "task-methods",
+      "agentId": "agent-acquisition",
+      "status": "waiting",
+      "startedAt": "2026-10-08T14:16:00Z",
+      "endedAt": null,
+      "toolCalls": [],
+      "selectedModel": null,
+      "skillVersions": [],
+      "resultSummary": "Waiting for a permitted alternative source or a source-access update.",
+      "returnedReasoning": {
+        "availability": "absent"
+      }
+    },
+    {
+      "id": "attempt-sibling",
+      "taskId": "task-sibling",
+      "agentId": "agent-planning",
+      "status": "running",
+      "startedAt": "2026-10-08T14:18:00Z",
+      "endedAt": null,
+      "toolCalls": [],
+      "selectedModel": null,
+      "skillVersions": [],
+      "resultSummary": "Opened a separate planning question without changing the current evidence claim.",
+      "returnedReasoning": {
+        "availability": "absent"
+      }
+    }
+  ],
+  "messages": [
+    {
+      "id": "message-a2-1",
+      "requestId": "request-a2",
+      "status": "requested",
+      "summary": "Find an independent adult attention-control study at six weeks.",
+      "createdAt": "2026-10-08T14:02:00Z",
+      "fromAgentId": "agent-synthesis",
+      "toAgentId": "agent-acquisition",
+      "taskId": "task-a2"
+    },
+    {
+      "id": "message-a2-2",
+      "requestId": "request-a2",
+      "status": "delivered",
+      "summary": "Request reached the acquisition peer.",
+      "createdAt": "2026-10-08T14:02:10Z",
+      "fromAgentId": "agent-synthesis",
+      "toAgentId": "agent-acquisition",
+      "taskId": "task-a2"
+    },
+    {
+      "id": "message-a2-3",
+      "requestId": "request-a2",
+      "status": "acknowledged",
+      "summary": "Acquisition peer accepted the question.",
+      "createdAt": "2026-10-08T14:02:30Z",
+      "fromAgentId": "agent-synthesis",
+      "toAgentId": "agent-acquisition",
+      "taskId": "task-a2"
+    },
+    {
+      "id": "message-a2-4",
+      "requestId": "request-a2",
+      "status": "fulfilled",
+      "summary": "A2 supplied a separate study and narrowed the claim.",
+      "createdAt": "2026-10-08T14:06:00Z",
+      "fromAgentId": "agent-synthesis",
+      "toAgentId": "agent-acquisition",
+      "taskId": "task-a2",
+      "sourceId": "A2",
+      "claimId": "claim-benefit-v2"
+    },
+    {
+      "id": "message-methods-1",
+      "requestId": "request-methods",
+      "status": "requested",
+      "summary": "Seek permitted methods or adverse-event detail for A1.",
+      "createdAt": "2026-10-08T14:12:30Z",
+      "fromAgentId": "agent-synthesis",
+      "toAgentId": "agent-acquisition",
+      "taskId": "task-methods"
+    },
+    {
+      "id": "message-methods-2",
+      "requestId": "request-methods",
+      "status": "delivered",
+      "summary": "Request reached the acquisition peer.",
+      "createdAt": "2026-10-08T14:12:40Z",
+      "fromAgentId": "agent-synthesis",
+      "toAgentId": "agent-acquisition",
+      "taskId": "task-methods"
+    },
+    {
+      "id": "message-methods-3",
+      "requestId": "request-methods",
+      "status": "acknowledged",
+      "summary": "Peer searched the packet; the methods table remains inaccessible.",
+      "createdAt": "2026-10-08T14:16:00Z",
+      "fromAgentId": "agent-synthesis",
+      "toAgentId": "agent-acquisition",
+      "taskId": "task-methods",
+      "sourceId": "A4"
+    }
+  ],
+  "sources": [
+    {
+      "id": "A1",
+      "copyId": "A1-copy-v1",
+      "version": 1,
+      "title": "Adult study A · Lantern Brief Skills vs attention control",
+      "accessState": "abstract_only",
+      "retrievalStatus": "available",
+      "provider": "Synthetic benchmark packet",
+      "contentHash": "2bfa1e78a58139bf2ee923123a169bbb0ed6ca2b01a8900e02b017e30aa26975",
+      "passages": [
+        {
+          "spanId": "A1-pop",
+          "locator": "Abstract, sentence 2",
+          "text": "80 adults with Condition Y, 40 received Lantern Brief Skills and 40 received attention control"
+        },
+        {
+          "spanId": "A1-result",
+          "locator": "Abstract, sentence 3",
+          "text": "At six weeks, response occurred in 18 of 40 versus 12 of 40 participants; the synthetic risk-difference interval was -4 to 34 percentage points"
+        },
+        {
+          "spanId": "A1-gap",
+          "locator": "Abstract, sentence 4",
+          "text": "Adverse events and subgroup outcomes were not reported in this abstract"
+        }
+      ]
+    },
+    {
+      "id": "A2",
+      "copyId": "A2-copy-v1",
+      "version": 1,
+      "title": "Adult study B · independent randomized comparison",
+      "accessState": "abstract_only",
+      "retrievalStatus": "available",
+      "provider": "Synthetic benchmark packet",
+      "contentHash": "2ec9adf64e80d68b1a14bf5dd24dc9aa319877657b847420986a99915da80a8c",
+      "passages": [
+        {
+          "spanId": "A2-pop",
+          "locator": "Abstract, sentence 2",
+          "text": "50 adults with Condition Y to Lantern Brief Skills and 50 to attention control"
+        },
+        {
+          "spanId": "A2-result",
+          "locator": "Abstract, sentence 3",
+          "text": "At six weeks, response occurred in 20 of 50 versus 21 of 50 participants"
+        },
+        {
+          "spanId": "A2-interpretation",
+          "locator": "Abstract, sentence 4",
+          "text": "The authors reported no clear difference between groups"
+        }
+      ]
+    },
+    {
+      "id": "A3",
+      "copyId": "A3-copy-v1",
+      "version": 1,
+      "title": "Adolescent waitlist study · different question",
+      "accessState": "abstract_only",
+      "retrievalStatus": "available",
+      "provider": "Synthetic benchmark packet",
+      "contentHash": "c34dbd35491ced88695193a951e7fd4abcd545e81c937aede481e6e34568cb0f",
+      "passages": [
+        {
+          "spanId": "A3-mismatch",
+          "locator": "Abstract, sentence 2",
+          "text": "60 adolescents with Condition Z compared Lantern Brief Skills with a waitlist at two weeks"
+        }
+      ]
+    },
+    {
+      "id": "A4",
+      "copyId": "A4-copy-v1",
+      "version": 1,
+      "title": "Access notice · methods table unavailable",
+      "accessState": "locator_only",
+      "retrievalStatus": "access_limited",
+      "provider": "Synthetic benchmark packet",
+      "contentHash": "9b2ac8cee2d407e1571fc482a419091c405e6defe21e0d4fc8fe2c77bc40a77b",
+      "passages": [
+        {
+          "spanId": "A4-access",
+          "locator": "Access notice, sentence 2",
+          "text": "The full text and methods table for the first adult study are not available in this packet"
+        }
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "id": "claim-benefit-v1",
+      "version": 1,
+      "text": "A1 reports 18 of 40 versus 12 of 40 responses at six weeks; this favorable point direction does not establish benefit.",
+      "disposition": "provisional",
+      "supports": [
+        {
+          "sourceId": "A1",
+          "spanId": "A1-result"
+        }
+      ],
+      "taskId": "task-root"
+    },
+    {
+      "id": "claim-benefit-v2",
+      "version": 2,
+      "text": "Two synthetic adult abstracts give mixed and imprecise evidence: A1 reports 18/40 versus 12/40 with an interval spanning no difference; A2 reports 20/50 versus 21/50 and no clear difference.",
+      "disposition": "qualified",
+      "supports": [
+        {
+          "sourceId": "A1",
+          "spanId": "A1-result"
+        },
+        {
+          "sourceId": "A2",
+          "spanId": "A2-result"
+        }
+      ],
+      "supersedesVersion": 1,
+      "taskId": "task-root"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "report-v1",
+      "version": 1,
+      "kind": "report",
+      "title": "Early abstract reading",
+      "body": "The first synthetic adult abstract reports a favorable response direction, 18/40 versus 12/40 at six weeks. The interval includes no difference, so benefit is not established.",
+      "citations": [
+        {
+          "sourceId": "A1",
+          "spanId": "A1-result"
+        }
+      ],
+      "limitations": [
+        "Only one abstract had been included in this saved view; methods and adverse events were unavailable."
+      ]
+    },
+    {
+      "id": "report-v2",
+      "version": 2,
+      "kind": "report",
+      "title": "Revised evidence summary",
+      "body": "Two synthetic adult study abstracts report different six-week response directions. A1 reports 18/40 versus 12/40, but its interval spans no difference; A2 reports 20/50 versus 21/50 and no clear difference. Together they do not establish benefit.",
+      "citations": [
+        {
+          "sourceId": "A1",
+          "spanId": "A1-result"
+        },
+        {
+          "sourceId": "A2",
+          "spanId": "A2-result"
+        }
+      ],
+      "limitations": [
+        "Abstracts do not report the first study’s methods table, adverse events, or subgroup outcomes; these remain unknown."
+      ]
+    }
+  ],
+  "events": [
+    {
+      "id": "event-1",
+      "time": "2026-10-08T14:00:00Z",
+      "kind": "mission_started",
+      "summary": "Synthetic mission opened."
+    },
+    {
+      "id": "event-2",
+      "time": "2026-10-08T14:02:00Z",
+      "kind": "parallel_work",
+      "summary": "A1 and A2 abstract checks overlapped.",
+      "taskId": "task-a2",
+      "agentId": "agent-acquisition"
+    },
+    {
+      "id": "event-a2-route-failed",
+      "time": "2026-10-08T14:03:00Z",
+      "kind": "retrieval_failed",
+      "summary": "First A2 route failed; acquisition peer tried another permitted path.",
+      "taskId": "task-a2",
+      "agentId": "agent-acquisition"
+    },
+    {
+      "id": "event-3",
+      "time": "2026-10-08T14:09:00Z",
+      "kind": "critique",
+      "summary": "Interval and separate-study critique narrowed the claim.",
+      "taskId": "task-critique",
+      "agentId": "agent-critique"
+    },
+    {
+      "id": "event-4",
+      "time": "2026-10-08T14:12:00Z",
+      "kind": "claim_revision",
+      "summary": "Claim v2 and report v2 retained both cited abstract results.",
+      "taskId": "task-root",
+      "agentId": "agent-synthesis"
+    },
+    {
+      "id": "event-5",
+      "time": "2026-10-08T14:15:00Z",
+      "kind": "retrieval_failed",
+      "summary": "Methods table unavailable; sibling task continued.",
+      "taskId": "task-methods",
+      "agentId": "agent-acquisition"
+    }
+  ],
+  "diagnostics": [
+    {
+      "id": "diag-a2-route",
+      "kind": "retrieval_route",
+      "status": "failed",
+      "message": "The first scripted source route did not return an accessible adult comparison; no source or claim was accepted from it.",
+      "occurredAt": "2026-10-08T14:03:00Z",
+      "taskId": "task-a2",
+      "attemptId": "attempt-a2-failed"
+    },
+    {
+      "id": "diag-access",
+      "kind": "source_access",
+      "status": "failed",
+      "message": "A1 methods table is unavailable in the synthetic packet. No unseen method or adverse-event values were used.",
+      "occurredAt": "2026-10-08T14:15:00Z",
+      "taskId": "task-methods",
+      "attemptId": "attempt-methods-failed"
+    },
+    {
+      "id": "diag-wait",
+      "kind": "peer_wait",
+      "status": "waiting",
+      "message": "Request acknowledged but not fulfilled; alternative permitted source route is open.",
+      "occurredAt": "2026-10-08T14:16:00Z",
+      "taskId": "task-methods",
+      "attemptId": "attempt-methods-wait"
+    },
+    {
+      "id": "diag-reason",
+      "kind": "returned_content",
+      "status": "truncated",
+      "message": "Critique excerpt is truncated; no continuation was invented.",
+      "occurredAt": "2026-10-08T14:09:00Z",
+      "taskId": "task-critique",
+      "attemptId": "attempt-critique"
+    }
+  ]
+}

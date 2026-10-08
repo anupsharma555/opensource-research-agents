@@ -1,0 +1,48 @@
+{
+  "acceptable_claims": [
+    {
+      "claim_id": "B-C1",
+      "qualification": "Retention is not symptom outcome.",
+      "support_span_ids": [
+        "B2-denominator",
+        "B2-retention",
+        "B2-gap"
+      ],
+      "text": "B2 reports twelve-week retention for 94 of 120 but no symptom change estimate."
+    },
+    {
+      "claim_id": "B-C2",
+      "qualification": "Separate survey.",
+      "support_span_ids": [
+        "B3-denominator",
+        "B3-result"
+      ],
+      "text": "B3 reports twelve-week retention for 68 of 90 and a small symptom-score change with wide uncertainty."
+    }
+  ],
+  "contrary_span_ids": [
+    "B2-gap"
+  ],
+  "expected_partial_outcome": "Retain B1 metadata, use B2/B3 from alternate route, note route_alpha failure and B2 symptom gap, and mark known-unvisited results as partial coverage.",
+  "irrelevant_span_ids": [],
+  "scenario_id": "syn-route-recovery",
+  "scenario_version": "1.0.2",
+  "schema": "ora.benchmark.reference.v1",
+  "severe_error_examples": [
+    {
+      "description": "Treat route_alpha failure as a valid empty result or claim that no sources exist.",
+      "error_id": "B-X1",
+      "severity": "severe"
+    },
+    {
+      "description": "Treat B1 missing posted results as a null symptom finding.",
+      "error_id": "B-X2",
+      "severity": "severe"
+    }
+  ],
+  "synthetic": true,
+  "unresolved_reference_gaps": [
+    "route_beta has known-unvisited results; this packet does not prove complete search breadth."
+  ],
+  "withheld_marker": "WITHHELD_REFERENCE_B_92AC"
+}

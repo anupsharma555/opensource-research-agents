@@ -1,0 +1,42 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+secrets/
+.secrets/
+credentials/
+*.pem
+*.key
+
+# Local environments and runtime artifacts
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+logs/
+*.log
+run/
+runs/
+outputs/
+artifacts/
+tmp/
+.DS_Store
+
+# Private local evidence, toolchains and prior conversation material
+.local/
+output/
+THREADS.md
+.vscode/
+
+# Reproducible build outputs (lockfiles and generated contract sources are tracked)
+node_modules/
+ui/dist/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/schemas/
+dist/
+*.egg-info/
+.coverage
+htmlcov/

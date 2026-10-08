@@ -1,0 +1,44 @@
+{
+  "example": {
+    "path": "runtime_skills/evidence_linking/example.json",
+    "sha256": "3741dc0073b1f9d6e3470902dcae4426a690d6e8850bc6c771c8b573a0667349"
+  },
+  "failure_handling": "A missing source, locator or capability gives a scoped error. Preserve unrelated evidence and ask for a targeted repair.",
+  "helper": {
+    "dependencies": [
+      "pydantic==2.13.5"
+    ],
+    "durable_state_access": "none",
+    "function": "prepare_claim_link",
+    "helper_version": "1.0.0",
+    "license": "Project-owned; redistribution terms pending repository LICENSE",
+    "local_changes": "Initial project-owned implementation",
+    "module": "ora.skills.evidence_links",
+    "origin_type": "project_owned",
+    "path": "src/ora/skills/evidence_links.py",
+    "sha256": "7b5945eb75247d8c75ee8f5ed47270b23be91cd482207c737adf5a3f5aead14d",
+    "side_effects": "none",
+    "upstream_commit": null,
+    "upstream_url": null
+  },
+  "input_contract": "ora.contracts.models.EvidencePacket",
+  "instruction_variants": {
+    "concise": {
+      "path": "runtime_skills/evidence_linking/CONCISE.md",
+      "sha256": "81decb00d49d44423cdea515c1779606b813864f934ae3b90e1b46cfdfab230a"
+    },
+    "rich": {
+      "path": "runtime_skills/evidence_linking/RICH.md",
+      "sha256": "00e0e781d2f76ee82a1a974448a72027fae23361608b810419098739e3777806"
+    }
+  },
+  "output_contract": "project-owned internal candidate record; not a wire schema",
+  "purpose": "Link a narrow claim to a versioned, locatable source copy without treating citation presence as semantic proof.",
+  "required_capabilities": [
+    "source_read_by_id"
+  ],
+  "schema": "ora.runtime_skill.v1",
+  "skill_id": "evidence-linking",
+  "trigger": "Use when a synthesis or critique claim needs source support, challenge or context.",
+  "version": "1.0.0"
+}

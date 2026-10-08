@@ -1,0 +1,212 @@
+{
+  "$defs": {
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "sha256"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    },
+    "WaitCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "alternativeAction": {
+          "minLength": 1,
+          "title": "Alternativeaction",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "peer",
+            "quota",
+            "operation",
+            "subscription"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "nextCheckAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nextcheckat"
+        },
+        "referenceId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Referenceid",
+          "type": "string"
+        },
+        "wakeEvent": {
+          "minLength": 1,
+          "title": "Wakeevent",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "referenceId",
+        "wakeEvent",
+        "alternativeAction"
+      ],
+      "title": "WaitCondition",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "uncertain"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "uncertaintySource": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "uncertaintySource"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "waiting"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "nextCheck": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "nextCheck"
+        ]
+      }
+    }
+  ],
+  "properties": {
+    "attemptId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Attemptid",
+      "type": "string"
+    },
+    "cancellationRequested": {
+      "default": false,
+      "title": "Cancellationrequested",
+      "type": "boolean"
+    },
+    "nextCheck": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WaitCondition"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "operationId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Operationid",
+      "type": "string"
+    },
+    "ownerToken": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Ownertoken",
+      "type": "string"
+    },
+    "progress": {
+      "title": "Progress",
+      "type": "string"
+    },
+    "resultArtifacts": {
+      "items": {
+        "$ref": "#/$defs/ArtifactRef"
+      },
+      "title": "Resultartifacts",
+      "type": "array"
+    },
+    "status": {
+      "enum": [
+        "running",
+        "waiting",
+        "completed",
+        "failed",
+        "cancelled",
+        "uncertain"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "uncertaintySource": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Uncertaintysource"
+    }
+  },
+  "required": [
+    "operationId",
+    "attemptId",
+    "ownerToken",
+    "status",
+    "progress"
+  ],
+  "title": "OperationResult",
+  "type": "object"
+}

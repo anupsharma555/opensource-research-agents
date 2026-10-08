@@ -1,0 +1,239 @@
+{
+  "$defs": {
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "sha256"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    },
+    "ModelSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "changeReason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Changereason"
+        },
+        "configurationHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Configurationhash",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "reasoningEffort": {
+          "title": "Reasoningeffort",
+          "type": "string"
+        },
+        "settings": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          },
+          "title": "Settings",
+          "type": "object"
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "reasoningEffort",
+        "configurationHash"
+      ],
+      "title": "ModelSelection",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "attemptId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Attemptid",
+      "type": "string"
+    },
+    "expectedOutputs": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Expectedoutputs",
+      "type": "array"
+    },
+    "idempotencyKey": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Idempotencykey",
+      "type": "string"
+    },
+    "inputArtifacts": {
+      "items": {
+        "$ref": "#/$defs/ArtifactRef"
+      },
+      "title": "Inputartifacts",
+      "type": "array"
+    },
+    "intendedEffects": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Intendedeffects",
+      "type": "array"
+    },
+    "jobId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Jobid",
+      "type": "string"
+    },
+    "leaseExpiresAt": {
+      "minLength": 1,
+      "title": "Leaseexpiresat",
+      "type": "string"
+    },
+    "missionAuthorizationId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Missionauthorizationid",
+      "type": "string"
+    },
+    "missionId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Missionid",
+      "type": "string"
+    },
+    "modelSelection": {
+      "$ref": "#/$defs/ModelSelection"
+    },
+    "operationId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Operationid",
+      "type": "string"
+    },
+    "originatingModelCallId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Originatingmodelcallid",
+      "type": "string"
+    },
+    "ownerToken": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Ownertoken",
+      "type": "string"
+    },
+    "permittedResources": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Permittedresources",
+      "type": "array"
+    },
+    "quotaWakeAt": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Quotawakeat"
+    },
+    "requestTimeoutSeconds": {
+      "exclusiveMinimum": 0,
+      "title": "Requesttimeoutseconds",
+      "type": "number"
+    },
+    "taskId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Taskid",
+      "type": "string"
+    },
+    "toolCallId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Toolcallid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "jobId",
+    "missionId",
+    "taskId",
+    "attemptId",
+    "operationId",
+    "originatingModelCallId",
+    "toolCallId",
+    "idempotencyKey",
+    "ownerToken",
+    "inputArtifacts",
+    "expectedOutputs",
+    "intendedEffects",
+    "permittedResources",
+    "modelSelection",
+    "requestTimeoutSeconds",
+    "leaseExpiresAt",
+    "missionAuthorizationId"
+  ],
+  "title": "JobRequest",
+  "type": "object"
+}

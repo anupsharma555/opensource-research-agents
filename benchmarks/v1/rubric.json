@@ -1,0 +1,22 @@
+{
+  "schema": "ora.benchmark.rubric.v1",
+  "rubric_version": "1.0.0",
+  "separate_metrics": {
+    "scientific_support": "For each substantive claim, an independent evaluator checks whether the cited source passage actually warrants it, including population, comparator, timing, and uncertainty. Citation existence alone earns no credit.",
+    "counterevidence_retention": "Record whether relevant contrary or null evidence remains visible and is not counted twice through related reports.",
+    "severe_errors": "Count fabricated result details, unsupported causal certainty, mistaken study identity, or a technical failure presented as a scientific null. Report separately; never average away a severe error.",
+    "false_blocks": "Count valid supported work withheld or stopped by a local optional route, parser, or validator failure.",
+    "useful_unique_evidence": "Count distinct eligible underlying studies or checked results with usable, locatable passages; do not use raw URL count.",
+    "recovery": "Record which affected branch resumed or reached a qualified partial result after a provider or execution fault, while unrelated work continued.",
+    "cost": "Report observed calls, tokens, provider-specific credits, currency, and tool use separately. Unknown or unavailable units stay null, never zero.",
+    "useful_latency": "Report time to first usable source and first supported partial answer separately from full scoped completion. Separate active work, queue/provider waits, peer waits, and retries; latency category is descriptive, not a deadline.",
+    "reader_usefulness": "For the named audience, separately rate whether the answer, its cited support, reasoning from evidence to conclusion, and material uncertainty or disagreement are easy to find and understand. Do not award credit for length, polish, or generic prose. Note format differences that prevent a matched reader task."
+  },
+  "reader_score_anchors": {
+    "0": "The reader cannot locate a usable answer or its actual support.",
+    "1": "The answer and citations exist, but the evidence-to-conclusion link or important uncertainty is opaque.",
+    "2": "The same supported answer clearly explains why cited evidence warrants the conclusion and where it remains uncertain."
+  },
+  "partial_and_uncertain": "Credit explicit facts from published abstracts or checked results at their actual depth. Mark inaccessible details unknown. A valid scientific null is evidence; missing posted results and technical errors are not null findings. A scoped useful answer can be scored while other routes remain open.",
+  "review_rule": "Tested agents do not see reference files and do not score their own advantage. Independent reviewers score scientific and reader judgments blind to system identity when practical, record disagreements and adjudication, and keep fixture proof separate from live/model proof."
+}

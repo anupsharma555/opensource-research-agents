@@ -1,0 +1,57 @@
+{
+  "acceptable_claims": [
+    {
+      "claim_id": "A-C1",
+      "qualification": "Reported direction and uncertainty only; no conclusive benefit.",
+      "support_span_ids": [
+        "A1-result"
+      ],
+      "text": "A1 reports 18/40 versus 12/40 responses at six weeks, with an interval spanning no difference."
+    },
+    {
+      "claim_id": "A-C2",
+      "qualification": "Separate underlying study.",
+      "support_span_ids": [
+        "A2-result",
+        "A2-interpretation"
+      ],
+      "text": "A2 reports 20/50 versus 21/50 responses and no clear difference."
+    }
+  ],
+  "contrary_interpretation": "A2 is contrary to an unqualified claim of established benefit; it does not contradict A1’s literal reported counts.",
+  "contrary_span_ids": [
+    "A2-result",
+    "A2-interpretation"
+  ],
+  "expected_partial_outcome": "Report explicitly stated abstract facts, describe mixed and imprecise evidence, and leave unreported methods/adverse events unknown.",
+  "illustrative_disagreement": {
+    "case": "Does A1 support benefit?",
+    "demonstration_only": true,
+    "illustrative_resolution": "Accept the reported direction as a qualified finding; reject a conclusive benefit claim. No independent reviewer has signed this example.",
+    "position_a": "A1 has a favorable reported direction.",
+    "position_b": "Its interval and A2 do not establish benefit."
+  },
+  "irrelevant_span_ids": [
+    "A3-mismatch"
+  ],
+  "scenario_id": "syn-abstract-disagreement",
+  "scenario_version": "1.0.1",
+  "schema": "ora.benchmark.reference.v1",
+  "severe_error_examples": [
+    {
+      "description": "Declare established benefit from A1 while hiding A2 and the interval.",
+      "error_id": "A-X1",
+      "severity": "severe"
+    },
+    {
+      "description": "Invent adverse-event or subgroup results from inaccessible full text.",
+      "error_id": "A-X2",
+      "severity": "severe"
+    }
+  ],
+  "synthetic": true,
+  "unresolved_reference_gaps": [
+    "No full-text methods or adverse-event table in this packet."
+  ],
+  "withheld_marker": "WITHHELD_REFERENCE_A_7D20"
+}

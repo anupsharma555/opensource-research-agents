@@ -1,0 +1,155 @@
+{
+  "family": "fictional mental-health intervention",
+  "initial_source_ids": [
+    "A1",
+    "A2",
+    "A3",
+    "A4"
+  ],
+  "review_type": "focused evidence synthesis",
+  "scenario_id": "syn-abstract-disagreement",
+  "scenario_version": "1.0.1",
+  "schema": "ora.benchmark.scenario.v1",
+  "scripted_events": [
+    {
+      "actor": "independent_critic",
+      "event_id": "A-E1",
+      "kind": "peer_message",
+      "payload": {
+        "source_ids": [
+          "A3"
+        ],
+        "text": "Check whether the adolescent waitlist study answers the adult attention-control question."
+      },
+      "step": 1,
+      "target": "synthesis_agent"
+    },
+    {
+      "actor": "synthesis_agent",
+      "event_id": "A-E2",
+      "kind": "peer_request",
+      "payload": {
+        "source_ids": [
+          "A1",
+          "A4"
+        ],
+        "text": "Look for a permitted methods or adverse-event report for A1; keep unsupported details unknown."
+      },
+      "step": 2,
+      "target": "acquisition_agent"
+    }
+  ],
+  "sources": [
+    {
+      "access_state": "abstract_only",
+      "body": "Synthetic publication abstract. In a fictional randomized study of 80 adults with Condition Y, 40 received Lantern Brief Skills and 40 received attention control. At six weeks, response occurred in 18 of 40 versus 12 of 40 participants; the synthetic risk-difference interval was -4 to 34 percentage points. Adverse events and subgroup outcomes were not reported in this abstract.",
+      "body_sha256": "2bfa1e78a58139bf2ee923123a169bbb0ed6ca2b01a8900e02b017e30aa26975",
+      "rights": "synthetic_project_owned",
+      "source_id": "A1",
+      "source_version": "1.0.0",
+      "spans": [
+        {
+          "end": 161,
+          "locator": "Abstract, sentence 2",
+          "quote": "80 adults with Condition Y, 40 received Lantern Brief Skills and 40 received attention control",
+          "span_id": "A1-pop",
+          "start": 67
+        },
+        {
+          "end": 306,
+          "locator": "Abstract, sentence 3",
+          "quote": "At six weeks, response occurred in 18 of 40 versus 12 of 40 participants; the synthetic risk-difference interval was -4 to 34 percentage points",
+          "span_id": "A1-result",
+          "start": 163
+        },
+        {
+          "end": 379,
+          "locator": "Abstract, sentence 4",
+          "quote": "Adverse events and subgroup outcomes were not reported in this abstract",
+          "span_id": "A1-gap",
+          "start": 308
+        }
+      ],
+      "surface": "published_abstract",
+      "synthetic": true
+    },
+    {
+      "access_state": "abstract_only",
+      "body": "Synthetic publication abstract. A separate fictional randomized study assigned 50 adults with Condition Y to Lantern Brief Skills and 50 to attention control. At six weeks, response occurred in 20 of 50 versus 21 of 50 participants. The authors reported no clear difference between groups.",
+      "body_sha256": "2ec9adf64e80d68b1a14bf5dd24dc9aa319877657b847420986a99915da80a8c",
+      "rights": "synthetic_project_owned",
+      "source_id": "A2",
+      "source_version": "1.0.0",
+      "spans": [
+        {
+          "end": 157,
+          "locator": "Abstract, sentence 2",
+          "quote": "50 adults with Condition Y to Lantern Brief Skills and 50 to attention control",
+          "span_id": "A2-pop",
+          "start": 79
+        },
+        {
+          "end": 231,
+          "locator": "Abstract, sentence 3",
+          "quote": "At six weeks, response occurred in 20 of 50 versus 21 of 50 participants",
+          "span_id": "A2-result",
+          "start": 159
+        },
+        {
+          "end": 288,
+          "locator": "Abstract, sentence 4",
+          "quote": "The authors reported no clear difference between groups",
+          "span_id": "A2-interpretation",
+          "start": 233
+        }
+      ],
+      "surface": "published_abstract",
+      "synthetic": true
+    },
+    {
+      "access_state": "abstract_only",
+      "body": "Synthetic publication abstract. A fictional study of 60 adolescents with Condition Z compared Lantern Brief Skills with a waitlist at two weeks. The population, comparator, outcome, and timing differ from the adult Condition Y question.",
+      "body_sha256": "c34dbd35491ced88695193a951e7fd4abcd545e81c937aede481e6e34568cb0f",
+      "rights": "synthetic_project_owned",
+      "source_id": "A3",
+      "source_version": "1.0.0",
+      "spans": [
+        {
+          "end": 143,
+          "locator": "Abstract, sentence 2",
+          "quote": "60 adolescents with Condition Z compared Lantern Brief Skills with a waitlist at two weeks",
+          "span_id": "A3-mismatch",
+          "start": 53
+        }
+      ],
+      "surface": "published_abstract",
+      "synthetic": true
+    },
+    {
+      "access_state": "locator_only",
+      "body": "Synthetic publisher access notice. The full text and methods table for the first adult study are not available in this packet.",
+      "body_sha256": "9b2ac8cee2d407e1571fc482a419091c405e6defe21e0d4fc8fe2c77bc40a77b",
+      "rights": "synthetic_project_owned",
+      "source_id": "A4",
+      "source_version": "1.0.0",
+      "spans": [
+        {
+          "end": 125,
+          "locator": "Access notice, sentence 2",
+          "quote": "The full text and methods table for the first adult study are not available in this packet",
+          "span_id": "A4-access",
+          "start": 35
+        }
+      ],
+      "surface": "access_notice",
+      "synthetic": true
+    }
+  ],
+  "synthetic": true,
+  "task": {
+    "audience": "research program lead",
+    "decision": "Give a bounded evidence summary and identify what cannot be concluded.",
+    "latency_class": "medium",
+    "question": "For adults with fictional Condition Y, what do the available synthetic studies say about Lantern Brief Skills versus attention control at six weeks?"
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "budget_policy": {
+    "controlled_equal_input": "Before each matched run, predeclare the same source opportunity and comparable call/token/tool/currency envelope where measurable. Record any unavoidable product difference; do not invent a universal time or search-round cutoff.",
+    "fixture_only": "A scripted fixture has only its listed events and sources; this does not prove any live resource capacity.",
+    "native_workflow": "Before each native run, record the authorized spend/resource envelope and product features. Native tools remain available; compare observed usage and disclose non-equivalent capacity."
+  },
+  "illustrative_controlled_allowance": {
+    "example_only": true,
+    "scope": "benchmark_test_only",
+    "profile_id": "single_role",
+    "condition_id": "controlled_equal_input",
+    "comparison_group_id": "synthetic-a-single-role-example",
+    "max_model_calls": 4,
+    "max_model_tokens_total": 20000,
+    "max_tool_calls": 0,
+    "max_currency_amount": 1.0,
+    "currency_code": "USD",
+    "allowed_tool_names": [],
+    "fixed_source_ids": ["A1", "A2", "A3", "A4"],
+    "note": "A concrete proposed evaluation allowance for a controlled synthetic comparison, to be reviewed and declared before any actual run. It is not an observed spend, a runtime research limit, or a scientific duration cap."
+  },
+  "comparison_arms": [
+    {
+      "arm_id": "ora_pipeline",
+      "rule": "Record exact build, model, roles, tools, route access, and configuration."
+    },
+    {
+      "arm_id": "same_model_single_agent",
+      "rule": "Use the same selected model and question as the pipeline, with matched evidence opportunity in the controlled condition. Record tool differences and omit peer exchange."
+    },
+    {
+      "arm_id": "frontier_chatgpt_or_codex",
+      "rule": "Use a strong current ChatGPT or Codex research workflow. In the native condition allow its normal authorized tools; record product/model/version, features, source access, and human intervention rather than handicapping it."
+    }
+  ],
+  "conditions": [
+    {
+      "condition_id": "controlled_equal_input",
+      "interpretation": "Tests reasoning and workflow over comparable evidence opportunity; does not measure live discovery breadth.",
+      "source_access": "The same pinned task and source snapshots are supplied to every eligible system. Record any unmatched tool or product feature instead of silently disabling it."
+    },
+    {
+      "condition_id": "native_workflow",
+      "interpretation": "Tests product-native usefulness. Record actual source access, tools, versions, intervention, and cost; do not claim equal evidence opportunity.",
+      "source_access": "Supply the same question and decision, then allow each product's documented native research and browsing workflow under recorded authorization."
+    }
+  ],
+  "run_metadata_required": [
+    "arm_id",
+    "condition_id",
+    "scenario_id",
+    "scenario_version",
+    "scenario_sha256",
+    "profile_id",
+    "build_or_product_version",
+    "configuration_sha256",
+    "rubric_sha256",
+    "model_id",
+    "tool_versions",
+    "source_access",
+    "user_interventions",
+    "resource_use",
+    "evaluation_allowance",
+    "proof_type"
+  ],
+  "schema": "ora.benchmark.baselines.v1"
+}

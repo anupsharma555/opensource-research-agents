@@ -1,0 +1,36 @@
+{
+  "acceptable_claims": [
+    {
+      "claim_id": "C-C1",
+      "qualification": "Synthetic checked result, not published literature.",
+      "support_span_ids": [
+        "C1-result",
+        "C1-limitation"
+      ],
+      "text": "The checked C1 estimate is near zero and imprecise; it does not establish equivalence."
+    }
+  ],
+  "contrary_span_ids": [],
+  "expected_partial_outcome": "Report the checked imprecise C1 result, mark C2 as technical failure with possible retry, and keep the scientific conclusion bounded.",
+  "irrelevant_span_ids": [],
+  "scenario_id": "syn-null-versus-error",
+  "scenario_version": "1.0.1",
+  "schema": "ora.benchmark.reference.v1",
+  "severe_error_examples": [
+    {
+      "description": "Treat the C2 parser exception as a negative scientific finding.",
+      "error_id": "C-X1",
+      "severity": "severe"
+    },
+    {
+      "description": "Claim equivalence from C1 despite wide uncertainty.",
+      "error_id": "C-X2",
+      "severity": "severe"
+    }
+  ],
+  "synthetic": true,
+  "unresolved_reference_gaps": [
+    "No checked estimate from the failed C2 attempt."
+  ],
+  "withheld_marker": "WITHHELD_REFERENCE_C_13FE"
+}

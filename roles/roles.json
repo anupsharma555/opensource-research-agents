@@ -1,0 +1,15 @@
+{
+  "schema": "ora.roles.v1",
+  "plan_source": "Independent Research Agents: nine role checklists and implementation plan, Section 7 (read 2026-10-08)",
+  "roles": [
+    {"role_id": "literature_acquisition", "name": "Literature acquisition", "plan_section": "7.1", "inherits_shared_collaboration": true, "skill_refs": []},
+    {"role_id": "evidence_preparation_synthesis", "name": "Evidence preparation and synthesis", "plan_section": "7.2", "inherits_shared_collaboration": true, "skill_refs": [{"skill_id": "evidence-linking", "version": "1.0.0"}]},
+    {"role_id": "independent_methods_reviewer_critic", "name": "Independent methods reviewer and critic", "plan_section": "7.3", "inherits_shared_collaboration": true, "skill_refs": [{"skill_id": "evidence-linking", "version": "1.0.0"}, {"skill_id": "study-appraisal", "version": "1.0.0"}]},
+    {"role_id": "questions_hypotheses_ranking", "name": "Questions, competing hypotheses and ranking", "plan_section": "7.4", "inherits_shared_collaboration": true, "skill_refs": []},
+    {"role_id": "experimental_design", "name": "Experimental design", "plan_section": "7.5", "inherits_shared_collaboration": true, "skill_refs": []},
+    {"role_id": "data_management", "name": "Data management", "plan_section": "7.6", "inherits_shared_collaboration": true, "skill_refs": []},
+    {"role_id": "analysis", "name": "Analysis", "plan_section": "7.7", "inherits_shared_collaboration": true, "skill_refs": []},
+    {"role_id": "project_collaboration_planning", "name": "Project and collaboration planning", "plan_section": "7.8", "inherits_shared_collaboration": true, "skill_refs": []},
+    {"role_id": "shared_research_memory_completion", "name": "Shared research memory and completion reporting", "plan_section": "7.9", "inherits_shared_collaboration": true, "skill_refs": []}
+  ]
+}

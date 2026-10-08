@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "code": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Code",
+      "type": "string"
+    },
+    "commandId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Commandid",
+      "type": "string"
+    },
+    "eventIds": {
+      "items": {
+        "maxLength": 160,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Eventids",
+      "type": "array"
+    },
+    "message": {
+      "minLength": 1,
+      "title": "Message",
+      "type": "string"
+    },
+    "repair": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Repair"
+    },
+    "status": {
+      "enum": [
+        "accepted",
+        "duplicate",
+        "rejected",
+        "deferred"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "version": {
+      "minimum": 0,
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "commandId",
+    "status",
+    "code",
+    "message",
+    "version"
+  ],
+  "title": "Receipt",
+  "type": "object"
+}
