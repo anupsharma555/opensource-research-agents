@@ -1,3 +1,4 @@
+// Generate the React snapshot type from the canonical research schema, or check for drift.
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

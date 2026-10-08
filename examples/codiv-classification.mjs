@@ -1,3 +1,4 @@
+// Preview saved classifier examples by default; --live makes one explicit API request.
 import { readFileSync } from 'node:fs';
 import { parseEnv } from 'node:util';
 

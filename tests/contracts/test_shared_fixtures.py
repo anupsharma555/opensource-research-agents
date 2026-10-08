@@ -1,3 +1,5 @@
+"""Apply the shared wire examples to Python and check generated schema freshness."""
+
 import json
 from pathlib import Path
 

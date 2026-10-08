@@ -1,4 +1,8 @@
-"""Bounded, synthetic comparison of two runtime skills on the selected Groq model."""
+"""Prepare synthetic skill-fit cases offline; make bounded model calls only with --live.
+
+The runner compares two instruction variants per skill and keeps reference answers
+out of model-visible input. A completed request still needs independent scoring.
+"""
 
 from __future__ import annotations
 

@@ -1,3 +1,4 @@
+// Share the React renderer configuration between the Vite app and its DOM tests.
 import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vitest/config';

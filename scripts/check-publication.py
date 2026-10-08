@@ -1,4 +1,7 @@
-"""Inspect the intended Git file set without reading local credential files."""
+"""Screen staged Git blobs for private paths and credential-shaped content.
+
+Read the index bytes that would be committed, without opening local credential files.
+"""
 
 import re
 import subprocess

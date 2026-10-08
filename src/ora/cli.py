@@ -1,4 +1,7 @@
-"""Thin development commands over shared modules; no hidden workflow engine."""
+"""Expose offline contract, benchmark, skill, and sample-inspection commands.
+
+Production mission commands report unavailable; this CLI does not start a host.
+"""
 
 import argparse
 import json

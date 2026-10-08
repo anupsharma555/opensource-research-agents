@@ -1,3 +1,5 @@
+"""Exercise the offline command service's state, replay, and recovery boundaries."""
+
 import copy
 
 import pytest
@@ -391,6 +393,46 @@ def test_incompatible_client_has_actionable_diagnostic(board):
     assert receipt.code == "invalid_contract" and "schemaVersion" in receipt.message
     assert "1.0" in receipt.repair
     assert board.apply(propose("current-client", "task-b")).status == "accepted"
+
+
+def test_unsupported_client_does_not_erase_pending_work_across_restart(tmp_path):
+    path = tmp_path / "compatibility-fixture.sqlite"
+    board = ContractService(path)
+    board.seed("mission-a", "mission", "mission-a", "active")
+    assert board.apply(propose()).status == "accepted"
+    request = command(
+        "ask-peer",
+        {
+            "kind": "peer_message",
+            "messageId": "request-pending",
+            "recipientId": "peer-b",
+            "messageType": "request",
+            "body": "Check the synthetic source version",
+        },
+        task="task-a",
+    )
+    assert board.apply(request).status == "accepted"
+    older_client = propose("unsupported-client", "task-incompatible")
+    older_client["schemaVersion"] = "0.9"  # Deliberately unsupported fixture value; no v0.9 release.
+    rejected = board.apply(older_client)
+    assert rejected.code == "invalid_contract" and "schemaVersion" in rejected.message
+    assert "1.0" in rejected.repair
+    assert board.entity("mission-a", "task", "task-incompatible") is None
+    assert len(board.events("mission-a")) == 2
+    board.close()
+
+    board = ContractService(path)
+    try:
+        repeated = board.apply(older_client)
+        assert repeated.status == "duplicate" and repeated.code == "invalid_contract"
+        assert board.entity("mission-a", "mission", "mission-a")["state"] == "active"
+        assert board.entity("mission-a", "task", "task-a")["state"] == "queued"
+        assert [item["id"] for item in board.pending_requests("mission-a")] == ["request-pending"]
+        assert board.apply(propose("current-sibling", "task-b")).status == "accepted"
+        assert board.entity("mission-a", "task", "task-b")["state"] == "queued"
+        assert len(board.events("mission-a")) == 3
+    finally:
+        board.close()
 
 
 def test_current_ui_sample_uses_canonical_read_contract():

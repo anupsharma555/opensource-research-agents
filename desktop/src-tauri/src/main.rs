@@ -1,3 +1,4 @@
+// Launch the native sample window around the bundled React renderer.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {

@@ -1,3 +1,4 @@
+// Validate shared wire fixtures against the generated JSON Schemas in JavaScript.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import Ajv2020 from 'ajv/dist/2020.js';

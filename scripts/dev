@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""One local/CI/cloud command surface. Does not load .env or invoke research providers."""
+"""Run pinned setup, generation, checks, and sample-app commands in each environment.
+
+This wrapper does not load .env or invoke research providers.
+"""
 
 import argparse
 import hashlib

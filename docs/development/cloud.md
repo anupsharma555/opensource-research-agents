@@ -28,6 +28,13 @@ new task to verify the published setup. The task must discover
 helper. Record the exact commit, platform/toolchain, helper receipt and returned
 artifact or diff. Mere presence of `SKILL.md` is not proof of discovery.
 
+The first published-task check found an older snapshot than the requested commit.
+Verify the actual revision at task start; fetch the specified revision and use an
+isolated clean checkout when necessary, preserving existing task work. See the
+[observed cloud evidence](foundation-evidence.md#published-cloud-verification).
+Repository skill discovery through AGENTS.md worked even though the session's
+skill catalog had no entry. Do not describe that as verified menu integration.
+
 ## Platform and failure boundaries
 
 Linux cloud tasks can validate Python and the React build/component tests. The
@@ -41,6 +48,9 @@ diagnostic; recover by allowing the intended registry during setup, not by
 disabling validation. Confirm that missing provider credentials do not change
 offline results. Retain outputs through version control or returned artifacts;
 environment preparation is not evidence that every later task has the same files.
+If an output download mount is unavailable, return a sanitized artifact's complete
+contents and SHA-256 so a reviewer can save and verify it. The observed task used
+this path successfully; it did not establish a fixed saved-state retention period.
 
 ## Current versus legacy products
 

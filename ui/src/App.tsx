@@ -1,3 +1,5 @@
+// Render the scripted research snapshot with linked findings, work, sources, and diagnostics.
+// Request receipts and annotations here are local previews; no research host is connected.
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { ResearchSnapshot } from './generated/contracts';

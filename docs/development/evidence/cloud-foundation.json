@@ -1,0 +1,119 @@
+{
+  "task": "fresh_published_cloud_stage1_offline_foundation",
+  "time": {
+    "observed_start_utc": "2026-10-08T15:55:31+00:00",
+    "observed_end_utc": "2026-10-08T16:00:25+00:00",
+    "observed_elapsed_seconds": 294,
+    "documented_retention_limit": null,
+    "retention_note": "Repository cloud guidance says current tasks retain their own working state; no duration was verified. This elapsed time is this task only."
+  },
+  "checkout": {
+    "initial_branch": "work",
+    "initial_commit": "eb6a519d793683312dd163dc57d1d97c606984e1",
+    "initial_clean": true,
+    "fetch": "git fetch --no-tags origin 2d376257737238b1f028b8e2192922723c28a19f",
+    "verified_commit": "2d376257737238b1f028b8e2192922723c28a19f",
+    "checkout": "detached isolated worktree",
+    "verified_clean": true,
+    "original_branch_unchanged": true
+  },
+  "skill": {
+    "name": "os-check-foundation",
+    "version": "0.1.0",
+    "sha256": "40a27f745810e2f70e95071914c4a637fb1afcd240848bf18e0e50815fb44f9f",
+    "session_catalog_entry": false,
+    "discovery": "AGENTS.md documents .agents/skills; located and loaded .agents/skills/os-check-foundation/SKILL.md",
+    "command": ".venv/bin/python .agents/skills/os-check-foundation/scripts/check.py --mode full",
+    "receipt": ".local/checks/20261008T155756766172Z-receipt.json",
+    "receipt_sha256": "a42220fc21d7121e5010cc848398b3139e0ca60b31778bc9ca48a53ecb006fce",
+    "passed": true
+  },
+  "setup": {
+    "commands": [
+      "scripts/dev bootstrap",
+      "scripts/dev setup",
+      "scripts/dev doctor"
+    ],
+    "toolchain": {
+      "python": "3.12.12",
+      "uv": "0.9.21",
+      "node": "24.21.0",
+      "npm": "11.19.0"
+    },
+    "platform": "Linux x86_64",
+    "lock_hashes_sha256": {
+      "uv.lock": "712593a07392e0093e9fb4a9d0fc04364596e0920622f7912d1b5f4fb5dc4e14",
+      "package-lock.json": "8c7308c09c743b9c2d3a878dbad718566dfdf72f740f5c30beb5d0553877fc92",
+      "desktop/src-tauri/Cargo.lock": "e6ab9334ebcd3eb1d4da0ccf76140d9278475ca87dca7e2fadd00366d678c1de"
+    },
+    "locks_unchanged": true
+  },
+  "checks": {
+    "command": "scripts/dev check (via full skill helper)",
+    "subcommands": [
+      "ora.cli contracts --check",
+      "ora.cli benchmarks",
+      "ora.cli skills",
+      "ruff check src tests scripts",
+      "pytest -q",
+      "npm run contracts:check",
+      "npm test",
+      "npm run build"
+    ],
+    "passed_subcommands": 8,
+    "results": {
+      "canonical_contracts": "pass",
+      "benchmark_scenarios": 3,
+      "benchmark_profiles": 5,
+      "benchmark_conditions": 2,
+      "runtime_roles": 9,
+      "runtime_skills": 2,
+      "ruff": "pass",
+      "python_tests_passed": 86,
+      "js_contract_cases_passed": 20,
+      "react_tests_passed": 7,
+      "production_frontend_build": "pass"
+    }
+  },
+  "failure_probes": {
+    "uncached_offline_install": {
+      "command": "UV_CACHE_DIR=<empty isolated temp cache> UV_OFFLINE=1 uv pip install --python <temp venv> --offline pydantic==2.13.5",
+      "exit_code": 1,
+      "observed": "pydantic not found in cache; packages unavailable because network disabled",
+      "recovery": "existing project .venv imports pydantic 2.13.5; working dependencies unchanged"
+    },
+    "restricted_network": {
+      "request": "curl https://example.com via configured proxy",
+      "curl_exit_code": 56,
+      "proxy_connect_status": 403,
+      "policy_file": "restricted; example.com absent",
+      "runtime_policy_state": "unknown",
+      "bypass_attempted": false
+    },
+    "artifact_unavailable": {
+      "subject": "disposable copy of this task helper receipt",
+      "missing_read_observed": true,
+      "restored": true,
+      "sha256_before_after": "a42220fc21d7121e5010cc848398b3139e0ca60b31778bc9ca48a53ecb006fce",
+      "hash_matches": true
+    }
+  },
+  "credentials": {
+    "cloud_configured_secret_bindings": 0,
+    "checked_provider_env_names": [
+      "OPENAI_API_KEY",
+      "ANTHROPIC_API_KEY",
+      "GOOGLE_API_KEY",
+      "GEMINI_API_KEY",
+      "E2B_API_KEY"
+    ],
+    "checked_provider_env_present": false,
+    "provider_calls": 0,
+    "env_file_read": false
+  },
+  "limits": [
+    "Linux Python and React proof; native Mac not exercised",
+    "No live model fit, provider, E2B, production host, or endurance proof",
+    "Observed task lifetime does not establish artifact retention duration"
+  ]
+}
