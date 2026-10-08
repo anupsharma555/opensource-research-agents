@@ -30,6 +30,8 @@ class SetupError(Exception):
 def environment():
     value = os.environ.copy()
     value["UV_CACHE_DIR"] = str(ROOT / ".local/cache/uv")
+    value["UV_PYTHON_INSTALL_DIR"] = str(ROOT / ".local/toolchains/python")
+    value["PIP_CACHE_DIR"] = str(ROOT / ".local/cache/pip")
     value["npm_config_cache"] = str(ROOT / ".local/cache/npm")
     value["PYTHONDONTWRITEBYTECODE"] = "1"
     return value

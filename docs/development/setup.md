@@ -28,6 +28,11 @@ or call a research provider. Child processes inherit the caller's environment an
 package-manager configuration; this is not a secret-isolation sandbox. Do not put
 research-provider credentials into CI or the offline cloud environment.
 
+The shared wrapper also keeps uv-managed Python installations and pip caches under
+`.local/`. This was added after an actual Codex Cloud setup found that its default
+home-directory Python installation path was read-only. Local and cloud setup now
+use the same repair automatically; no competing cloud dependency list is needed.
+
 `check` uses the installed environment and runs canonical contract generation
 checks, benchmark and skill references, Python lint/tests, shared JavaScript
 contract fixtures, React component tests and a production frontend build. It uses
