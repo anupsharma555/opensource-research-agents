@@ -12,6 +12,7 @@ tracker; tracked examples and receipts use synthetic research material.
 | Contracts | Repeated/stale/malformed commands, peer answer semantics, per-mission replay, deferred/uncertain results, saved model settings and attempt-private resources | Trusted fixture actors; production transport authentication and file store remain later work |
 | Cross-language boundary | Twenty shared accepted/rejected fixtures validated in Python and JavaScript; generated client types checked | Wire shape and selected invariants do not certify scientific support |
 | Runtime skills | Two versioned packages, nine role definitions, reference/provenance checks, serial and parallel attempt isolation | Actual selected-model comparison is separately recorded in the model-fit report |
+| Selected-model skill experiment | Nine Groq GPT-OSS responses on one synthetic scenario; matched instruction variants, two prompt revisions and two peer-feedback revisions; independent agent review | Partial corrections only; no accepted final scientific answers, broader role qualification or production tool loop |
 | React Mac prototype | Seven component tests, production frontend build and standalone unsigned Mac launch with native source/diagnostic/follow-up review | Synthetic records only; no research host or provider connected |
 | Repository setup | Pinned Python 3.12.12 / Node 24.21.0 / npm 11.19.0 / uv 0.9.21; fresh-clone and private Linux CI checks passed with 86 Python tests, 20 JS cases and seven React tests | Native Mac and cloud tasks retain separate receipts |
 | Portable Codex skill | Local, private CI and a fresh published cloud task loaded and invoked the committed skill; the cloud artifact was retrieved and hash-matched | Repository discovery worked through AGENTS.md; the cloud session catalog did not list the skill |
@@ -102,7 +103,7 @@ The earlier clean cloud v0.1.0 result remains a historical receipt, not automati
 qualification of a later helper version.
 
 
-The final local integration check passed 88 Python tests, 20 shared JavaScript
+The earlier published integration check passed 88 Python tests, 20 shared JavaScript
 cases, seven React tests, lint and the frontend build. Its v0.1.1 receipt correctly
 identifies working-tree evidence because the reviewed changes had not yet been
 committed. A source-header audit covered all 53 handwritten code files (40 Python, including
@@ -111,3 +112,36 @@ clarified descriptions in 20 files, leaving generated output and hash-pinned com
 unchanged. Python syntax and AST comparison confirmed documentation-only changes
 apart from the separately reviewed compatibility regression; JavaScript syntax
 checks also passed. Native builds were not repeated solely for comments.
+
+## Final skill and source-description review
+
+The [selected-model report](model-fit.md) and its [sanitized receipt](evidence/skill-fit-summary.json)
+complete the small instruction-fit comparison. It recorded one truncated pilot,
+four matched v1.0.0 answers, two v1.0.1 instruction follow-ups and two same-model
+peer revisions. All returned model IDs matched the requested GPT-OSS model, and
+all request hashes were reconstructed. Independent review found useful partial
+facts but unresolved attribution, interpretation and identifier errors. The
+comparison is complete; general scientific competence is not established.
+
+Concise v1.0.1 is the provisional development default, loaded for the active skill.
+Peer revision retains source context and the prior answer, with its critique
+recorded separately. The helper keeps raw evidence outside tracked source, checks
+the prior case/model/request, and records receipt consistency without pretending
+to authenticate arbitrary edited files. It is an experiment helper, not the
+later persistent agent loop.
+
+The expanded description pass covers all 53 handwritten code files: 40 Python
+files including the extensionless wrapper, four JavaScript, five TypeScript,
+two Rust, one CSS and one HTML. Comparison with the previous published source
+confirmed unchanged executable bodies in 50. The remaining three are the
+deliberately changed experiment helper, its regression tests and the skill-version
+expectation test. Both skill-helper hashes were updated for comment-only byte
+changes; their executable versions remain 1.0.0. Historical benchmark/framework
+receipts retain their original hashes and are not represented as new measurements.
+
+The final shared local check passed **90 Python tests, 20 shared JavaScript cases,
+seven React tests, lint, schema/type drift checks and the frontend build**. The
+experiment helper also passed its separate Ruff check. Native packaging and the
+cloud environment were not rerun for description-only changes; their earlier
+receipts remain valid for the stated builds. No live retrieval, E2B execution,
+complete research host or hours-long mission was tested.

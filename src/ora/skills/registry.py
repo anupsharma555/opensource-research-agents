@@ -1,4 +1,9 @@
-"""Validate runtime skill packages without duplicating canonical wire contracts."""
+"""Find which saved skill packages each research-agent role can use.
+
+This loader reads role and skill manifests, checks referenced files and exact
+versions, and reports when a required tool capability is unavailable. It creates
+separate attempt state for callers but does not start model work.
+"""
 
 from __future__ import annotations
 

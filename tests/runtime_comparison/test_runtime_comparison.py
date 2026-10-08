@@ -1,6 +1,8 @@
-"""Offline behavior tests for the runtime candidates.
+"""Check whether the runtime candidates complete the same scripted peer work.
 
-Set ORA_LANGGRAPH_PYTHON and ORA_MAF_PYTHON to include the installed frameworks.
+The tests compare accepted artifacts, direct requests, parallel progress, and
+recovery after interruptions; optional frameworks run through separate Python
+interpreters. No model call or live research result is measured here.
 """
 
 from __future__ import annotations

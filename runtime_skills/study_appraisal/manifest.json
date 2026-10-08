@@ -16,7 +16,7 @@
     "module": "ora.skills.appraisal",
     "origin_type": "project_owned",
     "path": "src/ora/skills/appraisal.py",
-    "sha256": "36b4fb73d95598f6262d081545ab80599d0951738ffbbb00c4dc4bc717ec4d6a",
+    "sha256": "2eef674a1de277a5790dad682ac3955867d0198f547fb90055c8d0df6c55b954",
     "side_effects": "none",
     "upstream_commit": null,
     "upstream_url": null
@@ -25,7 +25,7 @@
   "instruction_variants": {
     "concise": {
       "path": "runtime_skills/study_appraisal/CONCISE.md",
-      "sha256": "552372684e1bf74632be56ff0ec0865cfd09615bb42f1f0d76343d8ec0761b15"
+      "sha256": "c6141b53dc7b0626f722b32e778e4e76340ae3b382ffd08b4a6566a7b576e821"
     },
     "rich": {
       "path": "runtime_skills/study_appraisal/RICH.md",
@@ -41,5 +41,5 @@
   "schema": "ora.runtime_skill.v1",
   "skill_id": "study-appraisal",
   "trigger": "Use for first-pass methods review or a result-specific reappraisal.",
-  "version": "1.0.0"
+  "version": "1.0.1"
 }

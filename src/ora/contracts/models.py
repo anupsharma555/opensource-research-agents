@@ -1,7 +1,8 @@
-"""One source for Python validation, JSON Schema and generated TypeScript.
+"""Define the fields and allowed values for research records shared across components.
 
-These are unreleased v1 contracts. Transport authentication and production durable
-execution are separate concerns; an actor ID in JSON is not authentication.
+Python validates these records, and generators turn the definitions into JSON rules
+and desktop TypeScript types. The definitions describe an unreleased interface;
+an actor ID inside a record does not authenticate its sender.
 """
 
 import hashlib

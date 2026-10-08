@@ -1,30 +1,157 @@
-# Selected-model fit check for two runtime skills
+# Selected-model fit of two runtime skills
 
-This is a small, controlled comparison of the concise and richer instructions for `evidence-linking` and `study-appraisal`. It uses one wholly synthetic benchmark scenario and the same user input within each skill pair. The reference judgments remain outside model-visible prompts. The model run has **not yet occurred**; no model-quality or variant-selection result is claimed.
+**The bounded comparison is complete; the answers are not scientifically
+qualified.** Concise instructions are the provisional development default, with
+versioned source packets and targeted peer feedback. The test supports a usable
+skill-loading and review scaffold, while showing why neither longer instructions,
+valid citations nor one correction turn can establish a trustworthy final answer.
 
-The selected endpoint is Groq `openai/gpt-oss-120b`, consistent with the current project plan. [Groq's model page](https://console.groq.com/docs/model/openai/gpt-oss-120b) lists $0.15 per million input tokens and $0.60 per million output tokens. Its [API reference](https://console.groq.com/docs/api-reference) lists the chat-completions URL, `max_completion_tokens`, and `reasoning_effort=high` for this model; [reasoning guidance](https://console.groq.com/docs/reasoning) documents `include_reasoning=false`. The harness sets high reasoning, asks for no returned reasoning text, uses no tools or retrieval, and caps each completion at 4,096 tokens. Pricing and API support were checked on 2026-10-08 and must be rechecked before a later run if they change.
+On 2026-10-08, Groq `openai/gpt-oss-120b` produced nine model responses: one empty,
+truncated pilot and eight completed answers. All requested and returned model IDs
+matched. The [sanitized receipt](evidence/skill-fit-summary.json) records versions,
+request hashes, usage, timings and review hashes. Raw answers and detailed reviews
+remain in ignored local evidence, separate from the findings in this report.
 
-## Fixed input and preflight
+## Design and source identity
 
-`experiments/skill_fit/run.py` uses the public, synthetic `syn-abstract-disagreement` worker packet. Evidence-linking cases see the same A1–A4 source copies. Appraisal cases see the same A1 abstract subset so independent review cannot borrow another study. Only the instruction variant differs within a pair. The script loads and hash-verifies skill manifests through `ora.skills.load_registry`, fixes the exact model and endpoint, and outputs four opaque case IDs with prompt and request SHA-256 hashes in `experiments/skill_fit/plan.json`. Its input upper-bound estimate counts UTF-8 prompt bytes plus 1,024 wrapper tokens per call; all four full 4,096-token completions produce a documented-rate bound below $1. This is deliberately conservative for a short text-only prompt, but it is a pricing estimate, not a billing receipt.
+The initial comparison used skill v1.0.0: concise versus richer instructions for
+`evidence-linking`, then the same comparison for `study-appraisal`. Each pair saw
+identical task text and sources from `syn-abstract-disagreement`, scenario v1.0.1
+in benchmark bundle v1.0.4. Evidence linking saw A1–A4; appraisal saw only A1 so it
+could not borrow another study's findings. Evaluator-only references were excluded
+from every request. A separate GPT-6 Sol reviewer, at extra-high reasoning,
+received opaque answer IDs and source packets without the model, variant mapping
+or usage data. The coordinating reviewer checked the findings against the sources.
+This was agent review, not a human panel or blinded clinical validation.
 
-The runner defaults to offline plan output. One explicit `--live --case Xn` invocation would reserve that case before a single HTTPS request and refuse an automatic repeat, including after a transport or HTTP failure. It reads `GROQ_API_KEY` from process environment or the existing local `.env` without displaying it. Only final answer text, model/usage/finish status, elapsed time, hashes and an approximate documented-rate charge would be saved. Returned reasoning content is discarded. A transport, authorization, model, or parameter error stops that case; the script has no alternate model, account, endpoint, retry, live search, or escalation path. **Live calls are pending the authorized credential decision. Zero calls have occurred.**
+Requests used high reasoning, `include_reasoning=false`, no tools and no streaming.
+The 4,096-token pilot returned `finish_reason=length` and an empty final answer.
+The matched comparison therefore used 8,192 completion tokens for each case.
+That is this experiment's allowance, not a fixed research-task limit. It includes
+capacity consumed before final text is produced; a high-effort request alone does
+not guarantee enough room for an answer. No private reasoning text was retained.
 
-## Blinded content rubric
+The original comparison used base commit `2fc86246fde795d5f1048b285c17ed24c2b2192c`
+with an explicit application User-Agent and the revised output allowance. It is
+not an exact clean-commit run. Revised concise instructions v1.0.1 used frozen
+working-source snapshot
+`819a0ae1c8a4d9b0093eeddac638935f44f1ceafbb316630eee538531e14f24e`.
+Two subsequent peer revisions have exact request, prior-result and feedback
+hashes; they used the working-tree helper rather than an isolated committed build.
+All nine request hashes were reconstructed successfully from their saved inputs.
+Later receipt and output-path checks were tested offline, without more API calls.
 
-The case-to-skill mapping is in the runner for reproducibility; a reviewer can score the final text under opaque IDs before inspecting that mapping. Score each dimension separately, using the withheld synthetic reference only on the evaluator side:
+## Observations
 
-| Dimension | What to inspect in the final answer |
-| --- | --- |
-| Source and claim support | Exact A1/A2 counts, six-week timing, A1 interval, and source/span identifiers support what the answer says. Locator presence alone does not prove entailment. |
-| Contrary evidence and uncertainty | A2's 20/50 versus 21/50 and reported lack of clear difference temper a strong benefit reading; A1's interval crosses no difference. Do not call A1's reported counts false. |
-| False blocks and useful coverage | The answer should use explicitly reported abstract facts, even without full text, while keeping methods, adverse events and subgroups unknown. A refusal to use A1's supported counts is a false block. |
-| Appraisal judgment | For A1, distinguish reporting completeness, risk of bias, applicability and precision for the exact result. An abstract-only randomization statement does not establish allocation concealment or full trial validity. A method/version claim must be checked rather than credited for fluency. |
-| Severe error | Fabricated full-text methods, adverse-event rates, pooled estimates, cross-study attribution, wrong denominator/time point, or treating missing information as a null result. |
-| Format and resource | Readability, targeted next information need, completion/truncation status, actual prompt/completion tokens, approximate cost and elapsed time. These do not substitute for scientific support. |
+| Phase | Evidence-linking result | Appraisal result |
+| --- | --- | --- |
+| v1.0.0 matched concise/rich comparison | Both preserved the two studies' counts. Concise added an unsupported magnitude label; rich falsely treated missing reported variance as making pooling impossible. Both overextended one source's reporting gaps. | Both proposed unsupported method versions. Rich also treated missing study details as reported and made an unsupported certainty downgrade. |
+| v1.0.1 concise instructions | Exact citation IDs improved, but a false quantitative-synthesis restriction and cross-study absence claims remained. | Exact IDs and separation of appraisal dimensions improved; an unsupported method version and causal wording remained. |
+| Same-model revision after source-specific peer feedback | Corrected A2's derived difference and narrowed A1's access notice. It still attached an A2 absence claim to A1's passage and overstated the restriction on synthesis. | Used the supplied official method date and formal categories, and improved applicability. It reverted to non-ASCII citation IDs, omitted source versions and retained an unsupported magnitude label. |
 
-For each case, record specific supported and unsupported sentences, span IDs, unknowns preserved, severe errors, false blocks and a provisional usefulness judgment. Compare the two variants within each skill, not across different tasks. Four responses from one fictional packet cannot establish general scientific reliability, latency distribution, or production readiness; a future larger held-out packet and independent review are separate proof.
+All four initial answers and all four follow-ups contained usable preliminary
+facts, but none was accepted as a final answer by the independent review. The
+concise initial variants avoided some errors introduced by the richer variants
+on this packet; that is a sample-specific observation, not a general winner.
+Updated instructions and peer feedback each corrected some errors while leaving
+others. These follow-ups changed instructions or supplied critique, so they are
+not additional replicates of the initial matched comparison.
 
-## Offline verification
+A concrete example explains the distinction between useful data and an unjustified
+block. A2 reports 20/50 versus 21/50 responses. Their difference is calculable as
+minus two percentage points, even though A2 reports no interval. Pooling these
+studies would require explicit scientific assumptions; missing a reported variance
+alone does not make arithmetic impossible. Similarly, an omission in A1's abstract
+does not establish that A2 omitted the same information. Exact passage identity
+and the meaning of the claim must be checked together.
 
-`PYTHONDONTWRITEBYTECODE=1 .venv/bin/pytest -q tests/skill_fit` passed five focused preflight tests. They check fixed model/settings/tool absence, matched input within each pair, absence of withheld reference markers, A1-only appraisal input, four distinct request hashes and the under-$1 ceiling. A stubbed transport test confirms the exact endpoint, no saved reasoning or key, one saved final answer and no repeated case. The code lint check passed. No provider or model request is part of these tests.
+The appraisal feedback supplied authoritative method guidance: the official RoB 2
+site dates the individually randomized parallel-group version to 22 August 2019,
+and Cochrane gives the formal judgment categories. A1 does not establish its unit
+of randomization, so selecting that particular variant remains conditional. No
+formal rating was justified from this abstract. The corrected method date shows
+use of supplied guidance, not unaided recall. Sources: [RoB 2 tool](https://www.riskofbias.info/welcome/rob-2-0-tool)
+and [Cochrane description](https://methods.cochrane.org/bias/resources/rob-2-revised-cochrane-risk-bias-tool-randomized-trials).
+
+## Loading and implementation decision
+
+Load the active skill's concise v1.0.1 instructions, then relevant source records
+and task-specific guidance. Do not preload all nine roles or the entire skill
+catalog. Both packages retain richer variants for later controlled comparison;
+helpers remain version 1.0.0 because their executable behavior did not change.
+Their source hashes were updated for the separate module-description edits.
+
+Keep supported partial findings available to collaborating peers. Record which
+claim needs correction, its exact source copy and the critique that prompted a
+new attempt. Revisions preserve the selected model and source context. Mechanical
+checks can detect invalid IDs or missing fields, but scientific peers decide how
+to interpret evidence and what to investigate next. Neither a validator nor this
+experiment's one-attempt-per-case protection is a global workflow gate.
+
+The next qualification should test held-out designs and repeated cases, jointly
+checking passage support, exact IDs, reported versus derived quantities, method
+selection, cross-study attribution and reader clarity. Include a case where added
+feedback fixes one defect but introduces another. Broader model/tool loops, live
+retrieval, all nine roles and long-running missions remain separate implementation
+and testing work. No claim of superiority to another system follows from this test.
+
+## Usage, latency and cost
+
+| Response | Input / completion tokens | Seconds | Finish |
+| --- | ---: | ---: | --- |
+| 4,096-token evidence pilot | 1,556 / 4,096 | 9.244 | Length; empty final |
+| v1.0.0 evidence concise | 1,556 / 5,562 | 12.266 | Complete |
+| v1.0.0 evidence rich | 1,689 / 2,784 | 7.719 | Complete |
+| v1.0.0 appraisal concise | 797 / 4,078 | 8.887 | Complete |
+| v1.0.0 appraisal rich | 1,002 / 4,356 | 10.624 | Complete |
+| v1.0.1 evidence concise | 1,658 / 4,818 | 10.645 | Complete |
+| v1.0.1 appraisal concise | 943 / 4,625 | 10.288 | Complete |
+| Evidence peer revision | 3,040 / 4,010 | 8.901 | Complete |
+| Appraisal peer revision | 2,691 / 2,989 | 6.891 | Complete |
+
+These are single-call elapsed observations, not latency distributions or a speed
+claim. One earlier POST was rejected at the edge before a model response. Two
+unauthenticated diagnostic requests isolated the default-client rejection; an
+honest application User-Agent then reached normal API authentication and allowed
+the authorized calls. No model, account or endpoint was substituted.
+
+At the [documented rates](https://console.groq.com/docs/model/openai/gpt-oss-120b)
+of $0.15 per million input tokens and $0.60 per million output tokens, the nine
+responses equal **$0.02463060**. This is an undiscounted paid-rate estimate, not an
+account invoice. Groq offers Free and paid Developer plans; an open-source project
+or open-weight model does not itself make hosted inference free. Actual billing
+was not inspected. The observed request/token limits were consistent with the
+published Free profile, but headers do not establish billing status. Sources:
+[Groq billing](https://console.groq.com/docs/billing-faqs) and
+[rate limits](https://console.groq.com/docs/rate-limits).
+
+## Reproduce the mechanics
+
+Run the offline preflight without credentials:
+
+```sh
+.venv/bin/python experiments/skill_fit/run.py
+.venv/bin/python -m pytest -q tests/skill_fit
+```
+
+The current `experiments/skill_fit/plan.json` is generated from v1.0.1 instructions;
+it is not the original v1.0.0 comparison ledger. The receipt preserves historical
+hashes and versions. An explicitly authorized `--live --case X1` call saves below
+ignored `.local/skill-fit`. `--prior-result` plus `--feedback-file` prepares a
+revision; without `--live`, it prints only a request hash and cost estimate.
+Use a separate ignored output folder for each experiment phase. The two committed
+feedback files contain synthetic source corrections and public method links.
+
+The helper checks case, requested/returned model, original request hash and a
+completed nonempty prior answer. New receipts include a content hash; historical
+receipts lacking it remain labeled as such. These hashes detect inconsistencies,
+not malicious rewriting of an entire receipt. Raw output destinations inside the
+repository must be below `.local`; explicit external paths are also allowed.
+Neither tests nor the offline plan reads a credential or calls a provider.
+
+Seven focused tests cover paired inputs, withheld-reference exclusion, A1-only
+appraisal, preserved settings/context, changed parent records, one-attempt
+behavior and rejection of an unsafe output destination before credential access.
+Stubbed transport verifies that keys and returned private reasoning are not saved.
+These checks establish experiment mechanics, separately from the negative and
+partial scientific results above.

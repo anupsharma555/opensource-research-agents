@@ -1,4 +1,9 @@
-"""Exercise the offline command service's state, replay, and recovery boundaries."""
+"""Check how the local research board handles commands and interrupted work.
+
+The tests submit repeated, stale, malformed, and delayed actions, then inspect
+saved receipts, peer requests, and event replay. Fixture actors are trusted here;
+these cases do not prove a live service can authenticate callers.
+"""
 
 import copy
 

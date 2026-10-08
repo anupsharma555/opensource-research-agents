@@ -4,6 +4,11 @@
 
 The comparison ran on 2026-10-08 with Python 3.12.12 on macOS arm64. This folder was not a Git checkout during the run, so there is no tested commit. [`observations-2026-10-08.json`](../../experiments/runtime_comparison/observations-2026-10-08.json) records SHA-256 hashes of the tested Python files, all five raw observations per candidate, and the conditions. [`failure-observations-2026-10-08.json`](../../experiments/runtime_comparison/failure-observations-2026-10-08.json) records each interruption and subsequent process restart.
 
+The recorded timings and file hashes describe the original experiment. Later
+module-description edits changed source bytes without changing executable bodies;
+the historical receipts were preserved. Current offline regression checks do not
+constitute a new framework timing or recovery measurement.
+
 ## What was compared
 
 All three candidates received the same saved model/settings record and deterministic specialist responses. Two independent collectors start together; one simulated step takes 0.20 seconds and the other 0.02 seconds. The quick collector chooses a directed request to a critic and creates that work. The critic first selects an invalid tool, sees the recorded rejection on its next attempt, repairs its action, and proposes synthesis. Synthesis waits for the relevant versioned artifacts. The board admits up to two active tasks. It schedules and validates actions but never chooses the specialist's source, tool, request, or scientific follow-up. This mapping is a **test script**, not a production scientific router.

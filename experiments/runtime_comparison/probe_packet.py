@@ -1,7 +1,8 @@
-"""Pass one public benchmark worker packet and one event at a time through an adapter.
+"""Check that each runtime carries an exact test question and later events intact.
 
-This checks transport/provenance only. It does not ask an agent to make a
-scientific decision and never opens evaluator-only reference files.
+It sends a public synthetic worker packet through one adapter, then delivers its
+scheduled events one at a time and compares their IDs on return. The probe never
+opens evaluator answers or asks a model to interpret the sources.
 """
 
 from __future__ import annotations

@@ -1,4 +1,7 @@
-// Validate shared wire fixtures against the generated JSON Schemas in JavaScript.
+/* Check that JavaScript accepts and rejects the same sample records as Python.
+   The script reads shared examples and generated JSON rules describing allowed
+   fields and values, then reports any mismatch. It checks record shape offline,
+   not whether research claims are true. */
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import Ajv2020 from 'ajv/dist/2020.js';

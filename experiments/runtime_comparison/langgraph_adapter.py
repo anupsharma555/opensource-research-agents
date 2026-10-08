@@ -1,4 +1,9 @@
-"""Actual LangGraph StateGraph with a disk-backed SQLite checkpoint saver."""
+"""Run one scripted peer task through a small LangGraph workflow.
+
+Its two steps prepare the task and return the peer's proposed action, with SQLite
+checkpoints saved for each attempt. The shared research board still decides
+whether that proposal becomes an accepted artifact or message.
+"""
 
 from __future__ import annotations
 

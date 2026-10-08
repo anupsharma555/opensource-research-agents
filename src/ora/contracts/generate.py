@@ -1,4 +1,9 @@
-"""Generate client-consumable schemas; --check never changes tracked output."""
+"""Create files describing the allowed fields and values in research records.
+
+These JSON Schemas and test examples come from the Python definitions in
+``models.py`` so other languages can check the same shapes. With ``--check``, this
+file reports outdated generated files without changing them.
+"""
 
 import argparse
 import difflib

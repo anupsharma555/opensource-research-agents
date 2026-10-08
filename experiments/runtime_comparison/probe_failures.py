@@ -1,4 +1,9 @@
-"""Record separate-process interruption and replay observations for each adapter."""
+"""Check what survives when each scripted runtime stops and starts again.
+
+The script interrupts work at three chosen points, resumes it in a new process,
+and records whether artifacts or peer messages were lost or duplicated. It does
+not simulate power loss or an uncertain live provider effect.
+"""
 
 from __future__ import annotations
 

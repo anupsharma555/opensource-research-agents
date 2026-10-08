@@ -1,0 +1,468 @@
+{
+  "schema": "ora.skill_fit.summary.v1",
+  "date": "2026-10-08",
+  "proof_type": "live_model_synthetic_packet_with_independent_agent_review",
+  "synthetic": true,
+  "model": "openai/gpt-oss-120b",
+  "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+  "settings": {
+    "reasoning_effort": "high",
+    "include_reasoning": false,
+    "tools": false,
+    "stream": false
+  },
+  "response_count": 9,
+  "nonempty_completed_answers": 8,
+  "edge_rejected_posts": 1,
+  "unauthenticated_diagnostic_gets": 2,
+  "paid_rate_equivalent_usd": 0.0246306,
+  "account_billing_charge": "unverified",
+  "rate_limit_observation": {
+    "request_limit": "1000",
+    "token_limit": "8000",
+    "billing_tier": "not established by headers"
+  },
+  "all_request_hashes_reconstructed": true,
+  "source_identity": {
+    "original_base_commit": "2fc86246fde795d5f1048b285c17ed24c2b2192c",
+    "original_overrides": [
+      "honest application User-Agent",
+      "completion allowance 8192 after retained 4096 pilot"
+    ],
+    "updated_frozen_snapshot_sha256": "819a0ae1c8a4d9b0093eeddac638935f44f1ceafbb316630eee538531e14f24e",
+    "peer_revision": "Working-tree helper; exact source packets, prompt/request hashes, prior-result and feedback hashes retained. No clean-commit claim. Later envelope/output-path checks were offline only."
+  },
+  "skill_manifests": {
+    "original": {
+      "evidence_linking": {
+        "example": {
+          "path": "runtime_skills/evidence_linking/example.json",
+          "sha256": "3741dc0073b1f9d6e3470902dcae4426a690d6e8850bc6c771c8b573a0667349"
+        },
+        "failure_handling": "A missing source, locator or capability gives a scoped error. Preserve unrelated evidence and ask for a targeted repair.",
+        "helper": {
+          "dependencies": [
+            "pydantic==2.13.5"
+          ],
+          "durable_state_access": "none",
+          "function": "prepare_claim_link",
+          "helper_version": "1.0.0",
+          "license": "Project-owned; redistribution terms pending repository LICENSE",
+          "local_changes": "Initial project-owned implementation",
+          "module": "ora.skills.evidence_links",
+          "origin_type": "project_owned",
+          "path": "src/ora/skills/evidence_links.py",
+          "sha256": "7b5945eb75247d8c75ee8f5ed47270b23be91cd482207c737adf5a3f5aead14d",
+          "side_effects": "none",
+          "upstream_commit": null,
+          "upstream_url": null
+        },
+        "input_contract": "ora.contracts.models.EvidencePacket",
+        "instruction_variants": {
+          "concise": {
+            "path": "runtime_skills/evidence_linking/CONCISE.md",
+            "sha256": "81decb00d49d44423cdea515c1779606b813864f934ae3b90e1b46cfdfab230a"
+          },
+          "rich": {
+            "path": "runtime_skills/evidence_linking/RICH.md",
+            "sha256": "00e0e781d2f76ee82a1a974448a72027fae23361608b810419098739e3777806"
+          }
+        },
+        "output_contract": "project-owned internal candidate record; not a wire schema",
+        "purpose": "Link a narrow claim to a versioned, locatable source copy without treating citation presence as semantic proof.",
+        "required_capabilities": [
+          "source_read_by_id"
+        ],
+        "schema": "ora.runtime_skill.v1",
+        "skill_id": "evidence-linking",
+        "trigger": "Use when a synthesis or critique claim needs source support, challenge or context.",
+        "version": "1.0.0"
+      },
+      "study_appraisal": {
+        "example": {
+          "path": "runtime_skills/study_appraisal/example.json",
+          "sha256": "de78913a674e002e5fa3cf5dd3e8ff01a6800e0f15e471b4429d9e0ab2e5deb7"
+        },
+        "failure_handling": "A missing source, locator or capability gives a scoped error. Preserve unrelated evidence and ask for a targeted repair.",
+        "helper": {
+          "dependencies": [
+            "pydantic==2.13.5"
+          ],
+          "durable_state_access": "none",
+          "function": "prepare_result_appraisal",
+          "helper_version": "1.0.0",
+          "license": "Project-owned; redistribution terms pending repository LICENSE",
+          "local_changes": "Initial project-owned implementation",
+          "module": "ora.skills.appraisal",
+          "origin_type": "project_owned",
+          "path": "src/ora/skills/appraisal.py",
+          "sha256": "36b4fb73d95598f6262d081545ab80599d0951738ffbbb00c4dc4bc717ec4d6a",
+          "side_effects": "none",
+          "upstream_commit": null,
+          "upstream_url": null
+        },
+        "input_contract": "ora.contracts.models.EvidencePacket",
+        "instruction_variants": {
+          "concise": {
+            "path": "runtime_skills/study_appraisal/CONCISE.md",
+            "sha256": "552372684e1bf74632be56ff0ec0865cfd09615bb42f1f0d76343d8ec0761b15"
+          },
+          "rich": {
+            "path": "runtime_skills/study_appraisal/RICH.md",
+            "sha256": "ca3e67040de06c0353737a8f0a66e8c319d83220fa4ade333e707314a3a2a2d9"
+          }
+        },
+        "output_contract": "project-owned internal candidate record; not a wire schema",
+        "purpose": "Prepare independent, result-scoped design-aware appraisal judgments from preserved sources.",
+        "required_capabilities": [
+          "source_read_by_id",
+          "study_appraisal"
+        ],
+        "schema": "ora.runtime_skill.v1",
+        "skill_id": "study-appraisal",
+        "trigger": "Use for first-pass methods review or a result-specific reappraisal.",
+        "version": "1.0.0"
+      }
+    },
+    "updated": {
+      "evidence_linking": {
+        "example": {
+          "path": "runtime_skills/evidence_linking/example.json",
+          "sha256": "3741dc0073b1f9d6e3470902dcae4426a690d6e8850bc6c771c8b573a0667349"
+        },
+        "failure_handling": "A missing source, locator or capability gives a scoped error. Preserve unrelated evidence and ask for a targeted repair.",
+        "helper": {
+          "dependencies": [
+            "pydantic==2.13.5"
+          ],
+          "durable_state_access": "none",
+          "function": "prepare_claim_link",
+          "helper_version": "1.0.0",
+          "license": "Project-owned; redistribution terms pending repository LICENSE",
+          "local_changes": "Initial project-owned implementation",
+          "module": "ora.skills.evidence_links",
+          "origin_type": "project_owned",
+          "path": "src/ora/skills/evidence_links.py",
+          "sha256": "e0e9541f9691468dba0346a28a8aaef1bf965f73dcf894f679d26529949f4e27",
+          "side_effects": "none",
+          "upstream_commit": null,
+          "upstream_url": null
+        },
+        "input_contract": "ora.contracts.models.EvidencePacket",
+        "instruction_variants": {
+          "concise": {
+            "path": "runtime_skills/evidence_linking/CONCISE.md",
+            "sha256": "234eb40ecbf50b761e57608bdd322d34fa8377b3655fbd4e2f04e7d52de40b73"
+          },
+          "rich": {
+            "path": "runtime_skills/evidence_linking/RICH.md",
+            "sha256": "00e0e781d2f76ee82a1a974448a72027fae23361608b810419098739e3777806"
+          }
+        },
+        "output_contract": "project-owned internal candidate record; not a wire schema",
+        "purpose": "Link a narrow claim to a versioned, locatable source copy without treating citation presence as semantic proof.",
+        "required_capabilities": [
+          "source_read_by_id"
+        ],
+        "schema": "ora.runtime_skill.v1",
+        "skill_id": "evidence-linking",
+        "trigger": "Use when a synthesis or critique claim needs source support, challenge or context.",
+        "version": "1.0.1"
+      },
+      "study_appraisal": {
+        "example": {
+          "path": "runtime_skills/study_appraisal/example.json",
+          "sha256": "de78913a674e002e5fa3cf5dd3e8ff01a6800e0f15e471b4429d9e0ab2e5deb7"
+        },
+        "failure_handling": "A missing source, locator or capability gives a scoped error. Preserve unrelated evidence and ask for a targeted repair.",
+        "helper": {
+          "dependencies": [
+            "pydantic==2.13.5"
+          ],
+          "durable_state_access": "none",
+          "function": "prepare_result_appraisal",
+          "helper_version": "1.0.0",
+          "license": "Project-owned; redistribution terms pending repository LICENSE",
+          "local_changes": "Initial project-owned implementation",
+          "module": "ora.skills.appraisal",
+          "origin_type": "project_owned",
+          "path": "src/ora/skills/appraisal.py",
+          "sha256": "2eef674a1de277a5790dad682ac3955867d0198f547fb90055c8d0df6c55b954",
+          "side_effects": "none",
+          "upstream_commit": null,
+          "upstream_url": null
+        },
+        "input_contract": "ora.contracts.models.EvidencePacket",
+        "instruction_variants": {
+          "concise": {
+            "path": "runtime_skills/study_appraisal/CONCISE.md",
+            "sha256": "c6141b53dc7b0626f722b32e778e4e76340ae3b382ffd08b4a6566a7b576e821"
+          },
+          "rich": {
+            "path": "runtime_skills/study_appraisal/RICH.md",
+            "sha256": "ca3e67040de06c0353737a8f0a66e8c319d83220fa4ade333e707314a3a2a2d9"
+          }
+        },
+        "output_contract": "project-owned internal candidate record; not a wire schema",
+        "purpose": "Prepare independent, result-scoped design-aware appraisal judgments from preserved sources.",
+        "required_capabilities": [
+          "source_read_by_id",
+          "study_appraisal"
+        ],
+        "schema": "ora.runtime_skill.v1",
+        "skill_id": "study-appraisal",
+        "trigger": "Use for first-pass methods review or a result-specific reappraisal.",
+        "version": "1.0.1"
+      }
+    }
+  },
+  "reviews": {
+    "independent-review.md": "ffe869dabf53e324a3600dd48552ec91f8135155cc7b71dd7698e1df71755347",
+    "followup-review.md": "3b086e5af96de5070fdee60f4bfed82d60315e2ce2a512c127cc974769795931",
+    "peer-revision-review.md": "4633ee755d8bf98cf11fff65d114dae1461d7d1262c65803b729c3b08a0d823f"
+  },
+  "records": [
+    {
+      "blind_id": "X1",
+      "model_requested": "openai/gpt-oss-120b",
+      "model_returned": "openai/gpt-oss-120b",
+      "request_sha256": "660f5f765338580f590d979f3da87f31ef0e8d9c0db8285771f853f1f3d9db43",
+      "prompt_sha256": "a2cb11fccdb0ed9e21d57a42c0f52f6e0c4e13d1b6b28c28a434e64b6f3dc10a",
+      "plan_sha256": "4fc1f325b2043a0f2924d4c5f9e30d07269382b1010b6891f04e02c019ff7b12",
+      "elapsed_seconds": 9.244,
+      "finish_reason": "length",
+      "usage": {
+        "prompt_tokens": 1556,
+        "completion_tokens": 4096,
+        "total_tokens": 5652
+      },
+      "estimated_usd_at_documented_rates": 0.002691,
+      "reasoning_returned": false,
+      "phase": "pilot",
+      "skill_id": "evidence-linking",
+      "skill_version": "1.0.0",
+      "variant": "concise",
+      "completion_allowance": 4096,
+      "final_nonempty": false,
+      "private_result_file_sha256": "cae63d99e8ae0e400928b62ba1df001ec90f7411ea0f41a9d509e0e1cdb7f789",
+      "final_content_sha256": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+    },
+    {
+      "blind_id": "X1",
+      "model_requested": "openai/gpt-oss-120b",
+      "model_returned": "openai/gpt-oss-120b",
+      "request_sha256": "cb9bd2810fdddf842188c65ba311cda5c79aa759bc425ac37bcf4d1ca7b6d03d",
+      "prompt_sha256": "a2cb11fccdb0ed9e21d57a42c0f52f6e0c4e13d1b6b28c28a434e64b6f3dc10a",
+      "plan_sha256": "a9e1c494090ddde33fd626b9d7ae88406ad0b500086204cb6aac9ca3df6f593c",
+      "elapsed_seconds": 12.266,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 1556,
+        "completion_tokens": 5562,
+        "total_tokens": 7118
+      },
+      "estimated_usd_at_documented_rates": 0.0035706,
+      "reasoning_returned": false,
+      "phase": "matched_comparison",
+      "skill_id": "evidence-linking",
+      "skill_version": "1.0.0",
+      "variant": "concise",
+      "completion_allowance": 8192,
+      "final_nonempty": true,
+      "private_result_file_sha256": "bedbec7a4acfd7e558f302d25f8e4c4bd71c17b87ce30475cfa09e4e97a3df7c",
+      "final_content_sha256": "7295dc042ba112d85292d18f519487d316639eda6e0cfe9785aea3f89ffd90bc"
+    },
+    {
+      "blind_id": "X2",
+      "model_requested": "openai/gpt-oss-120b",
+      "model_returned": "openai/gpt-oss-120b",
+      "request_sha256": "9385127a11dfb1ad38f396cd04dff9478b51a718154852971586727ef855517a",
+      "prompt_sha256": "9e719ccf4c2408aa07e803da7fc4e8a713bf2c400e4cb9a65dc03d6f35ec1355",
+      "plan_sha256": "a9e1c494090ddde33fd626b9d7ae88406ad0b500086204cb6aac9ca3df6f593c",
+      "elapsed_seconds": 7.719,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 1689,
+        "completion_tokens": 2784,
+        "total_tokens": 4473
+      },
+      "estimated_usd_at_documented_rates": 0.00192375,
+      "reasoning_returned": false,
+      "phase": "matched_comparison",
+      "skill_id": "evidence-linking",
+      "skill_version": "1.0.0",
+      "variant": "rich",
+      "completion_allowance": 8192,
+      "final_nonempty": true,
+      "private_result_file_sha256": "8b8779969cf6c1f038c272069d69b55df0642293de08950b049f966785f0f550",
+      "final_content_sha256": "b3286bdabc5abc27202471e564314c4d365e367a5bcf08402dc6117e4495b805"
+    },
+    {
+      "blind_id": "X3",
+      "model_requested": "openai/gpt-oss-120b",
+      "model_returned": "openai/gpt-oss-120b",
+      "request_sha256": "d12d4cdb39419943878fb7b104c3831e55235a1f8877a510e6d9fb6823de178b",
+      "prompt_sha256": "b358b85d2bfdeb20e1f2478958a5be8939b88451e0a3bf4d713c34a6ec8b6ebf",
+      "plan_sha256": "a9e1c494090ddde33fd626b9d7ae88406ad0b500086204cb6aac9ca3df6f593c",
+      "elapsed_seconds": 8.887,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 797,
+        "completion_tokens": 4078,
+        "total_tokens": 4875
+      },
+      "estimated_usd_at_documented_rates": 0.00256635,
+      "reasoning_returned": false,
+      "phase": "matched_comparison",
+      "skill_id": "study-appraisal",
+      "skill_version": "1.0.0",
+      "variant": "concise",
+      "completion_allowance": 8192,
+      "final_nonempty": true,
+      "private_result_file_sha256": "2446167b415c5129a0fb99cf1eb10e2a261565db886597fcf6b6459d0f337902",
+      "final_content_sha256": "5d7bac5779a9f13239edcf24e797fb095831c47d87e31a48f4d74b9e2f736f4c"
+    },
+    {
+      "blind_id": "X4",
+      "model_requested": "openai/gpt-oss-120b",
+      "model_returned": "openai/gpt-oss-120b",
+      "request_sha256": "d082b32c539b6ecd0297a0ec8540043bc16c51d75e8a7a738ded4d181f24f713",
+      "prompt_sha256": "2a1c89517ccbbbaaf37f356454fe42dbfdc3f32c5ff941ec823a872d645c4cde",
+      "plan_sha256": "a9e1c494090ddde33fd626b9d7ae88406ad0b500086204cb6aac9ca3df6f593c",
+      "elapsed_seconds": 10.624,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 1002,
+        "completion_tokens": 4356,
+        "total_tokens": 5358
+      },
+      "estimated_usd_at_documented_rates": 0.0027639,
+      "reasoning_returned": false,
+      "phase": "matched_comparison",
+      "skill_id": "study-appraisal",
+      "skill_version": "1.0.0",
+      "variant": "rich",
+      "completion_allowance": 8192,
+      "final_nonempty": true,
+      "private_result_file_sha256": "14bc57f077d63f7ddfb2538bccadba24205d000588dbd207e359cd951ffb3647",
+      "final_content_sha256": "774d82fd2bf4a5d8d79c339e1b3367f7b2c65b914c6043456cc7905dfbf4061e"
+    },
+    {
+      "blind_id": "X1",
+      "model_requested": "openai/gpt-oss-120b",
+      "model_returned": "openai/gpt-oss-120b",
+      "request_sha256": "bde3ace78720825005e82f8051660d054e8db4a8ac42fdbc547213533d17f7f3",
+      "prompt_sha256": "55fddf73747ede90ee01b2daf47bb66f396ecfbafaec4ef775fadb62e5e7846b",
+      "plan_sha256": "ab74e3e6d8f703ed0ec459503fa9b6fbbf6b234c12e4b8910bbb5fc388a7651e",
+      "elapsed_seconds": 10.645,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 1658,
+        "completion_tokens": 4818,
+        "total_tokens": 6476
+      },
+      "estimated_usd_at_documented_rates": 0.0031395,
+      "reasoning_returned": false,
+      "phase": "revised_instructions",
+      "skill_id": "evidence-linking",
+      "skill_version": "1.0.1",
+      "variant": "concise",
+      "completion_allowance": 8192,
+      "final_nonempty": true,
+      "private_result_file_sha256": "9a119cd46584f56756dcb70bf534c17a503f346be709d73016e64f2c491dd296",
+      "final_content_sha256": "010495d204a1121374ff45c16851555d84a64c5347523a739d6443287564e73b"
+    },
+    {
+      "blind_id": "X3",
+      "model_requested": "openai/gpt-oss-120b",
+      "model_returned": "openai/gpt-oss-120b",
+      "request_sha256": "690cafb42afcf26d2efb265b50528290beff1509cecbbbac67fbbfe5741b6686",
+      "prompt_sha256": "4312d8797568e7f942758e042f8b4d2dbbf1d7724022eda4fb6d54550d31a6dc",
+      "plan_sha256": "ab74e3e6d8f703ed0ec459503fa9b6fbbf6b234c12e4b8910bbb5fc388a7651e",
+      "elapsed_seconds": 10.288,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 943,
+        "completion_tokens": 4625,
+        "total_tokens": 5568
+      },
+      "estimated_usd_at_documented_rates": 0.00291645,
+      "reasoning_returned": false,
+      "phase": "revised_instructions",
+      "skill_id": "study-appraisal",
+      "skill_version": "1.0.1",
+      "variant": "concise",
+      "completion_allowance": 8192,
+      "final_nonempty": true,
+      "private_result_file_sha256": "6529b2c724e1138a44946d89f409900edc65335815649c58b15ed59d62be9e8e",
+      "final_content_sha256": "29628609e27dc5af71d10b057da9ec1599477b5c1859451780c9347133fca184"
+    },
+    {
+      "blind_id": "X1",
+      "model_requested": "openai/gpt-oss-120b",
+      "model_returned": "openai/gpt-oss-120b",
+      "request_sha256": "f0402e7538964d0b3714cb96665ab4f8b98642ebd44d86b6ef002f2b26288653",
+      "prompt_sha256": "ab602e58b657b18807c95b666eea9c86b769024d6d93361d15b8f4116e77ea95",
+      "plan_sha256": "ab74e3e6d8f703ed0ec459503fa9b6fbbf6b234c12e4b8910bbb5fc388a7651e",
+      "elapsed_seconds": 8.901,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 3040,
+        "completion_tokens": 4010,
+        "total_tokens": 7050
+      },
+      "estimated_usd_at_documented_rates": 0.002862,
+      "reasoning_returned": false,
+      "phase": "peer_revision",
+      "skill_id": "evidence-linking",
+      "skill_version": "1.0.1",
+      "variant": "concise",
+      "completion_allowance": 8192,
+      "final_nonempty": true,
+      "private_result_file_sha256": "bef930dfe8a349e6fe86f060dd0010a47820eeb38da6d458c837db58095945e1",
+      "final_content_sha256": "4e84afeffc2ebd2d11ae7f2c1e21d313322c8015299f7dfa824d94282f1e18ca",
+      "parent_result_sha256": "e0b0146ef3a31b18985ffaefd2210590464595fb8ec6c6c255757bbf4edb8d3c",
+      "feedback_sha256": "eab2ade5e7946720f5aea08770f1a2df804ab58f232fac7f64ff7cc3f586e06d"
+    },
+    {
+      "blind_id": "X3",
+      "model_requested": "openai/gpt-oss-120b",
+      "model_returned": "openai/gpt-oss-120b",
+      "request_sha256": "e15fad335eab569cc6b75f5a2caff2a435cdf9b61d2243ea228c60697b23f549",
+      "prompt_sha256": "5c2e36348ba8c88055e5138943a3ae20167bf7b1a03aa6e63333e633508a4f13",
+      "plan_sha256": "ab74e3e6d8f703ed0ec459503fa9b6fbbf6b234c12e4b8910bbb5fc388a7651e",
+      "elapsed_seconds": 6.891,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 2691,
+        "completion_tokens": 2989,
+        "total_tokens": 5680
+      },
+      "estimated_usd_at_documented_rates": 0.00219705,
+      "reasoning_returned": false,
+      "phase": "peer_revision",
+      "skill_id": "study-appraisal",
+      "skill_version": "1.0.1",
+      "variant": "concise",
+      "completion_allowance": 8192,
+      "final_nonempty": true,
+      "private_result_file_sha256": "2567b3eee9d291b8dc0d9465e5329a3775291374b153b2a0891142cf97128fb8",
+      "final_content_sha256": "401ee1964dac3d8168f25ab60dd94f466fd0089d0dd5d0e0e3280cbe09f3eaaa",
+      "parent_result_sha256": "c924bec44f0c9f2f9a1483cc6ce301ab5dd7f7ef15a18977297bf3cab3b388ac",
+      "feedback_sha256": "a07d99bc3b1067455c48967912fecd94ad38d95052fd31e866a7685d7a7bb919"
+    }
+  ],
+  "decision": {
+    "development_default": "concise instructions v1.0.1, loaded for the active skill; versioned peer feedback remains available",
+    "scientific_final_answer_status": "not_qualified_by_this_packet",
+    "observation": "Partial corrections did not eliminate source-attribution, unsupported inference, exact-ID and readability defects. Negative and partial results are retained.",
+    "scope": "Two skills on one synthetic scenario; no automatic research host, live retrieval, tool loop, held-out role qualification or endurance claim."
+  },
+  "sources": [
+    "https://console.groq.com/docs/model/openai/gpt-oss-120b",
+    "https://console.groq.com/docs/billing-faqs",
+    "https://console.groq.com/docs/rate-limits",
+    "https://www.riskofbias.info/welcome/rob-2-0-tool",
+    "https://methods.cochrane.org/bias/resources/rob-2-revised-cochrane-risk-bias-tool-randomized-trials"
+  ]
+}

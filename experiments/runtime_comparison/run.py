@@ -1,6 +1,8 @@
-"""Run one offline comparison segment; invoke again with --resume after interruption.
+"""Run one segment of the fixed peer-collaboration test with a chosen runtime.
 
-Example: python run.py --adapter custom --workdir /tmp/ora-comparison-custom
+The script schedules eligible tasks and asks the adapter to return scripted peer
+actions; a shared SQLite board saves accepted results. It can stop at a selected
+point and resume unfinished work later, without calling a model or provider.
 """
 
 from __future__ import annotations

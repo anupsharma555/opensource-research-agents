@@ -1,4 +1,9 @@
-"""Publication must inspect staged bytes even when the working tree is clean-looking."""
+"""Check that staged private-looking material is flagged before publication.
+
+The tests stage synthetic credential-shaped text and forbidden paths in temporary
+repositories, then verify that a harmless working-copy edit cannot hide them.
+They do not read or print real credentials.
+"""
 
 import importlib.util
 import subprocess

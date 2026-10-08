@@ -1,4 +1,9 @@
-"""Run-record checks that do not mistake a citation for scientific support."""
+"""Check whether a saved benchmark run can be traced to its exact test inputs.
+
+The validator checks the question version, recorded source access, cited passage
+IDs, and separately measured resources; it also marks old passes as historical
+after relevant changes. A reviewer still decides whether a passage supports a claim.
+"""
 
 from __future__ import annotations
 

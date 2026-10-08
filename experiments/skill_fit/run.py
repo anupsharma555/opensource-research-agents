@@ -1,7 +1,9 @@
-"""Prepare synthetic skill-fit cases offline; make bounded model calls only with --live.
+"""Prepare four matched questions for comparing two agent-skill instruction styles.
 
-The runner compares two instruction variants per skill and keeps reference answers
-out of model-visible input. A completed request still needs independent scoring.
+The default run prints an offline plan with exact prompt hashes and a cost bound.
+An explicit ``--live --case`` invocation makes one selected-model request or a
+peer-feedback revision and saves private evidence. A separate reviewer judges
+source support and usefulness; this helper is not the production agent loop.
 """
 
 from __future__ import annotations
@@ -20,10 +22,11 @@ from ora.benchmarks import make_worker_packet
 from ora.skills import load_registry
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / "experiments" / "skill_fit"
+OUT = ROOT / ".local" / "skill-fit"
 MODEL = "openai/gpt-oss-120b"
 URL = "https://api.groq.com/openai/v1/chat/completions"
-CAP = 4096
+USER_AGENT = "OpenSourceResearchAgents/0.1 skill-fit"
+CAP = 8192
 MESSAGE_OVERHEAD_TOKENS = 1024
 INPUT_USD_PER_M = 0.15
 OUTPUT_USD_PER_M = 0.60
@@ -85,6 +88,33 @@ def upper_cost_usd(requests: list[dict[str, object]]) -> float:
     return input_upper * INPUT_USD_PER_M / 1_000_000 + len(requests) * CAP * OUTPUT_USD_PER_M / 1_000_000
 
 
+def revision_request(case_id: str, prior: dict[str, object], feedback: str) -> dict[str, object]:
+    """Continue one completed case with source-checkable peer feedback and the same model."""
+    request = request_for(case_id)
+    if (prior.get("schema") != "ora.skill_fit.result.v1"
+            or prior.get("phase", "initial") != "initial"
+            or prior.get("blind_id") != case_id or prior.get("model_requested") != MODEL
+            or prior.get("model_returned") != MODEL
+            or prior.get("request_sha256") != digest(request)):
+        raise ValueError("Prior answer does not match this case, model and request")
+    content = prior.get("final_content")
+    if prior.get("finish_reason") != "stop" or not isinstance(content, str) or not content.strip():
+        raise ValueError("Peer revision requires a completed, nonempty prior answer")
+    if "final_content_sha256" in prior and prior["final_content_sha256"] != digest(content):
+        raise ValueError("Prior answer does not match its saved content hash")
+    if not feedback.strip():
+        raise ValueError("Peer feedback is empty")
+    request["messages"].extend([
+        {"role": "assistant", "content": content},
+        {"role": "user", "content": (
+            "Check this peer feedback against the supplied sources, then revise your answer. "
+            "Preserve supported findings and correct only affected claims. Distinguish any "
+            "new method guidance from the study evidence.\n\n" + feedback
+        )},
+    ])
+    return request
+
+
 def plan() -> dict[str, object]:
     requests = [request_for(case_id) for case_id in CASES]
     estimate = upper_cost_usd(requests)
@@ -121,23 +151,33 @@ def _key() -> str:
     raise RuntimeError("GROQ_API_KEY is unavailable")
 
 
-def run_one(case_id: str) -> dict[str, object]:
+def run_one(case_id: str, *, prior: dict[str, object] | None = None,
+            feedback: str | None = None, output_dir: Path | None = None) -> dict[str, object]:
     if case_id not in CASES:
         raise ValueError("Unknown blind case")
-    if (OUT / f"{case_id}.attempt.json").exists() or (OUT / f"{case_id}.json").exists():
+    folder = (output_dir or OUT).resolve()
+    # Research responses stay local even when an explicit destination is supplied.
+    if folder.is_relative_to(ROOT) and not folder.is_relative_to(ROOT / ".local"):
+        raise ValueError("Save raw results below .local or outside the repository")
+    if (folder / f"{case_id}.attempt.json").exists() or (folder / f"{case_id}.json").exists():
         raise RuntimeError("This case has already been attempted; no automatic repeat")
     p = plan()
-    request = request_for(case_id)
+    if (prior is None) != (feedback is None):
+        raise ValueError("Peer revision needs both the prior result and feedback")
+    request = request_for(case_id) if prior is None else revision_request(case_id, prior, feedback)
+    if upper_cost_usd([request]) >= 1.0:
+        raise RuntimeError("One-call estimate exceeds $1")
     body = json.dumps(request, ensure_ascii=False).encode("utf-8")
     key = _key()
-    OUT.mkdir(parents=True, exist_ok=True)
-    with (OUT / f"{case_id}.attempt.json").open("x", encoding="utf-8") as handle:
+    folder.mkdir(parents=True, exist_ok=True)
+    with (folder / f"{case_id}.attempt.json").open("x", encoding="utf-8") as handle:
         json.dump({"blind_id": case_id, "request_sha256": digest(request), "status": "attempt_reserved"}, handle)
         handle.write("\n")
     http = urllib.request.Request(
         URL,
         data=body,
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
+                 "User-Agent": USER_AGENT},
         method="POST",
     )
     started = time.monotonic()
@@ -157,6 +197,11 @@ def run_one(case_id: str) -> dict[str, object]:
     result = {
         "schema": "ora.skill_fit.result.v1",
         "blind_id": case_id,
+        "phase": "peer_revision" if prior is not None else "initial",
+        "parent_result_sha256": digest(prior) if prior is not None else None,
+        "parent_content_hash_status": ("not_applicable" if prior is None else
+                                       "matched" if "final_content_sha256" in prior else "not_recorded"),
+        "feedback_sha256": digest(feedback) if feedback is not None else None,
         "synthetic": True,
         "completed_utc": datetime.now(timezone.utc).isoformat(),
         "model_requested": MODEL,
@@ -172,10 +217,11 @@ def run_one(case_id: str) -> dict[str, object]:
             ((prompt_tokens or 0) * INPUT_USD_PER_M + (completion_tokens or 0) * OUTPUT_USD_PER_M) / 1_000_000, 8
         ),
         "final_content": message.get("content"),
+        "final_content_sha256": digest(message.get("content")),
         "reasoning_returned": bool(message.get("reasoning")),
     }
-    OUT.mkdir(parents=True, exist_ok=True)
-    (OUT / f"{case_id}.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{case_id}.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {k: v for k, v in result.items() if k != "final_content"}
 
 
@@ -183,11 +229,24 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--live", action="store_true", help="Make exactly one live call")
     parser.add_argument("--case", choices=CASES)
+    parser.add_argument("--prior-result", type=Path)
+    parser.add_argument("--feedback-file", type=Path)
+    parser.add_argument("--output-dir", type=Path, default=OUT)
     args = parser.parse_args()
+    if bool(args.prior_result) != bool(args.feedback_file):
+        parser.error("Peer revision needs --prior-result and --feedback-file")
+    prior = json.loads(args.prior_result.read_text()) if args.prior_result else None
+    feedback = args.feedback_file.read_text() if args.feedback_file else None
     if args.live:
         if not args.case:
             parser.error("--live requires --case")
-        print(json.dumps(run_one(args.case), indent=2))
+        print(json.dumps(run_one(args.case, prior=prior, feedback=feedback, output_dir=args.output_dir), indent=2))
+    elif prior is not None:
+        if not args.case:
+            parser.error("Peer revision preview requires --case")
+        request = revision_request(args.case, prior, feedback)
+        print(json.dumps({"case": args.case, "request_sha256": digest(request),
+                          "estimated_max_usd": upper_cost_usd([request]), "provider_called": False}))
     else:
         print(json.dumps(plan(), indent=2))
 

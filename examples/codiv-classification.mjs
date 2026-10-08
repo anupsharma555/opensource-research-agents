@@ -1,4 +1,7 @@
-// Preview saved classifier examples by default; --live makes one explicit API request.
+/* Show the inputs and expected answers from a saved classifier experiment.
+   The default preview prints one selected case without contacting the provider.
+   An explicit --live run sends that case once and checks basic fields in its
+   response; it is outside the offline foundation checks. */
 import { readFileSync } from 'node:fs';
 import { parseEnv } from 'node:util';
 

@@ -1,7 +1,8 @@
-"""Durable, offline contract example; not the production mission scheduler.
+"""Show how research commands can change saved state without losing their receipts.
 
-The transaction proves command receipts and replay behavior without a model or UI.
-Callers are trusted test actors. A real transport must authenticate actor identity.
+This local SQLite example checks record versions, duplicate command IDs, artifact
+references, and allowed state changes, then saves accepted events with receipts in
+one transaction. It trusts fixture actors and is not a live authenticated host.
 """
 
 import hashlib

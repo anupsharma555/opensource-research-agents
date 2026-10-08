@@ -1,7 +1,8 @@
-"""Attempt-private scratch/port allocation example with generation fencing.
+"""Give each offline task attempt its own temporary workspace and network port.
 
-Only explicit files created by this example are removed. Production process
-supervision, abandoned-workspace retention and sandbox enforcement are separate.
+SQLite tracks the current owner so an older attempt cannot write into or clean up
+its replacement's workspace. This example removes only files it created; it does
+not supervise processes or enforce a production sandbox.
 """
 
 import hashlib

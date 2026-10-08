@@ -16,7 +16,7 @@
     "module": "ora.skills.evidence_links",
     "origin_type": "project_owned",
     "path": "src/ora/skills/evidence_links.py",
-    "sha256": "7b5945eb75247d8c75ee8f5ed47270b23be91cd482207c737adf5a3f5aead14d",
+    "sha256": "e0e9541f9691468dba0346a28a8aaef1bf965f73dcf894f679d26529949f4e27",
     "side_effects": "none",
     "upstream_commit": null,
     "upstream_url": null
@@ -25,7 +25,7 @@
   "instruction_variants": {
     "concise": {
       "path": "runtime_skills/evidence_linking/CONCISE.md",
-      "sha256": "81decb00d49d44423cdea515c1779606b813864f934ae3b90e1b46cfdfab230a"
+      "sha256": "234eb40ecbf50b761e57608bdd322d34fa8377b3655fbd4e2f04e7d52de40b73"
     },
     "rich": {
       "path": "runtime_skills/evidence_linking/RICH.md",
@@ -40,5 +40,5 @@
   "schema": "ora.runtime_skill.v1",
   "skill_id": "evidence-linking",
   "trigger": "Use when a synthesis or critique claim needs source support, challenge or context.",
-  "version": "1.0.0"
+  "version": "1.0.1"
 }

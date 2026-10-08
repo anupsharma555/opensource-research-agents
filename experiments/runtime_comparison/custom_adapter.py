@@ -1,4 +1,9 @@
-"""Minimal stdlib asyncio task execution; board persistence lives in common.py."""
+"""Run one scripted peer task with Python's built-in asynchronous tools.
+
+It waits for the task's synthetic delay and returns the same proposed action used
+by the framework comparisons. The shared SQLite board saves accepted work, so
+this small adapter needs no separate checkpoint store.
+"""
 
 from __future__ import annotations
 

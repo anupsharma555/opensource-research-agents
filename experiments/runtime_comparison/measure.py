@@ -1,4 +1,9 @@
-"""Repeat the offline comparison with fresh stores and retain bounded evidence."""
+"""Measure how three runtimes handle the same small scripted collaboration.
+
+Each repetition gets a fresh workspace, and the report saves elapsed times,
+accepted artifacts, checkpoint size, installed packages, and tested source hashes.
+These timings describe synthetic waits, not live model or provider performance.
+"""
 
 from __future__ import annotations
 

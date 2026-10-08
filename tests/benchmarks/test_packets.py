@@ -1,4 +1,9 @@
-"""Behavioral checks for synthetic packet identity and answer-key separation."""
+"""Check that a synthetic research question can be prepared without its answers.
+
+The tests catch changed source text, mismatched quoted passages, leaked reference
+labels, and later events appearing too early. They inspect saved test materials,
+not the quality of any model response.
+"""
 
 from __future__ import annotations
 
