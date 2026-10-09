@@ -1,16 +1,24 @@
-# Synthetic research benchmark bundle v1.0.4
+# Research benchmark bundle v1.0.6: real clinical labels, simulated data
 
-This packet set tests whether later research-agent implementations can find, preserve, interpret, and explain evidence without hiding contrary findings or turning technical failures into scientific results. Every named study, program, number, and result in the three scenarios is fictional. The packets are **test input**, not published research or evidence about a real treatment.
+This packet set tests whether later research-agent implementations can find, preserve, interpret, and explain evidence without hiding contrary findings or turning technical failures into scientific results. It uses real clinical terminology: depression, generalized anxiety disorder, cognitive behavioural therapy, and Patient Health Questionnaire-9 (PHQ-9) scores. The studies, participant counts and results remain **simulated test input**, not published findings about those conditions or treatments.
+
+For real-publication tasks, see the [digital mental-health case designs](realistic-digital-mental-health.md).
+That separate candidate suite preserves publication identities and source-copy rights;
+it is not loaded by this simulated-data v1 catalog and has no model results yet.
 
 ## What is frozen
 
-`benchmarks/v1/manifest.json` pins the canonical SHA-256 of each scenario, its evaluator-only reference, and the profile, baseline, and rubric definitions. The bundle is v1.0.4: A and C scenarios remain v1.0.1; B is v1.0.2 after exact denominator spans were added to unchanged source bodies. Each scenario has a stable ID and version; each source has its own ID, version, text hash, access state, rights state, and exact passage spans. A span's offsets must reproduce its quoted text. Changing substantive content requires a new scenario version and manifest hash. Formatting JSON alone does not change the canonical hash.
+`benchmarks/v1/manifest.json` pins the canonical SHA-256 of each scenario, its evaluator-only reference, and the profile, baseline, and rubric definitions. Bundle v1.0.6 uses A/C v1.0.3 and B v1.0.4. Real clinical labels replace the earlier placeholders; counts, intervals, failure events and expected interpretations are preserved. Each scenario has a stable ID and version; each source has its own ID, version, text hash, access state, rights state, and exact passage spans. A span's offsets must reproduce its quoted text. Changing substantive content requires a new scenario version and manifest hash. Formatting JSON alone does not change the canonical hash.
+
+The saved Groq comparison used the earlier A v1.0.1 inputs. Its requests and results remain historical evidence for that version; the relabelled inputs have not been run on a model.
+
+Real labels do not fill missing methods: A's abstracts leave the definition of response unreported, and B does not name its symptom scale. C explicitly names PHQ-9, but supplies no basis for a causal treatment claim.
 
 | Scenario | Evidence challenge | Initial worker view |
 | --- | --- | --- |
-| `syn-abstract-disagreement` | Favorable but imprecise abstract, separate null study, irrelevant citation, unavailable methods/adverse events | Four synthetic source records, including the access notice |
-| `syn-route-recovery` | Failed search route, alternate partial result window, registry without posted outcomes, retention versus symptom outcome | Registry record; the fixture driver delivers later route results |
-| `syn-null-versus-error` | A checked imprecise null estimate followed by a separate parser failure | Checked result; the fixture driver delivers the later error |
+| `syn-abstract-disagreement` | Adult depression: cognitive behavioural therapy versus attention control; mixed abstracts, an adolescent anxiety study, unavailable methods | Four simulated source records, including the access notice |
+| `syn-route-recovery` | Youth depression therapy follow-up: failed search route, partial alternate results, retention versus symptom change | Registry record; the fixture driver delivers later route results |
+| `syn-null-versus-error` | PHQ-9 depression scores: a checked imprecise null estimate followed by a separate parser failure | Checked result; the fixture driver delivers the later error |
 
 The `ora.benchmarks` library exposes `validate_catalog`, `load_scenario`, `load_event_script`, `make_worker_packet`, `validate_worker_packet`, `export_worker_packet`, `load_reference`, and `validate_run_record`. `load_scenario` and `load_event_script` are for a fixture driver. Give a tested agent **only** the JSON returned by `make_worker_packet` or written by `export_worker_packet`; deliver scripted events one at a time. Do not reveal future events in the initial packet. `load_reference` reads withheld labels for an independent evaluator and must never run in the tested agent's process.
 
@@ -23,7 +31,7 @@ The source checkout contains the evaluator files, so a worker packet alone is no
 1. **Controlled equal input:** supply the same question and pinned source opportunity to eligible systems. Predeclare a comparable resource envelope, including calls, tokens, tools, currency, and source access where measurable. This condition tests reasoning and workflow over comparable material, not live discovery breadth.
 2. **Native workflow:** supply the same question and decision, then allow each product's ordinary authorized research features. Record exact product/model version, tools, source access, user interventions, and observed resources. Do not disable a frontier product's normal strengths merely to mimic this project. Disclose unmatched features and unmeasured costs.
 
-The comparison arms are this pipeline, one agent using the same selected model, and a strong current ChatGPT or Codex workflow. No model or provider comparison has been executed in this implementation. Exact run-time versions, budgets, account capacity, and product features must be recorded **before** any later live comparison; the fixture set does not invent those observations or impose a scientific search-round deadline. `baselines.json` includes one illustrative controlled-test allowance for the synthetic A single-role profile: up to four model calls, 20,000 total model tokens, zero tool calls, and USD 1.00, with A1–A4 as the fixed source opportunity. It is a proposed evaluation allocation to review and declare before a later comparison, not observed consumption or a scientific duration cap.
+The comparison arms are this pipeline, one agent using the same selected model, and a strong current ChatGPT or Codex workflow. This three-arm comparison has not run. A separate [two-skill experiment](../development/model-fit.md) used scenario A on the selected model and retained partial/negative results; it does not establish a baseline advantage. Exact run-time versions, budgets, account capacity, and product features must be recorded **before** any later live comparison; the fixture set does not invent those observations or impose a scientific search-round deadline. `baselines.json` includes one illustrative controlled-test allowance for the simulated A single-role profile: up to four model calls, 20,000 total model tokens, zero tool calls, and USD 1.00, with A1–A4 as the fixed source opportunity. It is a proposed evaluation allocation to review and declare before a later comparison, not observed consumption or a scientific duration cap.
 
 ## Scoring and interpretation
 
@@ -37,7 +45,7 @@ An abstract can support its **reported** facts even when full text is unavailabl
 
 ## Reviewer and proof workflow
 
-Reference files contain acceptable qualified claims, contrary and irrelevant spans, severe-error examples, expected partial outcomes, and unresolved gaps. Their illustrative disagreement fields are explicitly demonstrations, not real human reviews. For a benchmark claim, independent reviewers should receive blinded output when practical, record their own labels and reasons, discuss disagreements, and save an adjudicated decision without the tested agent scoring itself. The review record in `evidence/reference-review.md` documents independent science-agent checks of synthetic A and B labels; it is not a human panel or model-performance result.
+Reference files contain acceptable qualified claims, contrary and irrelevant spans, severe-error examples, expected partial outcomes, and unresolved gaps. Their illustrative disagreement fields are explicitly demonstrations, not real human reviews. For a benchmark claim, independent reviewers should receive blinded output when practical, record their own labels and reasons, discuss disagreements, and save an adjudicated decision without the tested agent scoring itself. The review record in `evidence/reference-review.md` documents independent science-agent checks of simulated A and B labels; it is not a human panel or model-performance result.
 
 `validate_run_record` confirms only a run record's structure and traceability. Scored ratings also pin the reference and rubric hashes. `result_applicability` returns `historical_untested_for_current` when the scenario, profile, arm, condition, rubric, reference, build, or configuration changes. A previous pass remains inspectable but does not become a pass for the new case. `evidence/scenario-result-map.json` links current packet identities to contract checks and explicitly untested model/pilot consumers.
 
@@ -49,4 +57,4 @@ The current `pyproject.toml` pytest configuration provides the focused project c
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/pytest -q tests/benchmarks
 ```
 
-The saved verbose standard-library transcript from the same selected `.venv` is under `evidence/validation.txt`. It proves the listed offline fixture behaviors only. No provider, selected model, scientific reviewer panel, Mac UI, or full workflow was run.
+The original verbose transcript is retained under `evidence/validation.txt`; the current label revision's checks are in `evidence/validation-sample-wording.txt`. These checks prove the listed offline fixture behaviors only. No model or provider was called for this revision.

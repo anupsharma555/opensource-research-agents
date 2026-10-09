@@ -2,7 +2,7 @@
   "acceptable_claims": [
     {
       "claim_id": "C-C1",
-      "qualification": "Synthetic checked result, not published literature.",
+      "qualification": "Simulated checked result, not published literature.",
       "support_span_ids": [
         "C1-result",
         "C1-limitation"
@@ -14,7 +14,7 @@
   "expected_partial_outcome": "Report the checked imprecise C1 result, mark C2 as technical failure with possible retry, and keep the scientific conclusion bounded.",
   "irrelevant_span_ids": [],
   "scenario_id": "syn-null-versus-error",
-  "scenario_version": "1.0.1",
+  "scenario_version": "1.0.3",
   "schema": "ora.benchmark.reference.v1",
   "severe_error_examples": [
     {

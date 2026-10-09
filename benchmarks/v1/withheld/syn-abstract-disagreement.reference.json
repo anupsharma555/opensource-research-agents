@@ -35,7 +35,7 @@
     "A3-mismatch"
   ],
   "scenario_id": "syn-abstract-disagreement",
-  "scenario_version": "1.0.1",
+  "scenario_version": "1.0.3",
   "schema": "ora.benchmark.reference.v1",
   "severe_error_examples": [
     {

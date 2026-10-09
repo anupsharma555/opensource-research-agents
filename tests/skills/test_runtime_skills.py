@@ -186,7 +186,8 @@ class RuntimeSkillTests(unittest.TestCase):
             for variant in case["variants"]:
                 self.assertTrue(registry.render_instructions(case["skill_id"], variant).strip())
             attempt = registry.start_skill_attempt(case["role_id"], case["skill_id"], "qualification-fixture")
-            self.assertEqual(attempt.skill_version, "1.0.1")
+            expected_version = {"evidence-linking": "1.0.2", "study-appraisal": "1.0.3"}[case["skill_id"]]
+            self.assertEqual(attempt.skill_version, expected_version)
 
 
 if __name__ == "__main__":

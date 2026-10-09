@@ -20,7 +20,7 @@ SCHEMA_WORKER = "ora.benchmark.worker.v1"
 SCHEMA_PROFILES = "ora.benchmark.profiles.v1"
 SCHEMA_BASELINES = "ora.benchmark.baselines.v1"
 SCHEMA_RUBRIC = "ora.benchmark.rubric.v1"
-PACKET_SET_VERSION = "1.0.4"
+PACKET_SET_VERSION = "1.0.6"
 DEFAULT_ROOT = Path(__file__).resolve().parents[3] / "benchmarks" / "v1"
 PROFILE_IDS = frozenset(
     {"provider_only", "retrieval_only", "single_role", "peer_exchange", "complete_workflow"}

@@ -212,13 +212,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=["bootstrap", "setup", "doctor", "check", "generate", "ui", "desktop", "inspect"],
+        choices=["bootstrap", "setup", "doctor", "check", "generate", "ui", "desktop", "inspect", "live"],
     )
     parser.add_argument(
         "--offline", action="store_true", help="Use cached dependencies only during setup"
     )
     parser.add_argument("--view", choices=["findings", "sources", "diagnostics"], default="sources")
-    args = parser.parse_args()
+    args, remaining = parser.parse_known_args()
+    if args.command != "live" and remaining:
+        parser.error("unrecognized arguments: " + " ".join(remaining))
     try:
         if args.command == "bootstrap":
             bootstrap()
@@ -238,7 +240,9 @@ def main():
             return
         doctor()
         env = node_environment()
-        if args.command == "check":
+        if args.command == "live":
+            run([PYTHON, "-m", "ora.cli", "live", *sys.argv[2:]], env)
+        elif args.command == "check":
             before = locks()
             for command in [
                 [PYTHON, "-m", "ora.cli", "contracts", "--check"],

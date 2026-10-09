@@ -55,7 +55,7 @@ def test_plan_cost_and_hashes() -> None:
 
 def test_appraisal_input_is_only_a1() -> None:
     request = fit.request_for("X3")
-    packet = json.loads(request["messages"][1]["content"].split("Synthetic source packet:\n", 1)[1])
+    packet = json.loads(request["messages"][1]["content"].split("Source packet (simulated data):\n", 1)[1])
     assert [source["source_id"] for source in packet["sources"]] == ["A1"]
 
 

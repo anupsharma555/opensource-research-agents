@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "agentIds": {
+      "items": {
+        "maxLength": 160,
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Agentids",
+      "type": "array"
+    },
+    "parentRunId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Parentrunid",
+      "type": "string"
+    },
+    "parentSnapshotId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Parentsnapshotid",
+      "type": "string"
+    },
+    "question": {
+      "minLength": 1,
+      "title": "Question",
+      "type": "string"
+    },
+    "requestId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Requestid",
+      "type": "string"
+    },
+    "scope": {
+      "default": "",
+      "title": "Scope",
+      "type": "string"
+    },
+    "targetId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Targetid",
+      "type": "string"
+    },
+    "targetVersion": {
+      "minimum": 1,
+      "title": "Targetversion",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "requestId",
+    "parentRunId",
+    "parentSnapshotId",
+    "targetId",
+    "targetVersion",
+    "question",
+    "agentIds"
+  ],
+  "title": "LiveFollowupRequest",
+  "type": "object"
+}

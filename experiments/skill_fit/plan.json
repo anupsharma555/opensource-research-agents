@@ -12,31 +12,31 @@
     "output": 0.6
   },
   "input_estimate_method": "UTF-8 message bytes plus 1024 wrapper tokens per call as conservative token upper bound",
-  "worst_case_usd": 0.023538,
+  "worst_case_usd": 0.023552,
   "cases": [
     {
       "blind_id": "X1",
-      "request_sha256": "bde3ace78720825005e82f8051660d054e8db4a8ac42fdbc547213533d17f7f3",
-      "prompt_sha256": "55fddf73747ede90ee01b2daf47bb66f396ecfbafaec4ef775fadb62e5e7846b",
-      "prompt_utf8_bytes": 6625
+      "request_sha256": "b7b6fd3b1b5b6413a0fa293924d9bc3073046f65d153b02160cc8209f8b6729f",
+      "prompt_sha256": "fb6939b92e854a244419d38e479a710fb54c968bddf898f88ca350880dbc4b67",
+      "prompt_utf8_bytes": 6674
     },
     {
       "blind_id": "X2",
-      "request_sha256": "9385127a11dfb1ad38f396cd04dff9478b51a718154852971586727ef855517a",
-      "prompt_sha256": "9e719ccf4c2408aa07e803da7fc4e8a713bf2c400e4cb9a65dc03d6f35ec1355",
-      "prompt_utf8_bytes": 6715
+      "request_sha256": "eb4712aa6c317bc604021e60c18c177a5be7734f79464d8a08d112b63710af57",
+      "prompt_sha256": "2b5bf8253d061806ed63a0615f59c6456c12a19875a3ca8e7bc9c29250fe0c04",
+      "prompt_utf8_bytes": 6764
     },
     {
       "blind_id": "X3",
-      "request_sha256": "690cafb42afcf26d2efb265b50528290beff1509cecbbbac67fbbfe5741b6686",
-      "prompt_sha256": "4312d8797568e7f942758e042f8b4d2dbbf1d7724022eda4fb6d54550d31a6dc",
-      "prompt_utf8_bytes": 4097
+      "request_sha256": "807f570e87d2b63a45d5b7d160b0b7ad32ea5b786f912c4ce805e26a11b1c9d0",
+      "prompt_sha256": "a7f31f4ad1302173035a0b8303725536587cd8045cb08af9b4656c77efd6ddb3",
+      "prompt_utf8_bytes": 4092
     },
     {
       "blind_id": "X4",
-      "request_sha256": "d082b32c539b6ecd0297a0ec8540043bc16c51d75e8a7a738ded4d181f24f713",
-      "prompt_sha256": "2a1c89517ccbbbaaf37f356454fe42dbfdc3f32c5ff941ec823a872d645c4cde",
-      "prompt_utf8_bytes": 4318
+      "request_sha256": "283961db20a77647649f3ff5d3ab81d7e9df1aded5ed2f8dc7b2338b0b23e41b",
+      "prompt_sha256": "60bdd8320387f055c652dc8be7c4c0ad0126b982c52acae9b299200262ab217b",
+      "prompt_utf8_bytes": 4313
     }
   ]
 }

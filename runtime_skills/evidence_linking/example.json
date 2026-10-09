@@ -10,15 +10,15 @@
       "locators": ["Abstract, sentence 3"],
       "validation_record": "synthetic-quality-receipt-A1",
       "access_surface": "abstract",
-      "summary": "Synthetic A1 reports response counts at six weeks with wide uncertainty.",
+      "summary": "Simulated A1 reports response counts at six weeks with wide uncertainty.",
       "limitations": ["Methods table not inspected"]
     },
-    "claim": "Synthetic A1 reports 18 of 40 versus 12 of 40 responses at six weeks.",
+    "claim": "Simulated A1 reports 18 of 40 versus 12 of 40 responses at six weeks.",
     "locator": "Abstract, sentence 3",
     "relation": "supports"
   },
   "expected_helper_output": {
-    "claim": "Synthetic A1 reports 18 of 40 versus 12 of 40 responses at six weeks.",
+    "claim": "Simulated A1 reports 18 of 40 versus 12 of 40 responses at six weeks.",
     "relation": "supports",
     "evidence_packet_id": "example-evidence-A1",
     "evidence_packet_version": 1,

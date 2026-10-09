@@ -48,6 +48,9 @@ def main():
     contracts.add_argument("--check", action="store_true")
     sub.add_parser("benchmarks", help="Verify frozen synthetic benchmark packets")
     sub.add_parser("skills", help="Validate role, skill, helper and provenance references")
+    from .live.cli import configure as configure_live
+
+    configure_live(sub.add_parser("live", help="Explicit local Groq research over supplied evidence"))
     sample = sub.add_parser(
         "inspect-sample", help="Inspect the same sample sources as the desktop app"
     )
@@ -80,6 +83,10 @@ def main():
             )
         elif args.command == "inspect-sample":
             print(json.dumps(inspect_sample(args.path, args.view), indent=2))
+        elif args.command == "live":
+            from .live.cli import main as live_main
+
+            live_main(args, root)
         else:
             parser.exit(
                 2,

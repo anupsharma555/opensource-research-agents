@@ -1,11 +1,11 @@
 {
-  "family": "fictional youth program follow-up",
+  "family": "simulated youth depression follow-up",
   "initial_source_ids": [
     "B1"
   ],
   "review_type": "source discovery and recovery",
   "scenario_id": "syn-route-recovery",
-  "scenario_version": "1.0.2",
+  "scenario_version": "1.0.4",
   "schema": "ora.benchmark.scenario.v1",
   "scripted_events": [
     {
@@ -55,18 +55,18 @@
   "sources": [
     {
       "access_state": "metadata_only",
-      "body": "Synthetic registry result. A fictional youth Program P survey registered a twelve-week follow-up question, but this entry has no posted outcome data.",
-      "body_sha256": "7949a7b86c6afef78c7730542488dc274ecf22ac9f68ab850ad3a4d9f75bc925",
+      "body": "Registry result (simulated data). A simulated survey of young people receiving cognitive behavioural therapy for depression registered a twelve-week follow-up question, but this entry has no posted outcome data.",
+      "body_sha256": "1a3eb79528a5136a81530c0d575783c51868a6ee59e8f989a7403934ca842e49",
       "rights": "synthetic_project_owned",
       "source_id": "B1",
-      "source_version": "1.0.0",
+      "source_version": "1.0.2",
       "spans": [
         {
-          "end": 148,
+          "end": 210,
           "locator": "Registry entry, outcome status",
           "quote": "this entry has no posted outcome data",
           "span_id": "B1-no-result",
-          "start": 111
+          "start": 173
         }
       ],
       "surface": "registry_record",
@@ -74,32 +74,32 @@
     },
     {
       "access_state": "abstract_only",
-      "body": "Synthetic publication abstract. A fictional survey of 120 youth Program P participants reported follow-up for 94 participants at twelve weeks. The abstract gives retention only; it does not report a symptom change estimate.",
-      "body_sha256": "98477396a58036e8349f30172acfc3a8e88780444884cf8a323b4368a3470016",
+      "body": "Study abstract (simulated data). A simulated survey of 120 young people receiving cognitive behavioural therapy for depression reported follow-up for 94 participants at twelve weeks. The abstract gives retention only; it does not report a symptom change estimate.",
+      "body_sha256": "bb5f733af70941414654317f6dd0a20a7b182d0110959a6f0dc36c97d501b7dc",
       "rights": "synthetic_project_owned",
       "source_id": "B2",
-      "source_version": "1.0.1",
+      "source_version": "1.0.3",
       "spans": [
         {
-          "end": 86,
+          "end": 126,
           "locator": "Abstract, sentence 2, enrolled group",
-          "quote": "120 youth Program P participants",
+          "quote": "120 young people receiving cognitive behavioural therapy for depression",
           "span_id": "B2-denominator",
-          "start": 54
+          "start": 55
         },
         {
-          "end": 141,
+          "end": 181,
           "locator": "Abstract, sentence 2",
           "quote": "follow-up for 94 participants at twelve weeks",
           "span_id": "B2-retention",
-          "start": 96
+          "start": 136
         },
         {
-          "end": 222,
+          "end": 262,
           "locator": "Abstract, sentence 3",
           "quote": "it does not report a symptom change estimate",
           "span_id": "B2-gap",
-          "start": 178
+          "start": 218
         }
       ],
       "surface": "published_abstract",
@@ -107,25 +107,25 @@
     },
     {
       "access_state": "abstract_only",
-      "body": "Synthetic publication abstract. A separate fictional survey of 90 youth Program P participants reported follow-up for 68 participants at twelve weeks and a small symptom-score change with wide uncertainty.",
-      "body_sha256": "8e99959ee57b7d90dffe9b9acd57b4fc2f81ab8e99d595046b8879fcae1afdc6",
+      "body": "Study abstract (simulated data). A separate simulated survey of 90 young people receiving cognitive behavioural therapy for depression reported follow-up for 68 participants at twelve weeks and a small symptom-score change with wide uncertainty.",
+      "body_sha256": "f9725801ca2ccaf690e8053fd080b8e7a2663b5801f017b87b561e62fea3413c",
       "rights": "synthetic_project_owned",
       "source_id": "B3",
-      "source_version": "1.0.1",
+      "source_version": "1.0.3",
       "spans": [
         {
-          "end": 94,
+          "end": 134,
           "locator": "Abstract, sentence 2, enrolled group",
-          "quote": "90 youth Program P participants",
+          "quote": "90 young people receiving cognitive behavioural therapy for depression",
           "span_id": "B3-denominator",
-          "start": 63
+          "start": 64
         },
         {
-          "end": 204,
+          "end": 244,
           "locator": "Abstract, sentence 2",
           "quote": "follow-up for 68 participants at twelve weeks and a small symptom-score change with wide uncertainty",
           "span_id": "B3-result",
-          "start": 104
+          "start": 144
         }
       ],
       "surface": "published_abstract",
@@ -137,6 +137,6 @@
     "audience": "research coordinator",
     "decision": "Return useful available evidence while distinguishing retention from symptom outcomes and an unsearched route from an empty result.",
     "latency_class": "long",
-    "question": "Which synthetic youth Program P sources report twelve-week follow-up, and what do they actually report?"
+    "question": "Which sources on cognitive behavioural therapy for depression in young people report twelve-week follow-up, and what do they actually report?"
   }
 }

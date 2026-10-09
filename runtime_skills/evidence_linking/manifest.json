@@ -1,7 +1,7 @@
 {
   "example": {
     "path": "runtime_skills/evidence_linking/example.json",
-    "sha256": "3741dc0073b1f9d6e3470902dcae4426a690d6e8850bc6c771c8b573a0667349"
+    "sha256": "ed29ff5f0a96fba2394125127b7e1f9b871956c41be155a2cf706ed770dea282"
   },
   "failure_handling": "A missing source, locator or capability gives a scoped error. Preserve unrelated evidence and ask for a targeted repair.",
   "helper": {
@@ -40,5 +40,5 @@
   "schema": "ora.runtime_skill.v1",
   "skill_id": "evidence-linking",
   "trigger": "Use when a synthesis or critique claim needs source support, challenge or context.",
-  "version": "1.0.1"
+  "version": "1.0.2"
 }

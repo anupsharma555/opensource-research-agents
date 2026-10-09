@@ -440,13 +440,25 @@ def test_unsupported_client_does_not_erase_pending_work_across_restart(tmp_path)
         board.close()
 
 
-def test_current_ui_sample_uses_canonical_read_contract():
+@pytest.mark.parametrize("filename", ["sample-run.json", "sample-run-baseline.json"])
+def test_ui_sample_preserves_canonical_source_lineage(filename):
     from pathlib import Path
 
-    path = Path("ui/public/sample-run.json")
-    if not path.exists():
-        pytest.skip("UI sample has not been generated in this development slice")
-    ResearchSnapshot.model_validate_json(path.read_text(), strict=True)
+    from ora.benchmarks import load_scenario
+
+    path = Path("ui/public") / filename
+    snapshot = ResearchSnapshot.model_validate_json(path.read_text(), strict=True)
+    scenario = load_scenario(Path("benchmarks/v1"), "syn-abstract-disagreement")
+    assert snapshot.sample_version == scenario["scenario_version"]
+    assert snapshot.mission.question == scenario["task"]["question"]
+    sources = {source["source_id"]: source for source in scenario["sources"]}
+    for source in snapshot.sources:
+        canonical = sources[source.id]
+        assert source.content_hash == canonical["body_sha256"]
+        assert [passage.model_dump(by_alias=True) for passage in source.passages] == [
+            {"spanId": span["span_id"], "locator": span["locator"], "text": span["quote"]}
+            for span in canonical["spans"]
+        ]
 
 
 def test_valid_command_round_trip():

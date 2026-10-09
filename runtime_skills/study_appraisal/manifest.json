@@ -1,7 +1,7 @@
 {
   "example": {
     "path": "runtime_skills/study_appraisal/example.json",
-    "sha256": "de78913a674e002e5fa3cf5dd3e8ff01a6800e0f15e471b4429d9e0ab2e5deb7"
+    "sha256": "d0f71dd688229a1a5e739ed3863951e782f7a63a13338eba12925adfbb2c6c3a"
   },
   "failure_handling": "A missing source, locator or capability gives a scoped error. Preserve unrelated evidence and ask for a targeted repair.",
   "helper": {
@@ -41,5 +41,5 @@
   "schema": "ora.runtime_skill.v1",
   "skill_id": "study-appraisal",
   "trigger": "Use for first-pass methods review or a result-specific reappraisal.",
-  "version": "1.0.1"
+  "version": "1.0.3"
 }

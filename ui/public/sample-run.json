@@ -1,13 +1,13 @@
 {
   "schemaVersion": "1.0",
   "snapshotId": "syn-abstract-disagreement-snapshot-v2",
-  "sampleVersion": "1.0.1",
+  "sampleVersion": "1.0.3",
   "capturedAt": "2026-10-08T14:24:00Z",
   "mission": {
     "id": "mission-fictional-adult-review",
     "version": 2,
-    "question": "For adults with fictional Condition Y, what do the available synthetic studies say about Lantern Brief Skills versus attention control at six weeks?",
-    "scope": "Published abstracts only; verify population, comparator and time point. Do not infer inaccessible methods or adverse events.",
+    "question": "For adults with depression, what do the available studies say about cognitive behavioural therapy versus attention control at six weeks?",
+    "scope": "Simulated abstracts with real clinical labels; verify population, comparator and time point. Do not infer inaccessible methods or adverse events.",
     "status": "active",
     "latencyClass": "very_long",
     "latencyBasis": "Multi-source review with an unresolved methods search; no deadline.",
@@ -134,7 +134,7 @@
       "toolCalls": [
         {
           "name": "Read scripted abstract A1",
-          "provider": "Synthetic benchmark packet",
+          "provider": "Sample benchmark packet",
           "status": "completed"
         }
       ],
@@ -155,7 +155,7 @@
       "toolCalls": [
         {
           "name": "Read unavailable scripted route",
-          "provider": "Synthetic benchmark packet",
+          "provider": "Sample benchmark packet",
           "status": "failed"
         }
       ],
@@ -176,7 +176,7 @@
       "toolCalls": [
         {
           "name": "Read scripted abstract A2",
-          "provider": "Synthetic benchmark packet",
+          "provider": "Sample benchmark packet",
           "status": "completed"
         }
       ],
@@ -229,7 +229,7 @@
       "toolCalls": [
         {
           "name": "Request scripted methods table",
-          "provider": "Synthetic benchmark packet",
+          "provider": "Sample benchmark packet",
           "status": "failed"
         }
       ],
@@ -349,23 +349,23 @@
   "sources": [
     {
       "id": "A1",
-      "copyId": "A1-copy-v1",
-      "version": 1,
-      "title": "Adult study A · Lantern Brief Skills vs attention control",
+      "copyId": "A1-copy-v3",
+      "version": 3,
+      "title": "Adult study A · cognitive behavioural therapy vs attention control",
       "accessState": "abstract_only",
       "retrievalStatus": "available",
-      "provider": "Synthetic benchmark packet",
-      "contentHash": "2bfa1e78a58139bf2ee923123a169bbb0ed6ca2b01a8900e02b017e30aa26975",
+      "provider": "Sample benchmark packet",
+      "contentHash": "0f26f222d6267d3737f9496e2879252f1b380ec69c4dbc5b2f14c299c95ad3ac",
       "passages": [
         {
           "spanId": "A1-pop",
           "locator": "Abstract, sentence 2",
-          "text": "80 adults with Condition Y, 40 received Lantern Brief Skills and 40 received attention control"
+          "text": "80 adults with depression, 40 received cognitive behavioural therapy and 40 received attention control"
         },
         {
           "spanId": "A1-result",
           "locator": "Abstract, sentence 3",
-          "text": "At six weeks, response occurred in 18 of 40 versus 12 of 40 participants; the synthetic risk-difference interval was -4 to 34 percentage points"
+          "text": "At six weeks, response occurred in 18 of 40 versus 12 of 40 participants; the risk-difference interval was -4 to 34 percentage points"
         },
         {
           "spanId": "A1-gap",
@@ -376,18 +376,18 @@
     },
     {
       "id": "A2",
-      "copyId": "A2-copy-v1",
-      "version": 1,
+      "copyId": "A2-copy-v3",
+      "version": 3,
       "title": "Adult study B · independent randomized comparison",
       "accessState": "abstract_only",
       "retrievalStatus": "available",
-      "provider": "Synthetic benchmark packet",
-      "contentHash": "2ec9adf64e80d68b1a14bf5dd24dc9aa319877657b847420986a99915da80a8c",
+      "provider": "Sample benchmark packet",
+      "contentHash": "5664a8ab894f29d007a1889332f6f9e5ccc6ee761c0e81edef1ebcfadbe7d7a7",
       "passages": [
         {
           "spanId": "A2-pop",
           "locator": "Abstract, sentence 2",
-          "text": "50 adults with Condition Y to Lantern Brief Skills and 50 to attention control"
+          "text": "50 adults with depression to cognitive behavioural therapy and 50 to attention control"
         },
         {
           "spanId": "A2-result",
@@ -403,30 +403,30 @@
     },
     {
       "id": "A3",
-      "copyId": "A3-copy-v1",
-      "version": 1,
+      "copyId": "A3-copy-v3",
+      "version": 3,
       "title": "Adolescent waitlist study · different question",
       "accessState": "abstract_only",
       "retrievalStatus": "available",
-      "provider": "Synthetic benchmark packet",
-      "contentHash": "c34dbd35491ced88695193a951e7fd4abcd545e81c937aede481e6e34568cb0f",
+      "provider": "Sample benchmark packet",
+      "contentHash": "e0f406dc8051390b521eb8e4b094ac02fbda3698a65be7a4d8a0e0fd5c0c8887",
       "passages": [
         {
           "spanId": "A3-mismatch",
           "locator": "Abstract, sentence 2",
-          "text": "60 adolescents with Condition Z compared Lantern Brief Skills with a waitlist at two weeks"
+          "text": "60 adolescents with generalized anxiety disorder compared cognitive behavioural therapy with a waitlist at two weeks"
         }
       ]
     },
     {
       "id": "A4",
-      "copyId": "A4-copy-v1",
-      "version": 1,
+      "copyId": "A4-copy-v2",
+      "version": 2,
       "title": "Access notice · methods table unavailable",
       "accessState": "locator_only",
       "retrievalStatus": "access_limited",
-      "provider": "Synthetic benchmark packet",
-      "contentHash": "9b2ac8cee2d407e1571fc482a419091c405e6defe21e0d4fc8fe2c77bc40a77b",
+      "provider": "Sample benchmark packet",
+      "contentHash": "051cb95993f0c7830d03e5bed72098ef554cdd361a4511be0643b5ae2f54f54d",
       "passages": [
         {
           "spanId": "A4-access",
@@ -453,7 +453,7 @@
     {
       "id": "claim-benefit-v2",
       "version": 2,
-      "text": "Two synthetic adult abstracts give mixed and imprecise evidence: A1 reports 18/40 versus 12/40 with an interval spanning no difference; A2 reports 20/50 versus 21/50 and no clear difference.",
+      "text": "Two adult abstracts give mixed and imprecise evidence: A1 reports 18/40 versus 12/40 with an interval spanning no difference; A2 reports 20/50 versus 21/50 and no clear difference.",
       "disposition": "qualified",
       "supports": [
         {
@@ -475,7 +475,7 @@
       "version": 1,
       "kind": "report",
       "title": "Early abstract reading",
-      "body": "The first synthetic adult abstract reports a favorable response direction, 18/40 versus 12/40 at six weeks. The interval includes no difference, so benefit is not established.",
+      "body": "The first adult abstract reports a favorable response direction, 18/40 versus 12/40 at six weeks. The interval includes no difference, so benefit is not established.",
       "citations": [
         {
           "sourceId": "A1",
@@ -491,7 +491,7 @@
       "version": 2,
       "kind": "report",
       "title": "Revised evidence summary",
-      "body": "Two synthetic adult study abstracts report different six-week response directions. A1 reports 18/40 versus 12/40, but its interval spans no difference; A2 reports 20/50 versus 21/50 and no clear difference. Together they do not establish benefit.",
+      "body": "Two adult study abstracts report different six-week response directions. A1 reports 18/40 versus 12/40, but its interval spans no difference; A2 reports 20/50 versus 21/50 and no clear difference. Together they do not establish benefit.",
       "citations": [
         {
           "sourceId": "A1",
@@ -512,7 +512,7 @@
       "id": "event-1",
       "time": "2026-10-08T14:00:00Z",
       "kind": "mission_started",
-      "summary": "Synthetic mission opened."
+      "summary": "Sample mission opened."
     },
     {
       "id": "event-2",
@@ -569,7 +569,7 @@
       "id": "diag-access",
       "kind": "source_access",
       "status": "failed",
-      "message": "A1 methods table is unavailable in the synthetic packet. No unseen method or adverse-event values were used.",
+      "message": "A1 methods table is unavailable in the sample packet. No unseen method or adverse-event values were used.",
       "occurredAt": "2026-10-08T14:15:00Z",
       "taskId": "task-methods",
       "attemptId": "attempt-methods-failed"

@@ -38,15 +38,15 @@ CASES = {
 }
 TASKS = {
     "evidence-linking": (
-        "Use the preserved synthetic sources to link a bounded answer to the adult "
-        "Condition Y question. State A1's six-week counts and interval, address A2, "
+        "Use the preserved sources to link a bounded answer to the adult "
+        "depression question. State A1's six-week counts and interval, address A2, "
         "and distinguish evidence support from uncertainty. For each factual claim give "
         "source_id, source_version and exact span_id. Identify any requested detail "
         "the packet cannot support. Do not use tools or outside knowledge."
     ),
     "study-appraisal": (
         "Independently appraise only A1's six-week response comparison from its "
-        "synthetic published abstract. Name a design-appropriate appraisal method "
+        "study abstract (simulated data). Name a design-appropriate appraisal method "
         "and version if known. Separate reporting completeness, risk of bias, "
         "applicability and precision. Cite exact A1 span_ids for reported facts; "
         "say which methods cannot be determined from this abstract. Do not use "
@@ -69,7 +69,7 @@ def request_for(case_id: str) -> dict[str, object]:
         packet.pop("worker_packet_sha256")  # The task view is a subset, not a benchmark export.
     messages = [
         {"role": "system", "content": registry.render_instructions(skill_id, variant)},
-        {"role": "user", "content": TASKS[skill_id] + "\n\nSynthetic source packet:\n" + json.dumps(packet, ensure_ascii=False, sort_keys=True)},
+        {"role": "user", "content": TASKS[skill_id] + "\n\nSource packet (simulated data):\n" + json.dumps(packet, ensure_ascii=False, sort_keys=True)},
     ]
     return {
         "model": MODEL,

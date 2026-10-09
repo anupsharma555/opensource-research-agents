@@ -8,19 +8,19 @@
     "tests/benchmarks/test_packets.py",
     "tests/benchmarks/test_results.py"
   ],
-  "local_code_bundle_sha256": "58cb64d5d1bd7fcd5d5cd8f98a23c003f8070efe0715c1f6f8f55bd0f4b323d0",
-  "packet_set_version": "1.0.4",
-  "proof_boundary": "No live provider, selected model, independent human panel, interface, or endurance run was performed.",
+  "local_code_bundle_sha256": "a1b88d7a7656c4d4d7341cade25e1a492d846750f1cf78ea1e14e96f01ce6c65",
+  "packet_set_version": "1.0.6",
+  "proof_boundary": "Current clinical-label packets were checked offline only. Historical model calls used the older fictional labels and do not qualify this packet version.",
   "scenario_results": [
     {
       "consumers": [
         {
-          "artifact": "docs/benchmarks/evidence/validation.txt",
+          "artifact": "docs/benchmarks/evidence/validation-sample-wording.txt",
           "assertions": "Frozen hash, exact span, worker/reference separation and structural run-record checks as applicable; see named tests.",
           "consumer": "benchmark packet contract",
           "proof_type": "fixture",
           "status": "passed",
-          "tested_code_sha256": "58cb64d5d1bd7fcd5d5cd8f98a23c003f8070efe0715c1f6f8f55bd0f4b323d0"
+          "tested_code_sha256": "a1b88d7a7656c4d4d7341cade25e1a492d846750f1cf78ea1e14e96f01ce6c65"
         },
         {
           "artifact": null,
@@ -39,21 +39,21 @@
           "tested_code_sha256": null
         }
       ],
-      "reference_sha256": "63bd642f0460fce3b39ced42606a7744e25f15936206ed566175004928a72c14",
+      "reference_sha256": "7634ecf16b9225fb8813b268e66013ae92707ee971fbd3a408d252cb3c41a177",
       "rubric_sha256": "f5dda5277315a1281b2a1eed308ed2a3c2406816486d601413369381dbdb6ba3",
       "scenario_id": "syn-abstract-disagreement",
-      "scenario_sha256": "2688edc336bbc3b94dc897d6cd90378b6555149edd39022dbc4f7c24ae75bdb6",
-      "scenario_version": "1.0.1"
+      "scenario_sha256": "83621c2c23e199ca777211ec2d773cb9dedc84bf078cd42ad40d6e8e53b90e62",
+      "scenario_version": "1.0.3"
     },
     {
       "consumers": [
         {
-          "artifact": "docs/benchmarks/evidence/validation.txt",
+          "artifact": "docs/benchmarks/evidence/validation-sample-wording.txt",
           "assertions": "Frozen hash, exact span, worker/reference separation and structural run-record checks as applicable; see named tests.",
           "consumer": "benchmark packet contract",
           "proof_type": "fixture",
           "status": "passed",
-          "tested_code_sha256": "58cb64d5d1bd7fcd5d5cd8f98a23c003f8070efe0715c1f6f8f55bd0f4b323d0"
+          "tested_code_sha256": "a1b88d7a7656c4d4d7341cade25e1a492d846750f1cf78ea1e14e96f01ce6c65"
         },
         {
           "artifact": null,
@@ -72,21 +72,21 @@
           "tested_code_sha256": null
         }
       ],
-      "reference_sha256": "2a261f58ab31f5680a6781b04b3fb1ee0d596085e0cefbf10e780cacd7cd0d73",
+      "reference_sha256": "9e7ad21b8489b51059597706666b18a9849698dc4ed2d41c4b10f432d22ec158",
       "rubric_sha256": "f5dda5277315a1281b2a1eed308ed2a3c2406816486d601413369381dbdb6ba3",
       "scenario_id": "syn-null-versus-error",
-      "scenario_sha256": "0ee9618dc86372877533db7a259636ba7dd060f659ecf56982583e27a92ec2e8",
-      "scenario_version": "1.0.1"
+      "scenario_sha256": "bc9700a7cf794d8cd71fae189660b1bcaa2844577947327fd236f30754b69cf3",
+      "scenario_version": "1.0.3"
     },
     {
       "consumers": [
         {
-          "artifact": "docs/benchmarks/evidence/validation.txt",
+          "artifact": "docs/benchmarks/evidence/validation-sample-wording.txt",
           "assertions": "Frozen hash, exact span, worker/reference separation and structural run-record checks as applicable; see named tests.",
           "consumer": "benchmark packet contract",
           "proof_type": "fixture",
           "status": "passed",
-          "tested_code_sha256": "58cb64d5d1bd7fcd5d5cd8f98a23c003f8070efe0715c1f6f8f55bd0f4b323d0"
+          "tested_code_sha256": "a1b88d7a7656c4d4d7341cade25e1a492d846750f1cf78ea1e14e96f01ce6c65"
         },
         {
           "artifact": null,
@@ -105,11 +105,11 @@
           "tested_code_sha256": null
         }
       ],
-      "reference_sha256": "eca0ea3aef7dc39fa105dce5d043c902ac7c12634816a83caa6fcd5a568fc443",
+      "reference_sha256": "e881d2b3863f6192e4053d494d001d7648eda1e6377d6874aa2d6b868b69c84d",
       "rubric_sha256": "f5dda5277315a1281b2a1eed308ed2a3c2406816486d601413369381dbdb6ba3",
       "scenario_id": "syn-route-recovery",
-      "scenario_sha256": "b6028bcb6559de2a49df1daafb1609a48eee04f5257705d818cd201aa2cd6bcc",
-      "scenario_version": "1.0.2"
+      "scenario_sha256": "0886b4932113aba0fcf5c285db417a46c116e4429ec03c2c4556ba8d0984bb41",
+      "scenario_version": "1.0.4"
     }
   ],
   "schema": "ora.benchmark.scenario-results.v1"

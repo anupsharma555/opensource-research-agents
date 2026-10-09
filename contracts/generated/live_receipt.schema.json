@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "requestId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Requestid",
+      "type": "string"
+    },
+    "reused": {
+      "default": false,
+      "title": "Reused",
+      "type": "boolean"
+    },
+    "runId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Runid",
+      "type": "string"
+    },
+    "status": {
+      "const": "queued",
+      "default": "queued",
+      "title": "Status",
+      "type": "string"
+    },
+    "taskId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Taskid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "requestId",
+    "runId",
+    "taskId"
+  ],
+  "title": "LiveReceipt",
+  "type": "object"
+}
