@@ -66,6 +66,20 @@
           "title": "Limitations",
           "type": "array"
         },
+        "producerAttemptId": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Producerattemptid"
+        },
         "title": {
           "minLength": 1,
           "title": "Title",
@@ -87,6 +101,64 @@
         "limitations"
       ],
       "title": "ArtifactView",
+      "type": "object"
+    },
+    "AttemptProvenanceView": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptedOutputReferences": {
+          "items": {
+            "$ref": "#/$defs/SavedRecordRef"
+          },
+          "title": "Acceptedoutputreferences",
+          "type": "array"
+        },
+        "attemptId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Attemptid",
+          "type": "string"
+        },
+        "callReferences": {
+          "items": {
+            "$ref": "#/$defs/SavedRecordRef"
+          },
+          "title": "Callreferences",
+          "type": "array"
+        },
+        "configurationReference": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SavedRecordRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "explanation": {
+          "minLength": 1,
+          "title": "Explanation",
+          "type": "string"
+        },
+        "inputReferences": {
+          "items": {
+            "$ref": "#/$defs/SavedRecordRef"
+          },
+          "title": "Inputreferences",
+          "type": "array"
+        },
+        "instanceReference": {
+          "$ref": "#/$defs/SavedRecordRef"
+        }
+      },
+      "required": [
+        "attemptId",
+        "instanceReference",
+        "explanation"
+      ],
+      "title": "AttemptProvenanceView",
       "type": "object"
     },
     "AttemptView": {
@@ -553,6 +625,134 @@
       "title": "PassageView",
       "type": "object"
     },
+    "RecordInspection": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "additionalProperties": true,
+          "title": "Data",
+          "type": "object"
+        },
+        "label": {
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "reference": {
+          "$ref": "#/$defs/SavedRecordRef"
+        }
+      },
+      "required": [
+        "reference",
+        "label",
+        "data"
+      ],
+      "title": "RecordInspection",
+      "type": "object"
+    },
+    "ResearchStep": {
+      "additionalProperties": false,
+      "description": "A readable account of a saved event, not private model reasoning.",
+      "properties": {
+        "action": {
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        },
+        "actorName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actorname"
+        },
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "inputReferences": {
+          "items": {
+            "$ref": "#/$defs/SavedRecordRef"
+          },
+          "title": "Inputreferences",
+          "type": "array"
+        },
+        "nextAction": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nextaction"
+        },
+        "outcome": {
+          "minLength": 1,
+          "title": "Outcome",
+          "type": "string"
+        },
+        "outputReferences": {
+          "items": {
+            "$ref": "#/$defs/SavedRecordRef"
+          },
+          "title": "Outputreferences",
+          "type": "array"
+        },
+        "proof": {
+          "minLength": 1,
+          "title": "Proof",
+          "type": "string"
+        },
+        "reasonSummary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasonsummary"
+        },
+        "recordedAt": {
+          "minLength": 1,
+          "title": "Recordedat",
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "summary": {
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "sequence",
+        "recordedAt",
+        "action",
+        "summary",
+        "outcome",
+        "proof"
+      ],
+      "title": "ResearchStep",
+      "type": "object"
+    },
     "ReturnedReasoning": {
       "additionalProperties": false,
       "properties": {
@@ -585,6 +785,175 @@
       "title": "ReturnedReasoning",
       "type": "object"
     },
+    "SavedRecordRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "version"
+      ],
+      "title": "SavedRecordRef",
+      "type": "object"
+    },
+    "SnapshotInspection": {
+      "additionalProperties": false,
+      "description": "Backend-saved context for inspection, separate from reader-facing findings.",
+      "properties": {
+        "acceptedOutputReferences": {
+          "items": {
+            "$ref": "#/$defs/SavedRecordRef"
+          },
+          "title": "Acceptedoutputreferences",
+          "type": "array"
+        },
+        "attempts": {
+          "items": {
+            "$ref": "#/$defs/AttemptProvenanceView"
+          },
+          "title": "Attempts",
+          "type": "array"
+        },
+        "followupTarget": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SavedRecordRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "initialSourceIds": {
+          "items": {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Initialsourceids",
+          "type": "array"
+        },
+        "records": {
+          "items": {
+            "$ref": "#/$defs/RecordInspection"
+          },
+          "title": "Records",
+          "type": "array"
+        },
+        "schemaVersion": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "snapshotReference": {
+          "$ref": "#/$defs/SavedRecordRef"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceProvenanceView"
+          },
+          "title": "Sources",
+          "type": "array"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/ResearchStep"
+          },
+          "title": "Steps",
+          "type": "array"
+        },
+        "timingBasis": {
+          "enum": [
+            "observed_local",
+            "controlled_clock"
+          ],
+          "title": "Timingbasis",
+          "type": "string"
+        }
+      },
+      "required": [
+        "snapshotReference",
+        "initialSourceIds",
+        "sources",
+        "attempts",
+        "records",
+        "acceptedOutputReferences",
+        "timingBasis"
+      ],
+      "title": "SnapshotInspection",
+      "type": "object"
+    },
+    "SourceProvenanceView": {
+      "additionalProperties": false,
+      "properties": {
+        "copyReference": {
+          "$ref": "#/$defs/SavedRecordRef"
+        },
+        "encounterReferences": {
+          "items": {
+            "$ref": "#/$defs/SavedRecordRef"
+          },
+          "title": "Encounterreferences",
+          "type": "array"
+        },
+        "fromSnapshotId": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fromsnapshotid"
+        },
+        "origin": {
+          "enum": [
+            "supplied",
+            "retrieved",
+            "reused"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "sourceId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Sourceid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sourceId",
+        "copyReference",
+        "encounterReferences",
+        "origin"
+      ],
+      "title": "SourceProvenanceView",
+      "type": "object"
+    },
     "SourceView": {
       "additionalProperties": false,
       "properties": {
@@ -592,7 +961,8 @@
           "enum": [
             "abstract_only",
             "full_text",
-            "locator_only"
+            "locator_only",
+            "supplied_text"
           ],
           "title": "Accessstate",
           "type": "string"
@@ -922,6 +1292,29 @@
       "title": "Events",
       "type": "array"
     },
+    "inputQuestion": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Inputquestion"
+    },
+    "inspection": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SnapshotInspection"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "messages": {
       "items": {
         "$ref": "#/$defs/MessageView"
@@ -931,6 +1324,30 @@
     },
     "mission": {
       "$ref": "#/$defs/MissionView"
+    },
+    "parentSnapshotId": {
+      "anyOf": [
+        {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Parentsnapshotid"
+    },
+    "proofKind": {
+      "default": "synthetic_sample",
+      "enum": [
+        "synthetic_sample",
+        "live_model_on_supplied_evidence",
+        "offline_test"
+      ],
+      "title": "Proofkind",
+      "type": "string"
     },
     "sampleVersion": {
       "minLength": 1,

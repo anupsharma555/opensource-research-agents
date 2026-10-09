@@ -26,7 +26,7 @@
   "expected_partial_outcome": "Retain B1 metadata, use B2/B3 from alternate route, note route_alpha failure and B2 symptom gap, and mark known-unvisited results as partial coverage.",
   "irrelevant_span_ids": [],
   "scenario_id": "syn-route-recovery",
-  "scenario_version": "1.0.2",
+  "scenario_version": "1.0.4",
   "schema": "ora.benchmark.reference.v1",
   "severe_error_examples": [
     {

@@ -1,0 +1,1570 @@
+{
+  "$defs": {
+    "AgentView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "role": {
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "role",
+        "status"
+      ],
+      "title": "AgentView",
+      "type": "object"
+    },
+    "ArtifactView": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "minLength": 1,
+          "title": "Body",
+          "type": "string"
+        },
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/Citation"
+          },
+          "title": "Citations",
+          "type": "array"
+        },
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        },
+        "producerAttemptId": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Producerattemptid"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "kind",
+        "title",
+        "body",
+        "citations",
+        "limitations"
+      ],
+      "title": "ArtifactView",
+      "type": "object"
+    },
+    "AttemptProvenanceView": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptedOutputReferences": {
+          "items": {
+            "$ref": "#/$defs/SavedRecordRef"
+          },
+          "title": "Acceptedoutputreferences",
+          "type": "array"
+        },
+        "attemptId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Attemptid",
+          "type": "string"
+        },
+        "callReferences": {
+          "items": {
+            "$ref": "#/$defs/SavedRecordRef"
+          },
+          "title": "Callreferences",
+          "type": "array"
+        },
+        "configurationReference": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SavedRecordRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "explanation": {
+          "minLength": 1,
+          "title": "Explanation",
+          "type": "string"
+        },
+        "inputReferences": {
+          "items": {
+            "$ref": "#/$defs/SavedRecordRef"
+          },
+          "title": "Inputreferences",
+          "type": "array"
+        },
+        "instanceReference": {
+          "$ref": "#/$defs/SavedRecordRef"
+        }
+      },
+      "required": [
+        "attemptId",
+        "instanceReference",
+        "explanation"
+      ],
+      "title": "AttemptProvenanceView",
+      "type": "object"
+    },
+    "AttemptView": {
+      "additionalProperties": false,
+      "properties": {
+        "agentId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Agentid",
+          "type": "string"
+        },
+        "endedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Endedat"
+        },
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "resultSummary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resultsummary"
+        },
+        "returnedReasoning": {
+          "$ref": "#/$defs/ReturnedReasoning"
+        },
+        "selectedModel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selectedmodel"
+        },
+        "skillVersions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Skillversions",
+          "type": "array"
+        },
+        "startedAt": {
+          "title": "Startedat",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "running",
+            "waiting",
+            "completed",
+            "failed",
+            "cancelled",
+            "uncertain"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "taskId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Taskid",
+          "type": "string"
+        },
+        "toolCalls": {
+          "items": {
+            "$ref": "#/$defs/ToolCallView"
+          },
+          "title": "Toolcalls",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "taskId",
+        "agentId",
+        "status",
+        "startedAt",
+        "toolCalls",
+        "skillVersions",
+        "returnedReasoning"
+      ],
+      "title": "AttemptView",
+      "type": "object"
+    },
+    "Citation": {
+      "additionalProperties": false,
+      "properties": {
+        "sourceId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Sourceid",
+          "type": "string"
+        },
+        "spanId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Spanid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sourceId",
+        "spanId"
+      ],
+      "title": "Citation",
+      "type": "object"
+    },
+    "ClaimView": {
+      "additionalProperties": false,
+      "properties": {
+        "disposition": {
+          "minLength": 1,
+          "title": "Disposition",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "supersedesVersion": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedesversion"
+        },
+        "supports": {
+          "items": {
+            "$ref": "#/$defs/Citation"
+          },
+          "title": "Supports",
+          "type": "array"
+        },
+        "taskId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Taskid",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "text",
+        "disposition",
+        "supports",
+        "taskId"
+      ],
+      "title": "ClaimView",
+      "type": "object"
+    },
+    "DiagnosticView": {
+      "additionalProperties": false,
+      "properties": {
+        "attemptId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attemptid"
+        },
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "message": {
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "occurredAt": {
+          "title": "Occurredat",
+          "type": "string"
+        },
+        "status": {
+          "minLength": 1,
+          "title": "Status",
+          "type": "string"
+        },
+        "taskId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Taskid"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "status",
+        "message",
+        "occurredAt"
+      ],
+      "title": "DiagnosticView",
+      "type": "object"
+    },
+    "LiveAgent": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "role": {
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "skillVersion": {
+          "minLength": 1,
+          "title": "Skillversion",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "role",
+        "skillVersion"
+      ],
+      "title": "LiveAgent",
+      "type": "object"
+    },
+    "LiveRunSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "agentIds": {
+          "items": {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Agentids",
+          "type": "array"
+        },
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "parentRunId": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parentrunid"
+        },
+        "question": {
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        },
+        "status": {
+          "minLength": 1,
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "question",
+        "status"
+      ],
+      "title": "LiveRunSummary",
+      "type": "object"
+    },
+    "MessageView": {
+      "additionalProperties": false,
+      "properties": {
+        "claimId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Claimid"
+        },
+        "createdAt": {
+          "title": "Createdat",
+          "type": "string"
+        },
+        "fromAgentId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Fromagentid",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "requestId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requestid"
+        },
+        "sourceId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sourceid"
+        },
+        "status": {
+          "enum": [
+            "requested",
+            "delivered",
+            "acknowledged",
+            "fulfilled"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "summary": {
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        },
+        "taskId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Taskid",
+          "type": "string"
+        },
+        "toAgentId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Toagentid",
+          "type": "string"
+        },
+        "updatedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Updatedat"
+        }
+      },
+      "required": [
+        "id",
+        "fromAgentId",
+        "toAgentId",
+        "taskId",
+        "status",
+        "summary",
+        "createdAt"
+      ],
+      "title": "MessageView",
+      "type": "object"
+    },
+    "MissionView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "latencyBasis": {
+          "minLength": 1,
+          "title": "Latencybasis",
+          "type": "string"
+        },
+        "latencyClass": {
+          "enum": [
+            "minimal",
+            "medium",
+            "long",
+            "very_long"
+          ],
+          "title": "Latencyclass",
+          "type": "string"
+        },
+        "question": {
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        },
+        "reportArtifactId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reportartifactid"
+        },
+        "scope": {
+          "title": "Scope",
+          "type": "string"
+        },
+        "startedAt": {
+          "title": "Startedat",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "waiting",
+            "completed",
+            "cancelled"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "question",
+        "scope",
+        "status",
+        "latencyClass",
+        "latencyBasis",
+        "startedAt"
+      ],
+      "title": "MissionView",
+      "type": "object"
+    },
+    "PassageView": {
+      "additionalProperties": false,
+      "properties": {
+        "locator": {
+          "minLength": 1,
+          "title": "Locator",
+          "type": "string"
+        },
+        "spanId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Spanid",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "spanId",
+        "locator",
+        "text"
+      ],
+      "title": "PassageView",
+      "type": "object"
+    },
+    "RecordInspection": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "additionalProperties": true,
+          "title": "Data",
+          "type": "object"
+        },
+        "label": {
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "reference": {
+          "$ref": "#/$defs/SavedRecordRef"
+        }
+      },
+      "required": [
+        "reference",
+        "label",
+        "data"
+      ],
+      "title": "RecordInspection",
+      "type": "object"
+    },
+    "ResearchSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "agents": {
+          "items": {
+            "$ref": "#/$defs/AgentView"
+          },
+          "title": "Agents",
+          "type": "array"
+        },
+        "artifacts": {
+          "items": {
+            "$ref": "#/$defs/ArtifactView"
+          },
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "attempts": {
+          "items": {
+            "$ref": "#/$defs/AttemptView"
+          },
+          "title": "Attempts",
+          "type": "array"
+        },
+        "capturedAt": {
+          "title": "Capturedat",
+          "type": "string"
+        },
+        "claims": {
+          "items": {
+            "$ref": "#/$defs/ClaimView"
+          },
+          "title": "Claims",
+          "type": "array"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/$defs/DiagnosticView"
+          },
+          "title": "Diagnostics",
+          "type": "array"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/TimelineView"
+          },
+          "title": "Events",
+          "type": "array"
+        },
+        "inputQuestion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inputquestion"
+        },
+        "inspection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SnapshotInspection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "messages": {
+          "items": {
+            "$ref": "#/$defs/MessageView"
+          },
+          "title": "Messages",
+          "type": "array"
+        },
+        "mission": {
+          "$ref": "#/$defs/MissionView"
+        },
+        "parentSnapshotId": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parentsnapshotid"
+        },
+        "proofKind": {
+          "default": "synthetic_sample",
+          "enum": [
+            "synthetic_sample",
+            "live_model_on_supplied_evidence",
+            "offline_test"
+          ],
+          "title": "Proofkind",
+          "type": "string"
+        },
+        "sampleVersion": {
+          "minLength": 1,
+          "title": "Sampleversion",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "snapshotId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Snapshotid",
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceView"
+          },
+          "title": "Sources",
+          "type": "array"
+        },
+        "tasks": {
+          "items": {
+            "$ref": "#/$defs/TaskView"
+          },
+          "title": "Tasks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "snapshotId",
+        "sampleVersion",
+        "capturedAt",
+        "mission",
+        "agents",
+        "tasks",
+        "attempts",
+        "messages",
+        "sources",
+        "claims",
+        "artifacts",
+        "events",
+        "diagnostics"
+      ],
+      "title": "ResearchSnapshot",
+      "type": "object"
+    },
+    "ResearchStep": {
+      "additionalProperties": false,
+      "description": "A readable account of a saved event, not private model reasoning.",
+      "properties": {
+        "action": {
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        },
+        "actorName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actorname"
+        },
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "inputReferences": {
+          "items": {
+            "$ref": "#/$defs/SavedRecordRef"
+          },
+          "title": "Inputreferences",
+          "type": "array"
+        },
+        "nextAction": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nextaction"
+        },
+        "outcome": {
+          "minLength": 1,
+          "title": "Outcome",
+          "type": "string"
+        },
+        "outputReferences": {
+          "items": {
+            "$ref": "#/$defs/SavedRecordRef"
+          },
+          "title": "Outputreferences",
+          "type": "array"
+        },
+        "proof": {
+          "minLength": 1,
+          "title": "Proof",
+          "type": "string"
+        },
+        "reasonSummary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasonsummary"
+        },
+        "recordedAt": {
+          "minLength": 1,
+          "title": "Recordedat",
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "summary": {
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "sequence",
+        "recordedAt",
+        "action",
+        "summary",
+        "outcome",
+        "proof"
+      ],
+      "title": "ResearchStep",
+      "type": "object"
+    },
+    "ReturnedReasoning": {
+      "additionalProperties": false,
+      "properties": {
+        "availability": {
+          "enum": [
+            "returned",
+            "absent",
+            "restricted",
+            "truncated"
+          ],
+          "title": "Availability",
+          "type": "string"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        }
+      },
+      "required": [
+        "availability"
+      ],
+      "title": "ReturnedReasoning",
+      "type": "object"
+    },
+    "SavedRecordRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "version"
+      ],
+      "title": "SavedRecordRef",
+      "type": "object"
+    },
+    "SnapshotInspection": {
+      "additionalProperties": false,
+      "description": "Backend-saved context for inspection, separate from reader-facing findings.",
+      "properties": {
+        "acceptedOutputReferences": {
+          "items": {
+            "$ref": "#/$defs/SavedRecordRef"
+          },
+          "title": "Acceptedoutputreferences",
+          "type": "array"
+        },
+        "attempts": {
+          "items": {
+            "$ref": "#/$defs/AttemptProvenanceView"
+          },
+          "title": "Attempts",
+          "type": "array"
+        },
+        "followupTarget": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SavedRecordRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "initialSourceIds": {
+          "items": {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Initialsourceids",
+          "type": "array"
+        },
+        "records": {
+          "items": {
+            "$ref": "#/$defs/RecordInspection"
+          },
+          "title": "Records",
+          "type": "array"
+        },
+        "schemaVersion": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "snapshotReference": {
+          "$ref": "#/$defs/SavedRecordRef"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceProvenanceView"
+          },
+          "title": "Sources",
+          "type": "array"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/ResearchStep"
+          },
+          "title": "Steps",
+          "type": "array"
+        },
+        "timingBasis": {
+          "enum": [
+            "observed_local",
+            "controlled_clock"
+          ],
+          "title": "Timingbasis",
+          "type": "string"
+        }
+      },
+      "required": [
+        "snapshotReference",
+        "initialSourceIds",
+        "sources",
+        "attempts",
+        "records",
+        "acceptedOutputReferences",
+        "timingBasis"
+      ],
+      "title": "SnapshotInspection",
+      "type": "object"
+    },
+    "SourceProvenanceView": {
+      "additionalProperties": false,
+      "properties": {
+        "copyReference": {
+          "$ref": "#/$defs/SavedRecordRef"
+        },
+        "encounterReferences": {
+          "items": {
+            "$ref": "#/$defs/SavedRecordRef"
+          },
+          "title": "Encounterreferences",
+          "type": "array"
+        },
+        "fromSnapshotId": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fromsnapshotid"
+        },
+        "origin": {
+          "enum": [
+            "supplied",
+            "retrieved",
+            "reused"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "sourceId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Sourceid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sourceId",
+        "copyReference",
+        "encounterReferences",
+        "origin"
+      ],
+      "title": "SourceProvenanceView",
+      "type": "object"
+    },
+    "SourceView": {
+      "additionalProperties": false,
+      "properties": {
+        "accessState": {
+          "enum": [
+            "abstract_only",
+            "full_text",
+            "locator_only",
+            "supplied_text"
+          ],
+          "title": "Accessstate",
+          "type": "string"
+        },
+        "contentHash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Contenthash"
+        },
+        "copyId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Copyid",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "passages": {
+          "items": {
+            "$ref": "#/$defs/PassageView"
+          },
+          "title": "Passages",
+          "type": "array"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        },
+        "retrievalStatus": {
+          "minLength": 1,
+          "title": "Retrievalstatus",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "copyId",
+        "version",
+        "title",
+        "accessState",
+        "retrievalStatus",
+        "passages"
+      ],
+      "title": "SourceView",
+      "type": "object"
+    },
+    "TaskView": {
+      "additionalProperties": false,
+      "properties": {
+        "activeOrWaiting": {
+          "title": "Activeorwaiting",
+          "type": "string"
+        },
+        "attemptIds": {
+          "items": {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Attemptids",
+          "type": "array"
+        },
+        "firstUsefulAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Firstusefulat"
+        },
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "latencyBasis": {
+          "minLength": 1,
+          "title": "Latencybasis",
+          "type": "string"
+        },
+        "latencyClass": {
+          "enum": [
+            "minimal",
+            "medium",
+            "long",
+            "very_long"
+          ],
+          "title": "Latencyclass",
+          "type": "string"
+        },
+        "parentTaskId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parenttaskid"
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "running",
+            "waiting",
+            "completed",
+            "failed",
+            "cancelled"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "targetArtifactId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Targetartifactid"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "status",
+        "latencyClass",
+        "latencyBasis",
+        "activeOrWaiting",
+        "attemptIds"
+      ],
+      "title": "TaskView",
+      "type": "object"
+    },
+    "TimelineView": {
+      "additionalProperties": false,
+      "properties": {
+        "agentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agentid"
+        },
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "summary": {
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        },
+        "taskId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Taskid"
+        },
+        "time": {
+          "title": "Time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "time",
+        "kind",
+        "summary"
+      ],
+      "title": "TimelineView",
+      "type": "object"
+    },
+    "ToolCallView": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "status"
+      ],
+      "title": "ToolCallView",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "agents": {
+      "items": {
+        "$ref": "#/$defs/LiveAgent"
+      },
+      "title": "Agents",
+      "type": "array"
+    },
+    "comparisonSnapshot": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ResearchSnapshot"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "enabled": {
+      "title": "Enabled",
+      "type": "boolean"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    },
+    "model": {
+      "minLength": 1,
+      "title": "Model",
+      "type": "string"
+    },
+    "runId": {
+      "anyOf": [
+        {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Runid"
+    },
+    "runs": {
+      "items": {
+        "$ref": "#/$defs/LiveRunSummary"
+      },
+      "title": "Runs",
+      "type": "array"
+    },
+    "snapshot": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ResearchSnapshot"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "enabled",
+    "model",
+    "agents",
+    "runs"
+  ],
+  "title": "LiveState",
+  "type": "object"
+}

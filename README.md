@@ -11,8 +11,9 @@ coordinate resources; scientific decisions remain with the collaborating agents.
 
 The current release is a **tested foundation and sample Mac app**, not a deployed
 autonomous research pipeline. It provides executable interfaces, evaluation
-packets, reusable skill packages and small architecture experiments. The app uses
-clearly labeled synthetic data. It does not call models or search providers.
+packets, reusable skill packages and small architecture experiments. The default app uses
+clearly labeled simulated data. An explicitly launched [local live extension](docs/development/live-research.md)
+connects Start and Follow-up to Groq over supplied evidence; it does not search the web.
 
 ## Try the foundation
 
@@ -44,9 +45,11 @@ The [prototype guide](ui/README.md) explains its review journeys and sample limi
 
 | Foundation | What it establishes |
 | --- | --- |
-| Research benchmark packets | Versioned synthetic sources, hidden evaluator references, fair-comparison conditions and separate quality/resource measures. |
+| Research benchmark packets | Versioned simulated sources, hidden evaluator references, fair-comparison conditions and separate quality/resource measures. |
 | Shared interfaces | Typed commands, read models, events, receipts and independent state transitions; Python and JavaScript validate the same fixtures. |
 | Recovery examples | Repeated-command handling, missed-event replay, peer-request semantics, delayed operations, pinned model configuration and stale-worker protection. |
+| Persistent state and evidence | Versioned SQLite records, immutable source files, stable agent identities, pinned configurations, normalized retrieval receipts and source-to-finding links. [Stage 2 checks](docs/development/stage2-verification.md) exercise recovery and recorded parent/child review without provider calls. |
+| Peer coordination and model turns | Durable proposals, reliable peer requests, separate resource permits, concurrent callbacks and exact selected-model request/response records. [Stage 3 checks](docs/development/stage3-verification.md) distinguish offline integration, bounded live protocol proof and the later mission host. |
 | Role and skill packages | Nine role definitions, a shared evidence-linking skill and an independent-appraisal skill, with provenance and private attempt state. |
 | Runtime and storage experiments | The same scripted collaboration tested through custom asyncio, LangGraph and Microsoft Agent Framework; local SQLite failure and recovery examples. |
 | React Mac prototype | Linked findings, source passages, claim versions, peer work, attempts, follow-up requests and separate diagnostics. |
@@ -62,6 +65,16 @@ You can inspect the same sample evidence from a terminal or a Codex task:
 These commands read the shared sample snapshot. They do not imply a live research
 run or certify the scientific validity of the fictional findings.
 
+For the persisted recorded workflow, use Atlas's **Open recorded Stage 2 review**
+entry point and the matching [read-only state inspector](docs/development/state-records.md).
+Both expose saved sources, exact configuration/input versions and readable agent
+steps separately from the findings.
+
+The [Stage 3 collaboration fixture](docs/development/stage3-inspection.md) shows
+independent callbacks progressing together, a dependent callback consuming saved
+work, and a peer request that remains open. Its Atlas view and command-line
+inspection read the same saved records; they do not start a research run.
+
 ## Architecture at a glance
 
 ```mermaid
@@ -76,7 +89,8 @@ flowchart LR
   Host --> Evidence[(Immutable source and result files)]
 ```
 
-The host and live adapters in this diagram are implementation targets. The first
+The production host and full source adapters in this diagram remain implementation
+targets. The optional local live extension exercises a smaller supplied-evidence path. The first
 supported design uses SQLite plus immutable files on a single host, with a small
 asyncio execution boundary. The Mac shell uses Tauri v2. These decisions are
 provisional and include evidence, alternatives and explicit conditions for change.

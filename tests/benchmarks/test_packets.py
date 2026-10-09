@@ -59,8 +59,8 @@ class PacketTests(unittest.TestCase):
         claims = {claim["claim_id"]: claim for claim in reference["acceptable_claims"]}
         self.assertIn("B2-denominator", claims["B-C1"]["support_span_ids"])
         self.assertIn("B3-denominator", claims["B-C2"]["support_span_ids"])
-        self.assertIn("120 youth", spans["B2-denominator"]["quote"])
-        self.assertIn("90 youth", spans["B3-denominator"]["quote"])
+        self.assertIn("120 young people", spans["B2-denominator"]["quote"])
+        self.assertIn("90 young people", spans["B3-denominator"]["quote"])
 
     def test_result_map_tracks_current_packets_without_claiming_future_proof(self) -> None:
         path = ROOT.parent.parent / "docs/benchmarks/evidence/scenario-result-map.json"

@@ -5,7 +5,7 @@ The Python validator in `src/ora/benchmarks/` is the executable schema authority
 | Record | Required identity and contents | Visibility |
 | --- | --- | --- |
 | Manifest | Packet-set version; scenario and reference paths, versions and canonical SHA-256 hashes; profile/baseline/rubric hashes | Developer and evaluator |
-| Scenario | `scenario_id`, `scenario_version`, fictional task/question/decision/audience/latency class, sources, initially visible source IDs, scripted events | Fixture driver; events are not in initial worker input |
+| Scenario | `scenario_id`, `scenario_version`, simulated task with real clinical labels, question/decision/audience/latency class, sources, initially visible source IDs, scripted events | Fixture driver; events are not in initial worker input |
 | Source | `source_id`, `source_version`, content surface, access state, `synthetic_project_owned` rights, body SHA-256, exact text and spans | Worker only when initially provided or subsequently delivered |
 | Span | `span_id`, exact `quote`, character `start`/`end`, and human-readable section/page locator | With its source copy |
 | Scripted event | `event_id`, delivery `step`, `kind`, actor, target, typed payload | Fixture driver until delivery step |

@@ -1,11 +1,11 @@
 {
-  "family": "fictional analysis interpretation",
+  "family": "simulated depression-score analysis",
   "initial_source_ids": [
     "C1"
   ],
   "review_type": "checked-result interpretation",
   "scenario_id": "syn-null-versus-error",
-  "scenario_version": "1.0.1",
+  "scenario_version": "1.0.3",
   "schema": "ora.benchmark.scenario.v1",
   "scripted_events": [
     {
@@ -38,32 +38,32 @@
   "sources": [
     {
       "access_state": "inspected_result",
-      "body": "Synthetic checked-analysis result. In a fictional dataset, 40 records in each group contributed to the planned comparison. The group means were 5.0 and 5.1 units; the checked difference was -0.1 units with a synthetic interval from -1.2 to 1.0. This is an imprecise null result, not proof that the groups are equivalent.",
-      "body_sha256": "b80879780c07c2fc4a84ce0c731ef408cc3dbc8e73a5ab16a96544878b3c5e38",
+      "body": "Checked-analysis result (simulated data). In a simulated dataset comparing cognitive behavioural therapy with attention control for adults with depression, 40 records in each group contributed to the planned comparison. The group means were 5.0 and 5.1 PHQ-9 points; the checked difference was -0.1 points with a interval from -1.2 to 1.0. This is an imprecise null result, not proof that the groups are equivalent.",
+      "body_sha256": "42172ee64dd0c4420f43b382b5bc2be6996338c9db51a4f4a6c0fa5a9eaed0ff",
       "rights": "synthetic_project_owned",
       "source_id": "C1",
-      "source_version": "1.0.0",
+      "source_version": "1.0.2",
       "spans": [
         {
-          "end": 121,
+          "end": 218,
           "locator": "Checked result, sample",
           "quote": "40 records in each group contributed to the planned comparison",
           "span_id": "C1-denominator",
-          "start": 59
+          "start": 156
         },
         {
-          "end": 243,
+          "end": 338,
           "locator": "Checked result, estimate",
-          "quote": "The group means were 5.0 and 5.1 units; the checked difference was -0.1 units with a synthetic interval from -1.2 to 1.0",
+          "quote": "The group means were 5.0 and 5.1 PHQ-9 points; the checked difference was -0.1 points with a interval from -1.2 to 1.0",
           "span_id": "C1-result",
-          "start": 123
+          "start": 220
         },
         {
-          "end": 319,
+          "end": 414,
           "locator": "Checked result, interpretation",
           "quote": "This is an imprecise null result, not proof that the groups are equivalent",
           "span_id": "C1-limitation",
-          "start": 245
+          "start": 340
         }
       ],
       "surface": "checked_result",
@@ -71,25 +71,25 @@
     },
     {
       "access_state": "technical_error",
-      "body": "Synthetic execution log. A separate attempted analysis ended with a parser exception before producing a checked estimate. The failure says nothing about the scientific direction of the result.",
-      "body_sha256": "67cd2f172e0d1591392e523b2fcc377573966fccb06d4caa5ba9a2bc5ef1d9a6",
+      "body": "Sample execution log. A separate attempted analysis ended with a parser exception before producing a checked estimate. The failure says nothing about the scientific direction of the result.",
+      "body_sha256": "21a472e1d724471736b3f43821317f5df58763401ed4af4e90c3f598c597db9a",
       "rights": "synthetic_project_owned",
       "source_id": "C2",
-      "source_version": "1.0.0",
+      "source_version": "1.0.1",
       "spans": [
         {
-          "end": 120,
+          "end": 117,
           "locator": "Execution log, error",
           "quote": "a parser exception before producing a checked estimate",
           "span_id": "C2-error",
-          "start": 66
+          "start": 63
         },
         {
-          "end": 191,
+          "end": 188,
           "locator": "Execution log, interpretation",
           "quote": "The failure says nothing about the scientific direction of the result",
           "span_id": "C2-limit",
-          "start": 122
+          "start": 119
         }
       ],
       "surface": "execution_log",
@@ -101,6 +101,6 @@
     "audience": "scientific project team",
     "decision": "Distinguish a checked imprecise null estimate from a failed computation and preserve a useful partial report.",
     "latency_class": "medium",
-    "question": "Does the fictional Protocol Q dataset show a difference in the planned outcome, and what can be said after a later parser failure?"
+    "question": "Do the simulated cognitive behavioural therapy and attention-control groups differ in PHQ-9 depression scores, and what can be said after a later parser failure?"
   }
 }

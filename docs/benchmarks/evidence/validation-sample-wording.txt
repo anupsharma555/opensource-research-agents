@@ -1,0 +1,20 @@
+Sample wording revision: offline validation, 2026-10-08
+
+Bundle v1.0.6; scenarios A/C v1.0.3 and B v1.0.4.
+Command: scripts/dev check
+Result: passed with local loopback access for resource-isolation tests.
+
+- Canonical contracts, generated types, benchmark and skill references: passed.
+- Python: 91 tests passed.
+- JavaScript: 20 shared accepted/rejected contract cases passed.
+- React: 14 tests passed.
+- TypeScript check and production frontend build: passed.
+- Both UI snapshots retain exact canonical source hashes and citation passages.
+- Numeric results, event sequences and source/span IDs remain unchanged.
+- Current offline skill plan regenerated; historical Groq receipt unchanged.
+- Real-publication case designs are v0.2.1; first-task source content is unchanged.
+
+The visible questions, findings and source descriptions use neutral sample wording.
+Provenance flags still identify simulated data separately from real publications.
+No model/provider call or production research mission was performed for this revision.
+Earlier validation records remain available alongside this one.

@@ -1,15 +1,19 @@
-"""Define the fields and allowed values for research records shared across components.
+"""Define the shared data shapes for requesting research work and inspecting results.
 
-Python validates these records, and generators turn the definitions into JSON rules
-and desktop TypeScript types. The definitions describe an unreleased interface;
-an actor ID inside a record does not authenticate its sender.
+Commands, queries, events, receipts, jobs, and evidence references carry IDs,
+versions, allowed states, and exact artifact or model details. Separate read-only
+snapshot models describe what the sample Mac app displays: tasks, sources, claims,
+reports, and diagnostics. These Python definitions reject unknown fields and are
+the source for generated JSON rules and desktop TypeScript types. A valid record
+shape does not authenticate its sender, persist a mission, or prove that a cited
+passage supports a claim.
 """
 
 import hashlib
 import json
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue, model_validator
 from pydantic.alias_generators import to_camel
 
 Identifier = Annotated[str, Field(min_length=1, max_length=160)]
@@ -73,9 +77,14 @@ class ModelSelection(WireModel):
     provider: Identifier
     model: Identifier
     reasoning_effort: str
-    settings: dict[str, str | int | float | bool] = Field(default_factory=dict)
+    settings: dict[str, JsonValue] = Field(default_factory=dict)
     configuration_hash: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
     change_reason: str | None = None
+
+    @model_validator(mode="after")
+    def finite_settings(self):
+        json.dumps(self.settings, allow_nan=False)
+        return self
 
     @staticmethod
     def calculate_hash(provider: str, model: str, reasoning_effort: str, settings=None) -> str:
@@ -86,7 +95,7 @@ class ModelSelection(WireModel):
             "settings": settings or {},
         }
         return hashlib.sha256(
-            json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+            json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
         ).hexdigest()
 
 
@@ -155,6 +164,7 @@ class OperationResult(WireModel):
 
 
 class EvidencePacket(WireModel):
+    mission_id: Identifier | None = None
     id: Identifier
     version: Version
     kind: Literal["published_evidence", "checked_result"]
@@ -353,7 +363,7 @@ class SourceView(WireModel):
     copy_id: Identifier
     version: Version
     title: Text
-    access_state: Literal["abstract_only", "full_text", "locator_only"]
+    access_state: Literal["abstract_only", "full_text", "locator_only", "supplied_text"]
     retrieval_status: Text
     content_hash: str | None = None
     provider: str | None = None
@@ -384,6 +394,7 @@ class ArtifactView(WireModel):
     body: Text
     citations: list[Citation]
     limitations: list[str]
+    producer_attempt_id: Identifier | None = None
 
 
 class TimelineView(WireModel):
@@ -405,8 +416,76 @@ class DiagnosticView(WireModel):
     occurred_at: str
 
 
+class SavedRecordRef(WireModel):
+    kind: Text
+    id: Identifier
+    version: Version
+
+
+class RecordInspection(WireModel):
+    reference: SavedRecordRef
+    label: Text
+    data: dict
+
+
+class SourceProvenanceView(WireModel):
+    source_id: Identifier
+    copy_reference: SavedRecordRef
+    encounter_references: list[SavedRecordRef]
+    origin: Literal["supplied", "retrieved", "reused"]
+    from_snapshot_id: Identifier | None = None
+
+
+class AttemptProvenanceView(WireModel):
+    attempt_id: Identifier
+    instance_reference: SavedRecordRef
+    configuration_reference: SavedRecordRef | None = None
+    call_references: list[SavedRecordRef] = Field(default_factory=list)
+    input_references: list[SavedRecordRef] = Field(default_factory=list)
+    accepted_output_references: list[SavedRecordRef] = Field(default_factory=list)
+    explanation: Text
+
+
+class ResearchStep(WireModel):
+    """A readable account of a saved event, not private model reasoning."""
+
+    id: Identifier
+    sequence: int = Field(ge=1)
+    recorded_at: Text
+    actor_name: str | None = None
+    action: Text
+    summary: Text
+    outcome: Text
+    input_references: list[SavedRecordRef] = Field(default_factory=list)
+    output_references: list[SavedRecordRef] = Field(default_factory=list)
+    reason_summary: str | None = None
+    next_action: str | None = None
+    proof: Text
+
+
+class SnapshotInspection(WireModel):
+    """Backend-saved context for inspection, separate from reader-facing findings."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    snapshot_reference: SavedRecordRef
+    initial_source_ids: list[Identifier]
+    sources: list[SourceProvenanceView]
+    attempts: list[AttemptProvenanceView]
+    records: list[RecordInspection]
+    accepted_output_references: list[SavedRecordRef]
+    followup_target: SavedRecordRef | None = None
+    timing_basis: Literal["observed_local", "controlled_clock"]
+    steps: list[ResearchStep] = Field(default_factory=list)
+
+
 class ResearchSnapshot(WireModel):
     schema_version: Literal["1.0"] = "1.0"
+    proof_kind: Literal[
+        "synthetic_sample", "live_model_on_supplied_evidence", "offline_test"
+    ] = "synthetic_sample"
+    parent_snapshot_id: Identifier | None = None
+    input_question: str | None = None
+    inspection: SnapshotInspection | None = None
     snapshot_id: Identifier
     sample_version: Text
     captured_at: str
@@ -420,3 +499,208 @@ class ResearchSnapshot(WireModel):
     artifacts: list[ArtifactView]
     events: list[TimelineView]
     diagnostics: list[DiagnosticView]
+
+
+class LiveAgent(WireModel):
+    id: Identifier
+    name: Text
+    role: Text
+    skill_version: Text
+
+
+class LiveStartRequest(WireModel):
+    request_id: Identifier
+    question: Text
+    scope: str = ""
+    evidence_text: Text
+    agent_ids: list[Identifier] = Field(min_length=1)
+
+
+class LiveFollowupRequest(WireModel):
+    request_id: Identifier
+    parent_run_id: Identifier
+    parent_snapshot_id: Identifier
+    target_id: Identifier
+    target_version: Version
+    question: Text
+    scope: str = ""
+    agent_ids: list[Identifier] = Field(min_length=1)
+
+
+class LiveReceipt(WireModel):
+    request_id: Identifier
+    run_id: Identifier
+    task_id: Identifier
+    status: Literal["queued"] = "queued"
+    reused: bool = False
+
+
+class LiveRunSummary(WireModel):
+    id: Identifier
+    question: Text
+    status: Text
+    parent_run_id: Identifier | None = None
+    agent_ids: list[Identifier] = Field(default_factory=list)
+
+
+class LiveState(WireModel):
+    enabled: bool
+    model: Text
+    agents: list[LiveAgent]
+    runs: list[LiveRunSummary]
+    snapshot: ResearchSnapshot | None = None
+    comparison_snapshot: ResearchSnapshot | None = None
+    run_id: Identifier | None = None
+    error: str | None = None
+
+Sha256 = Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
+
+
+class BlobDescriptor(WireModel):
+    sha256: Sha256
+    size: int = Field(ge=0)
+
+
+class RetrievalWindow(WireModel):
+    offset: int | None = Field(default=None, ge=0)
+    cursor: str | None = None
+    limit: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def one_paging_mode(self):
+        if self.offset is not None and self.cursor is not None:
+            raise ValueError("offset and cursor cannot both be set")
+        return self
+
+
+class RetrievalContinuation(WireModel):
+    action: Literal["continue", "stop", "switch_route"]
+    reason: str = Field(min_length=1)
+
+
+class RetrievalResultWindow(WireModel):
+    returned_count: int = Field(ge=0)
+    accepted_count: int = Field(ge=0)
+    returned_offset: int | None = Field(default=None, ge=0)
+    returned_cursor: str | None = None
+    provider_total: int | None = Field(default=None, ge=0)  # None means unknown.
+    known_unseen_count: int | None = Field(default=None, ge=0)
+    more_available: Literal["yes", "no", "unknown"]
+    next_window: RetrievalWindow | None = None
+    provider_exposure_limit: int | None = Field(default=None, ge=0)
+    provider_stop_reason: Literal[
+        "exhausted", "more_available", "provider_limit", "quota_wait", "error", "unknown"
+    ]
+    continuation: RetrievalContinuation | None = None  # Peer choice, not provider status.
+    window_errors: list[str] = Field(default_factory=list)
+
+
+class RetrievalUsage(WireModel):
+    unit: str = Field(min_length=1)  # Preserve provider-native unit names.
+    amount: float = Field(ge=0)
+    basis: Literal["observed", "documented"]
+
+
+class RetrievalOmittedField(WireModel):
+    """Explain a field omitted by the mapping without retaining its private value."""
+
+    field: Text
+    reason: Text
+
+
+class RetrievalItem(WireModel):
+    item_id: str = Field(min_length=1)  # Retrieval identity, never a study-family ID.
+    rank: int = Field(gt=0)
+    rank_scope: Literal["page", "global_offset", "provider_reported"]
+    provider_item_id: str | None = None
+    original_url: str | None = None  # Sanitized if token-bearing; see flag/hash.
+    original_url_sha256: Sha256 | None = None
+    url_redacted: bool
+    title: str | None = None
+    content: str | None = None  # Only retained if rights_status == permitted.
+    content_sha256: Sha256 | None = None
+    content_retained: bool
+    content_unretained_reason: str | None = None
+    access_surface: Literal[
+        "metadata", "teaser", "abstract", "passage", "full_text", "provider_summary"
+    ]
+    origin: Literal["original_source", "provider_generated"]
+    rights_status: Literal["unknown", "permitted", "restricted", "not_retained"]
+    access_status: Literal["unknown", "available", "limited", "unavailable"]
+    redacted_fields: list[str] = Field(default_factory=list)
+    scientific_metadata: dict[str, JsonValue] = Field(default_factory=dict)
+    structured_content: dict[str, JsonValue] = Field(default_factory=dict)
+    omitted_fields: list[RetrievalOmittedField] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def finite_scientific_content(self):
+        json.dumps([self.scientific_metadata, self.structured_content], allow_nan=False)
+        return self
+
+
+class RetrievalItemError(WireModel):
+    position: int = Field(ge=0)
+    code: Literal["invalid_item"]
+    reason: str = Field(min_length=1)  # Controlled diagnostic, never raw payload.
+
+
+class RetrievalPayloadRef(WireModel):
+    blob: BlobDescriptor | None = None
+    original_sha256: Sha256
+    sanitized_sha256: Sha256
+    transformation_version: str = Field(min_length=1)
+    redacted_paths: list[str] = Field(default_factory=list)
+    retained_projection: Literal["allowlisted_provider_fields", "mapped_scientific_fields"]
+    original_retained: Literal[False] = False
+
+
+class RetrievalRequest(WireModel):
+    mission_id: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+    request_id: str = Field(min_length=1)
+    attempt_id: str = Field(min_length=1)
+    delivery_id: str = Field(min_length=1)
+    agent_instance_id: str | None = None
+    route: str = Field(min_length=1)
+    provider: str = Field(min_length=1)
+    index: str | None = None
+    operation: Literal["search", "fetch"]
+    query: str | None = None  # Exact after redaction; raw-query digest belongs in lineage.
+    query_sha256: Sha256 | None = None
+    filters: dict = Field(default_factory=dict)  # Sanitized before validation/persistence.
+    requested_at: AwareDatetime  # Require timezone-aware in canonical validator.
+    requested_window: RetrievalWindow
+
+
+class RetrievalFailure(WireModel):
+    category: Literal["provider_error", "quota_wait", "malformed_payload"]
+    code: Literal[
+        "route_unavailable", "rate_limited", "unauthorized", "not_found",
+        "timeout", "upstream_error", "unspecified",
+    ]
+    retry_after_seconds: float | None = Field(default=None, ge=0)
+
+
+class RetrievalEnvelope(WireModel):
+    schema_version: Literal["1.0"] = "1.0"
+    mapping_version: Text = "legacy-allowlist-v1"
+    request: RetrievalRequest
+    retrieved_at: AwareDatetime  # Require timezone-aware in canonical validator.
+    outcome: Literal[
+        "empty", "success", "partial", "provider_failure", "item_failure", "malformed_payload"
+    ]
+    failure: RetrievalFailure | None = None
+    returned_window: RetrievalResultWindow
+    items: list[RetrievalItem] = Field(default_factory=list)
+    item_errors: list[RetrievalItemError] = Field(default_factory=list)
+    usage: list[RetrievalUsage] = Field(default_factory=list)
+    raw_payload_ref: RetrievalPayloadRef | None = None
+    omitted_fields: list[RetrievalOmittedField] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def item_counts(self):
+        if self.returned_window.accepted_count != len(self.items):
+            raise ValueError("accepted count must equal item list length")
+        if self.returned_window.returned_count < len(self.items) + len(self.item_errors):
+            raise ValueError("returned count cannot omit accepted or failed items")
+        return self

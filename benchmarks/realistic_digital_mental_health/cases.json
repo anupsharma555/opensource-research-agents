@@ -1,0 +1,505 @@
+{
+  "schema": "ora.benchmark.case_design.v0.1",
+  "suite_id": "digital-mental-health-reeact",
+  "suite_version": "0.2.1",
+  "synthetic": false,
+  "status": "curated_case_designs_not_registered_runtime_cases",
+  "source_inventory": "sources.json",
+  "question_scope": "Historical study-family research, not a current treatment recommendation",
+  "metrics": [
+    "factual_support",
+    "coverage_and_study_identity",
+    "interpretation",
+    "citation_mechanics",
+    "reader_usefulness",
+    "peer_contribution",
+    "recovery",
+    "active_and_wait_time",
+    "provider_usage",
+    "hypothesis_discrimination_and_priority_rationale",
+    "experimental_reproducibility",
+    "project_feasibility_and_actionability"
+  ],
+  "evaluation_rule": "Report dimensions separately and preserve correct partial findings. A broken identifier is not automatically a false scientific claim. Reference judgments must cite exact evidence and permit justified alternatives.",
+  "testing_conditions": [
+    "matched retained sources for controlled skill/model comparison",
+    "same question with permitted adaptive retrieval for workflow comparison"
+  ],
+  "cases": [
+    {
+      "case_id": "DMH-01",
+      "title": "Answer a focused question from real trial abstracts",
+      "latency_class": "minimal",
+      "profile": "single_role",
+      "source_ids": [
+        "reeact-journal",
+        "reeact2-hta-abstract"
+      ],
+      "nine_role_plan_sections": [
+        "7.1",
+        "7.2"
+      ],
+      "worker_task": "For a research lead, explain what REEACT and REEACT-2 each compared, what outcome and follow-up were assessed, and what the supplied abstracts support about the role of human support. State what further source detail would improve the answer. Keep the two comparisons distinct.",
+      "expected_artifacts": [
+        "A short direct answer with study-specific citations",
+        "A compact comparison of participants, interventions, comparator, outcome and time",
+        "Specific follow-up questions only where they affect interpretation"
+      ],
+      "independent_review_checks": [
+        "Preserves the different comparisons and time points",
+        "Uses explicit abstract facts without withholding all conclusions",
+        "Does not equate a nonsignificant result with equivalence"
+      ],
+      "boundary": "A simple useful answer should not require a full systematic review or every role. The private controlled packet uses the NIHR abstract under the report's private-study terms; it is not for public redistribution.",
+      "execution_status": "not_run",
+      "input_views": [
+        {
+          "source_id": "reeact-journal",
+          "stage": "initial",
+          "surface": "published_abstract",
+          "source_copy_sha256": "e8056cae67d09f781ebeab3646582a80942126a58a8cf8fb6d9730dd6994f05c",
+          "view_text_sha256": "cee9d14144edb7c800609f6ebbe7dbab4fd92795335194111068cf6e68442129",
+          "locator": "Article front matter, Abstract",
+          "span_id": "reeact-journal-abstract"
+        },
+        {
+          "source_id": "reeact2-hta-abstract",
+          "stage": "initial",
+          "surface": "published_abstract",
+          "source_copy_sha256": "3e4abdcef7ae324c84e288ad69bb2e2b4712e968c2947276e29b46a77812cd13",
+          "view_text_sha256": "c6c9cb49f9645bcb93811893823c0f05bcdd14426a1ef74deee96f9e4a00aab2",
+          "locator": "Europe PMC indexed Abstract of NIHR report DOI10.3310/hta20890",
+          "span_id": "reeact2-hta-abstract"
+        }
+      ],
+      "input_rule": "Controlled condition supplies only these two exact abstract views. Additional retrieval is a separately declared workflow condition with its own recorded evidence opportunity.",
+      "primary_project_aim": "aim_1",
+      "supports_project_aims": [
+        "aim_1"
+      ],
+      "coverage_type": "functional_contribution"
+    },
+    {
+      "case_id": "DMH-02",
+      "title": "Find complementary reports and reconcile study identity",
+      "latency_class": "medium",
+      "profile": "retrieval_only",
+      "source_ids": [
+        "reeact-journal",
+        "reeact2-journal"
+      ],
+      "nine_role_plan_sections": [
+        "7.1",
+        "7.6"
+      ],
+      "worker_task": "Find the trial reports, full reports, registry entries, corrections and participant-experience research related to these studies. Use complementary search queries or public scholarly routes where useful. Group multiple reports of one trial without suppressing distinct relevant studies.",
+      "expected_artifacts": [
+        "Search/query/route receipts and complete source inventory",
+        "Study-to-publication map with uncertain matches visible",
+        "Passage-linked additions from accessible complementary reports"
+      ],
+      "independent_review_checks": [
+        "Multiple publications do not become extra randomized trials",
+        "Abstract, full text, registry and qualitative evidence remain distinguishable",
+        "A failed source route leads to a permitted alternative or useful partial result"
+      ],
+      "boundary": "Known sources are coverage anchors, not a closed whitelist or mandatory provider sequence.",
+      "execution_status": "not_run",
+      "input_rule": "These source IDs identify seed opportunities, not a frozen controlled packet. The harness must declare and hash the exact exposed views before scoring a controlled comparison; adaptive workflow retrieval retains each encountered copy and query.",
+      "primary_project_aim": "aim_1",
+      "supports_project_aims": [
+        "aim_1"
+      ],
+      "coverage_type": "functional_contribution"
+    },
+    {
+      "case_id": "DMH-03",
+      "title": "Expand an abstract appraisal with retrieved methods",
+      "latency_class": "medium",
+      "profile": "single_role",
+      "source_ids": [
+        "reeact-journal",
+        "reeact-hta",
+        "reeact-correction"
+      ],
+      "nine_role_plan_sections": [
+        "7.1",
+        "7.3"
+      ],
+      "worker_task": "Prepare a preliminary appraisal from the abstract, then seek the methods and any relevant correction. Explain which judgments changed after the additional evidence. Use verified methodological guidance when formal appraisal is useful, and separate missing reporting from demonstrated bias.",
+      "expected_artifacts": [
+        "Versioned preliminary and updated appraisals",
+        "Changed claims linked to newly inspected passages",
+        "Reporting completeness, bias, applicability and precision assessed separately"
+      ],
+      "independent_review_checks": [
+        "Supported preliminary facts remain available",
+        "Changes reflect actual methods or correction text",
+        "Method versions/categories are verified or explicitly unspecified"
+      ],
+      "boundary": "Use source-level or newly anchored passages when a supplied excerpt omits a reported fact.",
+      "execution_status": "not_run",
+      "input_views": [
+        {
+          "source_id": "reeact-journal",
+          "stage": "initial",
+          "surface": "published_abstract",
+          "source_copy_sha256": "e8056cae67d09f781ebeab3646582a80942126a58a8cf8fb6d9730dd6994f05c",
+          "view_text_sha256": "cee9d14144edb7c800609f6ebbe7dbab4fd92795335194111068cf6e68442129",
+          "locator": "Article front matter, Abstract",
+          "span_id": "reeact-journal-abstract"
+        },
+        {
+          "source_id": "reeact-journal",
+          "stage": "follow_up",
+          "surface": "full_text_xml",
+          "source_copy_sha256": "e8056cae67d09f781ebeab3646582a80942126a58a8cf8fb6d9730dd6994f05c",
+          "locator": "Article methods and results sections"
+        },
+        {
+          "source_id": "reeact-hta",
+          "stage": "follow_up",
+          "surface": "metadata_and_published_abstract",
+          "source_copy_sha256": "c9fa8d21d11d6be00140b96fa5e5e10d99dfc597ef6a5ced4fb6bf5c02c2a0e0",
+          "locator": "Indexed abstract; full report acquisition remains separate"
+        },
+        {
+          "source_id": "reeact-correction",
+          "stage": "follow_up",
+          "surface": "full_text_xml",
+          "source_copy_sha256": "ef650cefa2591fc173f55d0fa8a73836fff782139df41da2528087538583df1c",
+          "locator": "Correction body"
+        }
+      ],
+      "input_rule": "Start from the pinned abstract view. In the workflow condition, additional sources become available through an agent evidence request; retain its reason and acquisition receipt. A controlled before/after condition declares its second source view in advance. Do not expose later views or evaluator labels in initial input.",
+      "primary_project_aim": "aim_1",
+      "supports_project_aims": [
+        "aim_1"
+      ],
+      "coverage_type": "functional_contribution"
+    },
+    {
+      "case_id": "DMH-04",
+      "title": "Extract a PDF outcome table and explain discrepancies",
+      "latency_class": "medium",
+      "profile": "single_role",
+      "source_ids": [
+        "reeact2-hta-pdf"
+      ],
+      "nine_role_plan_sections": [
+        "7.2",
+        "7.3",
+        "7.7"
+      ],
+      "worker_task": "Extract the four-month outcome table with arm labels, observed and missing participant counts, outcome coding and adjusted estimates. Compare the numerical values with nearby narrative. Distinguish faithful transcription from any separately labeled arithmetic check.",
+      "expected_artifacts": [
+        "Structured table rows plus exact page/table/cell references",
+        "A short explanation of any disagreement between table and prose",
+        "Reported estimates and recalculated quantities stored separately"
+      ],
+      "independent_review_checks": [
+        "Column headers and missing-data counts stay attached to the correct arm/time",
+        "Table/prose conflicts remain visible rather than silently corrected",
+        "A parser problem is not a clinical finding"
+      ],
+      "boundary": "Inspect the rendered page when table extraction loses structure; do not require one parser brand.",
+      "execution_status": "not_run",
+      "measurement_phase": "parser_fidelity_and_result_interpretation",
+      "input_views": [
+        {
+          "source_id": "reeact2-hta-pdf",
+          "stage": "initial",
+          "surface": "publisher_pdf",
+          "source_copy_sha256": "9d1854652f3ff3ad9c6ab947baf0193df1dbfc1fed3fae3607bded5d416c3bc2",
+          "locator": "PDF pages 51 and 52 (printed pages 25 and 26), with full report available for context"
+        }
+      ],
+      "primary_project_aim": "aim_1",
+      "supports_project_aims": [
+        "aim_1",
+        "aim_2"
+      ],
+      "coverage_type": "functional_contribution"
+    },
+    {
+      "case_id": "DMH-05",
+      "title": "Use a peer critique to revise a source-grounded synthesis",
+      "latency_class": "long",
+      "profile": "peer_exchange",
+      "source_ids": [
+        "reeact-journal",
+        "reeact-correction",
+        "reeact2-journal",
+        "reeact2-hta-pdf",
+        "reeact-experience"
+      ],
+      "nine_role_plan_sections": [
+        "7.1",
+        "7.2",
+        "7.3",
+        "7.9"
+      ],
+      "worker_task": "Have collaborating research agents produce and independently critique a useful synthesis of the trial and participant-experience evidence. Peers may request additional sources, challenge an interpretation or propose a follow-up. Revise affected claims while retaining supported findings and unresolved disagreements.",
+      "expected_artifacts": [
+        "Initial synthesis, source-specific critique, peer reply and revised synthesis",
+        "Each revision linked to its earlier claim and supporting source",
+        "A record of what changed, what did not and why"
+      ],
+      "independent_review_checks": [
+        "The critique adds evidence or improves interpretation rather than just repeating text",
+        "A correction does not silently introduce new factual or citation defects",
+        "Qualitative themes inform questions without becoming proof of a causal mechanism"
+      ],
+      "boundary": "No fixed number of messages or revision rounds; score useful contribution and resulting output.",
+      "execution_status": "not_run",
+      "input_rule": "These source IDs identify seed opportunities, not a frozen controlled packet. The harness must declare and hash the exact exposed views before scoring a controlled comparison; adaptive workflow retrieval retains each encountered copy and query.",
+      "primary_project_aim": "aim_1",
+      "supports_project_aims": [
+        "aim_1"
+      ],
+      "coverage_type": "functional_contribution"
+    },
+    {
+      "case_id": "DMH-06",
+      "title": "Make one saved research run understandable to a new reviewer",
+      "latency_class": "medium",
+      "profile": "complete_workflow",
+      "source_ids": [
+        "reeact-journal",
+        "reeact2-journal",
+        "reeact2-hta-pdf"
+      ],
+      "nine_role_plan_sections": [
+        "7.9"
+      ],
+      "worker_task": "Review a saved run and show its question, source scope, answer, appraisal, peer feedback and changes. Let a reader move from an important claim to its exact source and the call or task that used it, without mixing raw run metadata into the report.",
+      "expected_artifacts": [
+        "Readable report and separate linked diagnostics",
+        "Matching app and Codex source/claim/attempt identities",
+        "Observed user journeys for finding an answer and checking its support"
+      ],
+      "independent_review_checks": [
+        "The reviewer can identify what run is loaded and whether it uses simulated data, replayed results or live retrieval",
+        "Input, output, critique and revision are distinguishable",
+        "Unavailable records are honest and do not hide available findings"
+      ],
+      "boundary": "This is a later connected-app test; the current sample does not implement this run.",
+      "execution_status": "not_run",
+      "input_rule": "These source IDs identify seed opportunities, not a frozen controlled packet. The harness must declare and hash the exact exposed views before scoring a controlled comparison; adaptive workflow retrieval retains each encountered copy and query.",
+      "primary_project_aim": null,
+      "supports_project_aims": [
+        "aim_1",
+        "aim_2",
+        "aim_3"
+      ],
+      "coverage_type": "cross_cutting_infrastructure"
+    },
+    {
+      "case_id": "DMH-07",
+      "title": "Develop competing hypotheses and a feasible discriminating study",
+      "latency_class": "long",
+      "profile": "complete_workflow",
+      "source_ids": [
+        "reeact-journal",
+        "reeact2-journal",
+        "reeact-experience"
+      ],
+      "nine_role_plan_sections": [
+        "7.4",
+        "7.5",
+        "7.6",
+        "7.7",
+        "7.8"
+      ],
+      "worker_task": "Use the trial and participant-experience evidence to propose distinct competing explanations for engagement and outcome differences. Check related prior work, explain which observations each explanation can and cannot account for, and propose discriminating predictions. Justify provisional priorities through evidence, relevance and feasibility, then sketch a protocol and analysis plan for a useful next test. Peers may revise the ranking or retain alternatives; distinguish proposals from observed results.",
+      "expected_artifacts": [
+        "Source-linked hypothesis portfolio with competing explanations and discriminating predictions",
+        "Prior-work checks and explicit reasons for provisional priorities",
+        "Feasible protocol/data/analysis sketch linked to the hypothesis version"
+      ],
+      "independent_review_checks": [
+        "Prior-work checks precede a novelty claim",
+        "Data requirements and unavailable variables are explicit",
+        "No invented participant data or executed experiment results",
+        "A synthesis alone is not a hypothesis portfolio; candidates have distinguishable predictions",
+        "Priorities follow stated evidence and feasibility reasons; no single required ranking"
+      ],
+      "boundary": "No single mandatory hypothesis or study design; judge coherence, feasibility and evidence linkage.",
+      "execution_status": "not_run",
+      "input_rule": "These source IDs identify seed opportunities, not a frozen controlled packet. The harness must declare and hash the exact exposed views before scoring a controlled comparison; adaptive workflow retrieval retains each encountered copy and query.",
+      "primary_project_aim": "aim_1",
+      "supports_project_aims": [
+        "aim_1",
+        "aim_2"
+      ],
+      "coverage_type": "functional_outcome"
+    },
+    {
+      "case_id": "DMH-08",
+      "title": "Continue useful research across waits and interruption",
+      "latency_class": "very_long",
+      "profile": "complete_workflow",
+      "source_ids": [
+        "reeact-journal",
+        "reeact2-journal",
+        "reeact2-hta-pdf",
+        "reeact-correction"
+      ],
+      "nine_role_plan_sections": [
+        "7.1",
+        "7.2",
+        "7.3",
+        "7.9"
+      ],
+      "worker_task": "Continue a research task across delayed retrieval, peer work, a context refresh and a process interruption. Recover the same selected model/skill settings, source versions and open questions, then produce useful further evidence or a justified revised report.",
+      "expected_artifacts": [
+        "Persisted progress and recoverable context with exact configuration lineage",
+        "Historical and resumed attempts, waits and useful contributions",
+        "A report available while independent work continues"
+      ],
+      "independent_review_checks": [
+        "No silent model/skill switch or duplicated accepted result",
+        "Waiting time is distinct from active work and first useful output",
+        "Progress is judged by evidence and task completion rather than elapsed duration alone"
+      ],
+      "boundary": "An hours-long execution profile is later runtime work, not a requirement to keep a process busy.",
+      "execution_status": "not_run",
+      "input_rule": "These source IDs identify seed opportunities, not a frozen controlled packet. The harness must declare and hash the exact exposed views before scoring a controlled comparison; adaptive workflow retrieval retains each encountered copy and query.",
+      "primary_project_aim": null,
+      "supports_project_aims": [
+        "aim_1",
+        "aim_2",
+        "aim_3"
+      ],
+      "coverage_type": "cross_cutting_infrastructure"
+    },
+    {
+      "case_id": "DMH-09",
+      "title": "Execute and independently check a bounded analysis",
+      "latency_class": "long",
+      "profile": "complete_workflow",
+      "source_ids": [
+        "reeact2-hta-pdf"
+      ],
+      "nine_role_plan_sections": [
+        "7.3",
+        "7.5",
+        "7.6",
+        "7.7",
+        "7.9"
+      ],
+      "primary_project_aim": "aim_2",
+      "supports_project_aims": [
+        "aim_2",
+        "aim_3"
+      ],
+      "coverage_type": "functional_outcome",
+      "worker_task": "Develop and execute a small reproducible analysis of the reported REEACT-2 outcome counts, with a versioned plan, source-derived input table, code, settings and result record. Specify the estimand and missing-data assumptions. Reproduce a descriptive contrast or explore a declared sensitivity analysis, then have an independent checker verify the computation and its interpretation. This is a retrospective reproduction or exploratory analysis, not a prospective confirmatory test of an unseen result. An explicitly labeled simulated-data variant may test the same mechanics without becoming evidence about the trial.",
+      "expected_artifacts": [
+        "Versioned analysis plan and source-derived table with arm/time/outcome definitions",
+        "Executed code, input hashes, environment, job/attempt receipt and retained outputs",
+        "Independent result check and distinctions among supported, null, inconclusive and technical-failure outcomes"
+      ],
+      "independent_review_checks": [
+        "The recorded result can be reproduced from the declared inputs and executable code",
+        "Aggregate counts are not presented as individual-participant data or an exact reproduction of a covariate-adjusted published estimate",
+        "Reported numbers, derived calculations and simulations remain distinct",
+        "An execution failure does not become a scientific null; a valid null is retained without a positivity requirement"
+      ],
+      "input_rule": "Freeze the exposed source table, its verified cell/page locators, analysis plan and environment before execution. The historical published result is known, so label the exercise retrospective. Use the existing shared job interface when implemented; no executed job is claimed by this design.",
+      "boundary": "This is a first bounded Aim 2 case. It does not prove a clinical mechanism, a new treatment effect, or all experiment types. E2B and production execution remain separate implementation work.",
+      "execution_status": "not_run"
+    },
+    {
+      "case_id": "DMH-10",
+      "title": "Turn evidence and result status into an actionable project brief",
+      "latency_class": "long",
+      "profile": "complete_workflow",
+      "source_ids": [
+        "reeact-journal",
+        "reeact2-hta-abstract",
+        "reeact-experience"
+      ],
+      "nine_role_plan_sections": [
+        "7.4",
+        "7.5",
+        "7.6",
+        "7.7",
+        "7.8",
+        "7.9"
+      ],
+      "primary_project_aim": "aim_3",
+      "supports_project_aims": [
+        "aim_1",
+        "aim_2",
+        "aim_3"
+      ],
+      "coverage_type": "functional_outcome",
+      "worker_task": "Using the evidence portfolio and any actually checked analysis results, produce a practical project or collaboration proposal for the next useful research step. Explain the research need, evidence, scientific rationale, required data and expertise, feasible work packages, resource assumptions and observable success criteria. Distinguish a prospective brief with pending results from a result-backed proposal. For a null, inconclusive or failed analysis, justify revision, a narrower project or closure of that branch while preserving unaffected work. Treat collaborator fit as a researched proposition, not verified interest.",
+      "expected_artifacts": [
+        "Reader-facing project or collaboration brief with evidence/result links",
+        "Work packages, necessary resources, feasibility assumptions and success criteria",
+        "Explicit proceed, revise, defer or close-this-branch recommendation with reasons and retained alternatives"
+      ],
+      "independent_review_checks": [
+        "The brief is usable for a planning discussion and its next steps follow from the evidence",
+        "Pending, simulated, failed and actually executed results are labeled honestly",
+        "Partner capabilities require public support; interest, commitments, access and funding are not invented",
+        "Positive, informative-null, inconclusive and technical-failure input variants lead to justified rather than mechanically identical recommendations",
+        "No outreach, data sharing or resource commitment occurs unless separately authorized"
+      ],
+      "input_rule": "Use versioned outputs from the evidence and hypothesis cases. Add the checked DMH-09 artifact only when one actually exists; otherwise mark analysis pending. A future evaluator may supply explicitly simulated alternative result states to test truthful brief adaptation.",
+      "boundary": "No single mandatory project, collaborator or branch decision. The evaluator scores evidence linkage, feasibility and usefulness; this case does not authorize external outreach.",
+      "execution_status": "not_run"
+    }
+  ],
+  "project_aims": [
+    {
+      "aim_id": "aim_1",
+      "plan_section": "3.1",
+      "title": "Evidence to questions and a ranked hypothesis portfolio",
+      "success": "Peers turn broad evidence into distinct, testable explanations with source-linked predictions, prior-work checks and justified priorities."
+    },
+    {
+      "aim_id": "aim_2",
+      "plan_section": "3.2",
+      "title": "Selected hypotheses to bounded experiments with public or simulated data",
+      "success": "A versioned protocol, permitted data and executed analysis produce independently checked results whose limitations and execution status are explicit."
+    },
+    {
+      "aim_id": "aim_3",
+      "plan_section": "3.3",
+      "title": "Findings to a project, collaboration proposal or an honest stop",
+      "success": "Evidence and result status inform an actionable project or collaboration brief, a revised direction or a justified branch disposition."
+    }
+  ],
+  "connected_workflow_check": {
+    "purpose": "A later integrated scenario must trace evidence and hypothesis versions through an actually executed/checkable result to a project brief or justified branch disposition.",
+    "aim_1_cases": [
+      "DMH-01",
+      "DMH-02",
+      "DMH-03",
+      "DMH-04",
+      "DMH-05",
+      "DMH-07"
+    ],
+    "aim_2_cases": [
+      "DMH-07",
+      "DMH-09"
+    ],
+    "aim_3_cases": [
+      "DMH-10"
+    ],
+    "shared_checks": [
+      "DMH-06",
+      "DMH-08"
+    ],
+    "feedback_examples": [
+      "A data-feasibility finding revises a hypothesis or protocol",
+      "A null or contrary analysis revises the portfolio or project brief",
+      "A collaboration requirement prompts additional evidence or a different study design"
+    ],
+    "execution_rule": "These are evaluation relationships, not a mandatory serial route. Each aim can be tested with declared versioned inputs while other branches proceed.",
+    "execution_status": "not_run"
+  }
+}

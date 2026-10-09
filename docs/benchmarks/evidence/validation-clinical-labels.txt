@@ -1,0 +1,19 @@
+Clinical-label benchmark revision: offline validation, 2026-10-08
+
+Bundle v1.0.5; scenarios A/C v1.0.2 and B v1.0.3.
+Command: scripts/dev check
+Result: passed with local loopback access for resource-isolation tests.
+The sandboxed attempt denied three temporary localhost binds; it was not a data failure.
+
+- Canonical contracts, generated types, benchmark and skill references: passed.
+- Python: 91 tests passed.
+- JavaScript: 20 shared accepted/rejected contract cases passed.
+- React: 13 tests passed.
+- TypeScript check and production frontend build: passed.
+- Both UI sample copies match canonical source hashes and exact passages.
+- Previous numeric results, event sequences, source/span IDs and reference judgments preserved.
+- Current offline skill plan regenerated; historical Groq receipt unchanged.
+
+These checks exercise simulated data with real clinical labels. No model/provider
+call, clinical validation or production research mission was performed for this revision.
+The original benchmark transcript remains in validation.txt.

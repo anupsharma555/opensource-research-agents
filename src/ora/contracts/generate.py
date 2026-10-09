@@ -16,10 +16,15 @@ from .models import (
     Event,
     EvidencePacket,
     JobRequest,
+    LiveFollowupRequest,
+    LiveReceipt,
+    LiveStartRequest,
+    LiveState,
     OperationResult,
     Query,
     Receipt,
     ResearchSnapshot,
+    RetrievalEnvelope,
     Subscription,
 )
 
@@ -33,6 +38,11 @@ MODELS = {
     "job": JobRequest,
     "operation": OperationResult,
     "subscription": Subscription,
+    "live_start": LiveStartRequest,
+    "live_followup": LiveFollowupRequest,
+    "live_receipt": LiveReceipt,
+    "live_state": LiveState,
+    "retrieval": RetrievalEnvelope,
 }
 
 

@@ -72,3 +72,9 @@ Do not copy `.venv`, `node_modules`, local caches or native build output into Gi
 
 An optional provider, framework or sandbox being unavailable affects its own
 qualification. It does not prevent the shared offline foundation from being used.
+
+## Optional live Atlas connection
+
+See [local live research](live-research.md) for explicit model activation, private
+state, native/browser launch, inspection commands and repeatable test inputs.
+The default setup and checks do not activate this provider.

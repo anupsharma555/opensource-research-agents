@@ -17,7 +17,7 @@
     "currency_code": "USD",
     "allowed_tool_names": [],
     "fixed_source_ids": ["A1", "A2", "A3", "A4"],
-    "note": "A concrete proposed evaluation allowance for a controlled synthetic comparison, to be reviewed and declared before any actual run. It is not an observed spend, a runtime research limit, or a scientific duration cap."
+    "note": "A concrete proposed evaluation allowance for a controlled comparison using simulated data, to be reviewed and declared before any actual run. It is not an observed spend, a runtime research limit, or a scientific duration cap."
   },
   "comparison_arms": [
     {

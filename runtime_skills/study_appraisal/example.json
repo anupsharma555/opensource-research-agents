@@ -10,22 +10,22 @@
       "locators": ["Abstract, sentence 3"],
       "validation_record": "synthetic-quality-receipt-A1",
       "access_surface": "abstract",
-      "summary": "Synthetic A1 reports response counts at six weeks with wide uncertainty.",
+      "summary": "Simulated A1 reports response counts at six weeks with wide uncertainty.",
       "limitations": ["Methods table not inspected"]
     },
     "locator": "Abstract, sentence 3",
     "method_id": "synthetic-design-rubric-v1",
-    "study_design": "fictional randomized study",
+    "study_design": "simulated randomized study",
     "outcome": "response",
-    "comparison": "Lantern Brief Skills versus attention control",
+    "comparison": "cognitive behavioural therapy versus attention control",
     "time_point": "six weeks",
     "judgments": {
       "reporting_completeness": "Outcome counts reported; methods details unavailable in this abstract.",
       "risk_of_bias": "unknown from this abstract",
-      "applicability": "Adults with fictional Condition Y match the example question.",
-      "precision": "Wide synthetic interval; estimate is imprecise."
+      "applicability": "Adults with depression match the example question.",
+      "precision": "Wide simulated interval; estimate is imprecise."
     },
-    "rationale": "This is a synthetic example of a result-scoped record, not a validated appraisal."
+    "rationale": "This is a simulated example of a result-scoped record, not a validated appraisal."
   },
   "expected_status": "agent_judgment_pending_independent_check"
 }

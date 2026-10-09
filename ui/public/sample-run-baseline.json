@@ -1,13 +1,13 @@
 {
   "schemaVersion": "1.0",
   "snapshotId": "syn-abstract-disagreement-baseline-snapshot",
-  "sampleVersion": "1.0.1",
+  "sampleVersion": "1.0.3",
   "capturedAt": "2026-10-08T14:08:00Z",
   "mission": {
     "id": "mission-fictional-adult-baseline",
     "version": 1,
-    "question": "For adults with fictional Condition Y, what do the available synthetic studies say about Lantern Brief Skills versus attention control at six weeks?",
-    "scope": "Published abstracts only; verify population, comparator and time point. Do not infer inaccessible methods or adverse events.",
+    "question": "For adults with depression, what do the available studies say about cognitive behavioural therapy versus attention control at six weeks?",
+    "scope": "Simulated abstracts with real clinical labels; verify population, comparator and time point. Do not infer inaccessible methods or adverse events.",
     "status": "waiting",
     "latencyClass": "very_long",
     "latencyBasis": "Initial abstract reading while a separate adult comparison is pending; no deadline.",
@@ -79,7 +79,7 @@
       "toolCalls": [
         {
           "name": "Read scripted abstract A1",
-          "provider": "Synthetic benchmark packet",
+          "provider": "Sample benchmark packet",
           "status": "completed"
         }
       ],
@@ -156,23 +156,23 @@
   "sources": [
     {
       "id": "A1",
-      "copyId": "A1-copy-v1",
-      "version": 1,
-      "title": "Adult study A · Lantern Brief Skills vs attention control",
+      "copyId": "A1-copy-v3",
+      "version": 3,
+      "title": "Adult study A · cognitive behavioural therapy vs attention control",
       "accessState": "abstract_only",
       "retrievalStatus": "available",
-      "provider": "Synthetic benchmark packet",
-      "contentHash": "2bfa1e78a58139bf2ee923123a169bbb0ed6ca2b01a8900e02b017e30aa26975",
+      "provider": "Sample benchmark packet",
+      "contentHash": "0f26f222d6267d3737f9496e2879252f1b380ec69c4dbc5b2f14c299c95ad3ac",
       "passages": [
         {
           "spanId": "A1-pop",
           "locator": "Abstract, sentence 2",
-          "text": "80 adults with Condition Y, 40 received Lantern Brief Skills and 40 received attention control"
+          "text": "80 adults with depression, 40 received cognitive behavioural therapy and 40 received attention control"
         },
         {
           "spanId": "A1-result",
           "locator": "Abstract, sentence 3",
-          "text": "At six weeks, response occurred in 18 of 40 versus 12 of 40 participants; the synthetic risk-difference interval was -4 to 34 percentage points"
+          "text": "At six weeks, response occurred in 18 of 40 versus 12 of 40 participants; the risk-difference interval was -4 to 34 percentage points"
         },
         {
           "spanId": "A1-gap",
@@ -203,7 +203,7 @@
       "version": 1,
       "kind": "report",
       "title": "Early abstract reading",
-      "body": "The first synthetic adult abstract reports a favorable response direction, 18/40 versus 12/40 at six weeks. The interval includes no difference, so benefit is not established.",
+      "body": "The first adult abstract reports a favorable response direction, 18/40 versus 12/40 at six weeks. The interval includes no difference, so benefit is not established.",
       "citations": [
         {
           "sourceId": "A1",
@@ -220,7 +220,7 @@
       "id": "event-1",
       "time": "2026-10-08T14:00:00Z",
       "kind": "mission_started",
-      "summary": "Synthetic mission opened."
+      "summary": "Sample mission opened."
     },
     {
       "id": "event-2",

@@ -1,0 +1,838 @@
+{
+  "$defs": {
+    "BlobDescriptor": {
+      "additionalProperties": false,
+      "properties": {
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size": {
+          "minimum": 0,
+          "title": "Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sha256",
+        "size"
+      ],
+      "title": "BlobDescriptor",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "RetrievalContinuation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "continue",
+            "stop",
+            "switch_route"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "reason"
+      ],
+      "title": "RetrievalContinuation",
+      "type": "object"
+    },
+    "RetrievalFailure": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "enum": [
+            "provider_error",
+            "quota_wait",
+            "malformed_payload"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "code": {
+          "enum": [
+            "route_unavailable",
+            "rate_limited",
+            "unauthorized",
+            "not_found",
+            "timeout",
+            "upstream_error",
+            "unspecified"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "retryAfterSeconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retryafterseconds"
+        }
+      },
+      "required": [
+        "category",
+        "code"
+      ],
+      "title": "RetrievalFailure",
+      "type": "object"
+    },
+    "RetrievalItem": {
+      "additionalProperties": false,
+      "properties": {
+        "accessStatus": {
+          "enum": [
+            "unknown",
+            "available",
+            "limited",
+            "unavailable"
+          ],
+          "title": "Accessstatus",
+          "type": "string"
+        },
+        "accessSurface": {
+          "enum": [
+            "metadata",
+            "teaser",
+            "abstract",
+            "passage",
+            "full_text",
+            "provider_summary"
+          ],
+          "title": "Accesssurface",
+          "type": "string"
+        },
+        "content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content"
+        },
+        "contentRetained": {
+          "title": "Contentretained",
+          "type": "boolean"
+        },
+        "contentSha256": {
+          "anyOf": [
+            {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Contentsha256"
+        },
+        "contentUnretainedReason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Contentunretainedreason"
+        },
+        "itemId": {
+          "minLength": 1,
+          "title": "Itemid",
+          "type": "string"
+        },
+        "omittedFields": {
+          "items": {
+            "$ref": "#/$defs/RetrievalOmittedField"
+          },
+          "title": "Omittedfields",
+          "type": "array"
+        },
+        "origin": {
+          "enum": [
+            "original_source",
+            "provider_generated"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "originalUrl": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Originalurl"
+        },
+        "originalUrlSha256": {
+          "anyOf": [
+            {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Originalurlsha256"
+        },
+        "providerItemId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provideritemid"
+        },
+        "rank": {
+          "exclusiveMinimum": 0,
+          "title": "Rank",
+          "type": "integer"
+        },
+        "rankScope": {
+          "enum": [
+            "page",
+            "global_offset",
+            "provider_reported"
+          ],
+          "title": "Rankscope",
+          "type": "string"
+        },
+        "redactedFields": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Redactedfields",
+          "type": "array"
+        },
+        "rightsStatus": {
+          "enum": [
+            "unknown",
+            "permitted",
+            "restricted",
+            "not_retained"
+          ],
+          "title": "Rightsstatus",
+          "type": "string"
+        },
+        "scientificMetadata": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Scientificmetadata",
+          "type": "object"
+        },
+        "structuredContent": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Structuredcontent",
+          "type": "object"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "urlRedacted": {
+          "title": "Urlredacted",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "itemId",
+        "rank",
+        "rankScope",
+        "urlRedacted",
+        "contentRetained",
+        "accessSurface",
+        "origin",
+        "rightsStatus",
+        "accessStatus"
+      ],
+      "title": "RetrievalItem",
+      "type": "object"
+    },
+    "RetrievalItemError": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "const": "invalid_item",
+          "title": "Code",
+          "type": "string"
+        },
+        "position": {
+          "minimum": 0,
+          "title": "Position",
+          "type": "integer"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "position",
+        "code",
+        "reason"
+      ],
+      "title": "RetrievalItemError",
+      "type": "object"
+    },
+    "RetrievalOmittedField": {
+      "additionalProperties": false,
+      "description": "Explain a field omitted by the mapping without retaining its private value.",
+      "properties": {
+        "field": {
+          "minLength": 1,
+          "title": "Field",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "field",
+        "reason"
+      ],
+      "title": "RetrievalOmittedField",
+      "type": "object"
+    },
+    "RetrievalPayloadRef": {
+      "additionalProperties": false,
+      "properties": {
+        "blob": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BlobDescriptor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "originalRetained": {
+          "const": false,
+          "default": false,
+          "title": "Originalretained",
+          "type": "boolean"
+        },
+        "originalSha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Originalsha256",
+          "type": "string"
+        },
+        "redactedPaths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Redactedpaths",
+          "type": "array"
+        },
+        "retainedProjection": {
+          "enum": [
+            "allowlisted_provider_fields",
+            "mapped_scientific_fields"
+          ],
+          "title": "Retainedprojection",
+          "type": "string"
+        },
+        "sanitizedSha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Sanitizedsha256",
+          "type": "string"
+        },
+        "transformationVersion": {
+          "minLength": 1,
+          "title": "Transformationversion",
+          "type": "string"
+        }
+      },
+      "required": [
+        "originalSha256",
+        "sanitizedSha256",
+        "transformationVersion",
+        "retainedProjection"
+      ],
+      "title": "RetrievalPayloadRef",
+      "type": "object"
+    },
+    "RetrievalRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "agentInstanceId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agentinstanceid"
+        },
+        "attemptId": {
+          "minLength": 1,
+          "title": "Attemptid",
+          "type": "string"
+        },
+        "deliveryId": {
+          "minLength": 1,
+          "title": "Deliveryid",
+          "type": "string"
+        },
+        "filters": {
+          "additionalProperties": true,
+          "title": "Filters",
+          "type": "object"
+        },
+        "index": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Index"
+        },
+        "missionId": {
+          "minLength": 1,
+          "title": "Missionid",
+          "type": "string"
+        },
+        "operation": {
+          "enum": [
+            "search",
+            "fetch"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "provider": {
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "query": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Query"
+        },
+        "querySha256": {
+          "anyOf": [
+            {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Querysha256"
+        },
+        "requestId": {
+          "minLength": 1,
+          "title": "Requestid",
+          "type": "string"
+        },
+        "requestedAt": {
+          "format": "date-time",
+          "title": "Requestedat",
+          "type": "string"
+        },
+        "requestedWindow": {
+          "$ref": "#/$defs/RetrievalWindow"
+        },
+        "route": {
+          "minLength": 1,
+          "title": "Route",
+          "type": "string"
+        },
+        "taskId": {
+          "minLength": 1,
+          "title": "Taskid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "missionId",
+        "taskId",
+        "requestId",
+        "attemptId",
+        "deliveryId",
+        "route",
+        "provider",
+        "operation",
+        "requestedAt",
+        "requestedWindow"
+      ],
+      "title": "RetrievalRequest",
+      "type": "object"
+    },
+    "RetrievalResultWindow": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptedCount": {
+          "minimum": 0,
+          "title": "Acceptedcount",
+          "type": "integer"
+        },
+        "continuation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RetrievalContinuation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "knownUnseenCount": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Knownunseencount"
+        },
+        "moreAvailable": {
+          "enum": [
+            "yes",
+            "no",
+            "unknown"
+          ],
+          "title": "Moreavailable",
+          "type": "string"
+        },
+        "nextWindow": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RetrievalWindow"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "providerExposureLimit": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Providerexposurelimit"
+        },
+        "providerStopReason": {
+          "enum": [
+            "exhausted",
+            "more_available",
+            "provider_limit",
+            "quota_wait",
+            "error",
+            "unknown"
+          ],
+          "title": "Providerstopreason",
+          "type": "string"
+        },
+        "providerTotal": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Providertotal"
+        },
+        "returnedCount": {
+          "minimum": 0,
+          "title": "Returnedcount",
+          "type": "integer"
+        },
+        "returnedCursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Returnedcursor"
+        },
+        "returnedOffset": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Returnedoffset"
+        },
+        "windowErrors": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Windowerrors",
+          "type": "array"
+        }
+      },
+      "required": [
+        "returnedCount",
+        "acceptedCount",
+        "moreAvailable",
+        "providerStopReason"
+      ],
+      "title": "RetrievalResultWindow",
+      "type": "object"
+    },
+    "RetrievalUsage": {
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "minimum": 0,
+          "title": "Amount",
+          "type": "number"
+        },
+        "basis": {
+          "enum": [
+            "observed",
+            "documented"
+          ],
+          "title": "Basis",
+          "type": "string"
+        },
+        "unit": {
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "unit",
+        "amount",
+        "basis"
+      ],
+      "title": "RetrievalUsage",
+      "type": "object"
+    },
+    "RetrievalWindow": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cursor"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Limit"
+        },
+        "offset": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Offset"
+        }
+      },
+      "title": "RetrievalWindow",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "failure": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RetrievalFailure"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "itemErrors": {
+      "items": {
+        "$ref": "#/$defs/RetrievalItemError"
+      },
+      "title": "Itemerrors",
+      "type": "array"
+    },
+    "items": {
+      "items": {
+        "$ref": "#/$defs/RetrievalItem"
+      },
+      "title": "Items",
+      "type": "array"
+    },
+    "mappingVersion": {
+      "default": "legacy-allowlist-v1",
+      "minLength": 1,
+      "title": "Mappingversion",
+      "type": "string"
+    },
+    "omittedFields": {
+      "items": {
+        "$ref": "#/$defs/RetrievalOmittedField"
+      },
+      "title": "Omittedfields",
+      "type": "array"
+    },
+    "outcome": {
+      "enum": [
+        "empty",
+        "success",
+        "partial",
+        "provider_failure",
+        "item_failure",
+        "malformed_payload"
+      ],
+      "title": "Outcome",
+      "type": "string"
+    },
+    "rawPayloadRef": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RetrievalPayloadRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request": {
+      "$ref": "#/$defs/RetrievalRequest"
+    },
+    "retrievedAt": {
+      "format": "date-time",
+      "title": "Retrievedat",
+      "type": "string"
+    },
+    "returnedWindow": {
+      "$ref": "#/$defs/RetrievalResultWindow"
+    },
+    "schemaVersion": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "usage": {
+      "items": {
+        "$ref": "#/$defs/RetrievalUsage"
+      },
+      "title": "Usage",
+      "type": "array"
+    }
+  },
+  "required": [
+    "request",
+    "retrievedAt",
+    "outcome",
+    "returnedWindow"
+  ],
+  "title": "RetrievalEnvelope",
+  "type": "object"
+}

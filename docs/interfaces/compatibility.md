@@ -1,6 +1,6 @@
 # Wire and stored-record compatibility
 
-The current [Python contract models](../../src/ora/contracts/models.py) accept `schemaVersion: "1.0"` for commands, queries, events, and research snapshots. They reject unknown fields. The [generated schemas](../../contracts/generated/) and [desktop TypeScript](../../ui/src/generated/contracts.ts) are derived outputs, not separate authorities. Only the research snapshot currently has generated desktop types. The [contract service](../../src/ora/contracts/service.py) is a local executable example; it does not yet provide a version-negotiated network transport, production migration runner, or upgrade/rollback mechanism.
+The current [Python contract models](../../src/ora/contracts/models.py) accept `schemaVersion: "1.0"` for commands, queries, events, and research snapshots. They reject unknown fields. The [generated schemas](../../contracts/generated/) and [desktop TypeScript](../../ui/src/generated/contracts.ts) are derived outputs, not separate authorities. Research snapshots and local live request, receipt and state records have generated desktop types. The [contract service](../../src/ora/contracts/service.py) is a local executable example; it does not yet provide a version-negotiated network transport, production migration runner, or upgrade/rollback mechanism.
 
 ## Three different versions
 
@@ -36,10 +36,65 @@ The interface owner maintains `ora.contracts.models`, generated schemas and the 
 
 The focused fixture uses a synthetic active mission with one queued task and one peer request. Its rejected command leaves the two accepted events unchanged; after restart a compatible sibling adds a third event. That establishes local rejection and continuation, not production transport authentication or a mixed-version deployment. Recheck only the affected command schema, generated JavaScript validator, receipt/replay, pending-state recovery and client view when this boundary changes; unrelated scientific scoring need not rerun unless its inputs change. The [module map](../development/modules.md) identifies each component's owner and later integration boundary.
 
-The current repository does **not** implement dual-version negotiation, migration, production backup, or mixed-version deployment. This is the compatibility work required before claiming them. The offline service proves a smaller boundary: schema validation, version checks, a durable receipt/event transaction, retained fixture-artifact lookup, and ordered replay. The [independent runtime comparison](../decisions/runtime-comparison.md) likewise used scripted calls rather than a live provider or long mission.
+The example contract service does **not** implement dual-version negotiation or mixed-version deployment. The separate Stage 2 store implements local schema migration and verified backup/restore, with its own [proof boundaries](../development/state-records.md); this does not qualify production upgrades. The offline service proves a smaller boundary: schema validation, version checks, a durable receipt/event transaction, retained fixture-artifact lookup, and ordered replay. The [independent runtime comparison](../decisions/runtime-comparison.md) likewise used scripted calls rather than a live provider or long mission.
 
 ## Evidence and wait rules during upgrades
 
 `published_evidence` and `checked_result` are distinct packet kinds in the [model](../../src/ora/contracts/models.py). For either kind, keep the artifact version, hash, locator, and validation record stable or record an explicit superseding version. A source copy's byte check does not prove claim support or study quality; a sandbox artifact's transport success does not prove a valid scientific result. New client fields should preserve that distinction and the separate display of reader report, diagnostics, and provider-returned reasoning.
 
 A descriptive latency class is not a timeout. A request timeout and lease apply to an operation or temporary owner. A waiting operation must retain a durable next-check/wake instruction; an uncertain one retains what outcome evidence is missing. During an upgrade, preserve those wake and reconciliation records, reattach by stable operation ID, and let other eligible branches continue. Failures should produce affected-action receipts or explicit partial results, without a global human approval gate or an arbitrary mission deadline.
+
+## Local live extension (unreleased)
+
+Research snapshots add defaulted `proofKind`, `parentSnapshotId` and `inputQuestion`
+fields; source access adds `supplied_text`. New Live request/receipt/state schemas
+include requested agent IDs and exact parent/target versions. Existing snapshots
+remain readable by the new models. Older strict clients may reject these added
+fields or enum values: regenerate and deploy client and local host together. This
+is an unreleased, matched-checkout extension, not negotiated wire compatibility
+or a production store migration.
+
+`ArtifactView.producerAttemptId` is optional. New local live reports record the
+attempt that published them; existing saved artifacts remain readable without
+being rewritten. The reader labels a unique identical-text match in an older
+snapshot as a match, not an explicit author pointer. Deploy generated clients and
+the local host together; this addition does not qualify older strict readers.
+
+## Stage 2 inspection and retrieval extension (unreleased)
+
+`ResearchSnapshot.inspection` is optional and defaults to absent. Its saved-record
+references, source/attempt provenance and default-empty `steps` describe accepted
+local records. A step contains a plain-language action, actor when known, outcome,
+exact input/output references, and only recorded explanation and next action.
+Old sample snapshots still validate; an older strict client may reject the new
+field. Deploy the generated client and backend from the same checkout.
+
+`RetrievalEnvelope` is a new canonical `1.0` wire record for reference adapters,
+generated alongside the other schemas and desktop types. It separates request,
+attempt, delivery, result window, item errors, typed usage and sanitized payload
+provenance. It does not assert conformance of any live provider.
+
+The local `ora.state` database records a separate schema version. Its tested
+version 1-to-2 migration adds scoped review requirements and an index; migration
+failure rolls back, and older unsupported readers reject the affected store.
+Recorded development snapshots written before event cursors were introduced are
+not a released compatibility format. Regenerate paired demonstration exports
+from a fresh private store; preserve old development stores as historical proof.
+
+The additive version 2-to-3 migration adds read-only overview views and
+`record_origins` for newly accepted records. Existing bodies, revisions and
+relationships are unchanged; missing historical proof/build/timing fields stay
+unknown. Current read-only record inspection can still open version 2 without
+migrating it. Overview views require the tested migration on a copy. The shared
+store may use the live database filename while keeping the same record format;
+backup manifests preserve that filename, with `state.sqlite3` as the legacy default.
+
+Retrieval records now optionally carry nested scientific metadata, structured
+content, explicit omissions and a mapping version. Model settings accept finite
+nested JSON, and evidence packets may declare their mission. Earlier records
+remain readable by these models; older strict consumers are not qualified to
+accept newly emitted fields. Regenerated schemas/types and the shared fixture
+checks are the cross-language proof. Live provenance uses a separate versioned
+ledger in the same SQLite file; its explicit migration retains historical
+payloads and marks reconstructed or unavailable facts rather than replacing
+them with current settings. See the [live inspection guide](../development/live-provenance.md).

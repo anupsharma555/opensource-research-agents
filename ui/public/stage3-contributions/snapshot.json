@@ -1,0 +1,4820 @@
+{
+  "schemaVersion": "1.0",
+  "proofKind": "offline_test",
+  "parentSnapshotId": null,
+  "inputQuestion": "How do three peers process one synthetic input?",
+  "inspection": {
+    "schemaVersion": "1.0",
+    "snapshotReference": {
+      "kind": "research_snapshot",
+      "id": "stage3-contribution-review-snapshot-v1",
+      "version": 1
+    },
+    "initialSourceIds": [],
+    "sources": [],
+    "attempts": [
+      {
+        "attemptId": "attempt-a-fast",
+        "instanceReference": {
+          "kind": "agent_instance",
+          "id": "agent-35479f72753447fc920b704352994456",
+          "version": 1
+        },
+        "configurationReference": {
+          "kind": "agent_configuration",
+          "id": "stage3-config-0",
+          "version": 1
+        },
+        "callReferences": [],
+        "inputReferences": [
+          {
+            "kind": "stage3_fixture_input",
+            "id": "stage3-synthetic-input",
+            "version": 1
+          }
+        ],
+        "acceptedOutputReferences": [],
+        "explanation": "Offline local callback; executor artifact and receipt are diagnostic records, not a scientific report."
+      },
+      {
+        "attemptId": "attempt-b-slow",
+        "instanceReference": {
+          "kind": "agent_instance",
+          "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+          "version": 1
+        },
+        "configurationReference": {
+          "kind": "agent_configuration",
+          "id": "stage3-config-1",
+          "version": 1
+        },
+        "callReferences": [],
+        "inputReferences": [
+          {
+            "kind": "stage3_fixture_input",
+            "id": "stage3-synthetic-input",
+            "version": 1
+          }
+        ],
+        "acceptedOutputReferences": [],
+        "explanation": "Offline local callback; executor artifact and receipt are diagnostic records, not a scientific report."
+      },
+      {
+        "attemptId": "attempt-c-dependent",
+        "instanceReference": {
+          "kind": "agent_instance",
+          "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+          "version": 1
+        },
+        "configurationReference": {
+          "kind": "agent_configuration",
+          "id": "stage3-config-2",
+          "version": 1
+        },
+        "callReferences": [],
+        "inputReferences": [
+          {
+            "kind": "stage3_fixture_input",
+            "id": "stage3-synthetic-input",
+            "version": 1
+          }
+        ],
+        "acceptedOutputReferences": [],
+        "explanation": "Offline local callback; executor artifact and receipt are diagnostic records, not a scientific report."
+      }
+    ],
+    "records": [
+      {
+        "reference": {
+          "kind": "stage3_fixture_input",
+          "id": "stage3-synthetic-input",
+          "version": 1
+        },
+        "label": "stage3 fixture input · stage3-synthetic-input · v1",
+        "data": {
+          "mission_id": "stage3-synthetic-mission",
+          "question": "Inspect a synthetic evidence packet",
+          "recordedAt": "2026-10-09T02:35:17.605810+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "stage3_fixture_proof",
+          "id": "concurrency",
+          "version": 1
+        },
+        "label": "stage3 fixture proof · concurrency · v1",
+        "data": {
+          "dependent_started_before_slow_finished": true,
+          "independent_overlap_observed": true,
+          "intervals_monotonic_ns": {
+            "a-fast": {
+              "ended_ns": 1836999715053750,
+              "started_ns": 1836999702981541
+            },
+            "b-slow": {
+              "ended_ns": 1836999743404375,
+              "started_ns": 1836999701172958
+            },
+            "c-dependent": {
+              "ended_ns": 1836999741557166,
+              "started_ns": 1836999729486708
+            }
+          },
+          "mission_id": "stage3-synthetic-mission",
+          "proof": "offline_local_callbacks",
+          "provider_calls": 0,
+          "run_id": "stage3-synthetic-run",
+          "recordedAt": "2026-10-09T02:35:17.698791+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "board_proposal",
+          "id": "d-evidence-gap",
+          "version": 1
+        },
+        "label": "board proposal · d-evidence-gap · v1",
+        "data": {
+          "actor_ref": {
+            "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "branch_of": null,
+          "depends_on": [],
+          "expected_artifact": "Source-backed appraisal when evidence exists",
+          "mission_id": "stage3-synthetic-mission",
+          "next_action": "Find a permitted exact source version, then invite an independent peer",
+          "objective": "Resolve the remaining synthetic evidence gap",
+          "outcome_ref": null,
+          "prerequisite_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            }
+          ],
+          "status": "deferred",
+          "recordedAt": "2026-10-09T02:35:17.700288+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "mail_request",
+          "id": "stage3-question",
+          "version": 1
+        },
+        "label": "mail request · stage3-question · v1",
+        "data": {
+          "accepted_answer_ref": null,
+          "answer_refs": [],
+          "answered_at": null,
+          "cause_ref": {
+            "id": "executor-artifact:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+            "kind": "executor_artifact",
+            "version": 1
+          },
+          "created_at": "2026-10-09T02:35:17.702374+00:00",
+          "delivered_at": null,
+          "expected_artifact": "Independent, explicitly limited appraisal",
+          "expected_latency": "long",
+          "last_useful_progress_at": null,
+          "message_ref": {
+            "id": "stage3-question-message",
+            "kind": "mail_message",
+            "version": 1
+          },
+          "mission_id": "stage3-synthetic-mission",
+          "question": "Can an independent peer appraise this synthetic callback result?",
+          "recipient_id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+          "replacement_request_ref": null,
+          "requester_id": "agent-35479f72753447fc920b704352994456",
+          "resolved_at": null,
+          "reviewer_id": null,
+          "status": "unanswered",
+          "recordedAt": "2026-10-09T02:35:17.702379+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "mail_message",
+          "id": "stage3-question-message",
+          "version": 3
+        },
+        "label": "mail message · stage3-question-message · v3",
+        "data": {
+          "acknowledged_at": "2026-10-09T02:35:17.704962+00:00",
+          "correlation_id": "stage3-question",
+          "created_at": "2026-10-09T02:35:17.702238+00:00",
+          "delivered_at": "2026-10-09T02:35:17.703465+00:00",
+          "duplicate_detection_id": "stage3-question-message",
+          "evidence_refs": [
+            {
+              "id": "executor-artifact:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+              "kind": "executor_artifact",
+              "version": 1
+            }
+          ],
+          "mission_id": "stage3-synthetic-mission",
+          "recipient_ref": {
+            "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "request_id": "stage3-question",
+          "sender_ref": {
+            "id": "agent-35479f72753447fc920b704352994456",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "task_ref": {
+            "id": "a-fast",
+            "kind": "board_proposal",
+            "version": 1
+          },
+          "payloadAccess": "Saved result content is separate from this diagnostic overview",
+          "recordedAt": "2026-10-09T02:35:17.704976+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "agent_instance",
+          "id": "agent-35479f72753447fc920b704352994456",
+          "version": 1
+        },
+        "label": "agent instance · agent-35479f72753447fc920b704352994456 · v1",
+        "data": {
+          "display_name": "Acquisition peer",
+          "kind": "role",
+          "lane_id": null,
+          "mission_id": "stage3-synthetic-mission",
+          "predecessor_id": null,
+          "role_id": "literature_acquisition",
+          "run_id": "stage3-synthetic-run",
+          "recordedAt": "2026-10-09T02:35:17.600444+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "agent_instance",
+          "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+          "version": 1
+        },
+        "label": "agent instance · agent-836be60e1dd64469bdca0335e4ab1d2d · v1",
+        "data": {
+          "display_name": "Synthesis peer",
+          "kind": "role",
+          "lane_id": null,
+          "mission_id": "stage3-synthetic-mission",
+          "predecessor_id": null,
+          "role_id": "evidence_preparation_synthesis",
+          "run_id": "stage3-synthetic-run",
+          "recordedAt": "2026-10-09T02:35:17.601898+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "agent_instance",
+          "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+          "version": 1
+        },
+        "label": "agent instance · agent-336c746ae6eb4018aa78e0d82ccce849 · v1",
+        "data": {
+          "display_name": "Review peer",
+          "kind": "role",
+          "lane_id": null,
+          "mission_id": "stage3-synthetic-mission",
+          "predecessor_id": null,
+          "role_id": "independent_methods_reviewer_critic",
+          "run_id": "stage3-synthetic-run",
+          "recordedAt": "2026-10-09T02:35:17.603906+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "agent_configuration",
+          "id": "stage3-config-0",
+          "version": 1
+        },
+        "label": "agent configuration · stage3-config-0 · v1",
+        "data": {
+          "configuration_sha256": "e39145b83c540ce8c24f9e5ddcc1a4e34714a75c80c7bd761ebe567b1c1812e3",
+          "input_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            }
+          ],
+          "instance_id": "agent-35479f72753447fc920b704352994456",
+          "instructions_sha256": "a5a55230f53edf9e17b32e0e7dfd8816ccfd4b393df312c67f8db5caa04c59b4",
+          "mission_id": "stage3-synthetic-mission",
+          "model_id": "no_model_invoked",
+          "provider": "offline_fixture",
+          "instructionText": "Stored privately; the exact instruction hash is shown",
+          "recordedAt": "2026-10-09T02:35:17.607112+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "agent_configuration",
+          "id": "stage3-config-1",
+          "version": 1
+        },
+        "label": "agent configuration · stage3-config-1 · v1",
+        "data": {
+          "configuration_sha256": "ebcd32baff48868398388de8d7f68cf83e815d156da1e14dcec47b4b88476934",
+          "input_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            }
+          ],
+          "instance_id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+          "instructions_sha256": "a5a55230f53edf9e17b32e0e7dfd8816ccfd4b393df312c67f8db5caa04c59b4",
+          "mission_id": "stage3-synthetic-mission",
+          "model_id": "no_model_invoked",
+          "provider": "offline_fixture",
+          "instructionText": "Stored privately; the exact instruction hash is shown",
+          "recordedAt": "2026-10-09T02:35:17.608557+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "agent_configuration",
+          "id": "stage3-config-2",
+          "version": 1
+        },
+        "label": "agent configuration · stage3-config-2 · v1",
+        "data": {
+          "configuration_sha256": "9bf63847ccf2d01d63ca91991820525f5c65b45c0e5cae08c0bc3210e6033947",
+          "input_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            }
+          ],
+          "instance_id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+          "instructions_sha256": "a5a55230f53edf9e17b32e0e7dfd8816ccfd4b393df312c67f8db5caa04c59b4",
+          "mission_id": "stage3-synthetic-mission",
+          "model_id": "no_model_invoked",
+          "provider": "offline_fixture",
+          "instructionText": "Stored privately; the exact instruction hash is shown",
+          "recordedAt": "2026-10-09T02:35:17.609694+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "executor_work",
+          "id": "executor-work:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f",
+          "version": 2
+        },
+        "label": "executor work · executor-work:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f · v2",
+        "data": {
+          "created_at": "2026-10-09T02:35:17.618450+00:00",
+          "phase": "completed",
+          "receipt_ref": {
+            "id": "executor-receipt:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f",
+            "kind": "executor_receipt",
+            "version": 1
+          },
+          "result_ref": {
+            "id": "executor-artifact:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f",
+            "kind": "executor_artifact",
+            "version": 1
+          },
+          "spec": {
+            "actor_id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+            "attempt_id": "attempt-b-slow",
+            "call_id": "",
+            "call_version": null,
+            "configuration_ref": {
+              "id": "stage3-config-1",
+              "kind": "agent_configuration",
+              "version": 1
+            },
+            "estimated_tokens": 1,
+            "handler_id": "synthetic_callback",
+            "handler_version": "1",
+            "input_refs": [
+              {
+                "id": "stage3-synthetic-input",
+                "kind": "stage3_fixture_input",
+                "version": 1
+              }
+            ],
+            "invitation_id": null,
+            "kind": "model",
+            "lane": "b-slow",
+            "mission_id": "stage3-synthetic-mission",
+            "proposal_ref": {
+              "id": "b-slow",
+              "kind": "board_proposal",
+              "version": 1
+            },
+            "quota_scopes": [
+              "fixture-route"
+            ],
+            "review": false,
+            "run_id": "stage3-synthetic-run",
+            "work_id": "b-slow"
+          },
+          "recordedAt": "2026-10-09T02:35:17.689300+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "executor_work",
+          "id": "executor-work:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db",
+          "version": 2
+        },
+        "label": "executor work · executor-work:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db · v2",
+        "data": {
+          "created_at": "2026-10-09T02:35:17.622998+00:00",
+          "phase": "completed",
+          "receipt_ref": {
+            "id": "executor-receipt:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db",
+            "kind": "executor_receipt",
+            "version": 1
+          },
+          "result_ref": {
+            "id": "executor-artifact:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db",
+            "kind": "executor_artifact",
+            "version": 1
+          },
+          "spec": {
+            "actor_id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+            "attempt_id": "attempt-c-dependent",
+            "call_id": "",
+            "call_version": null,
+            "configuration_ref": {
+              "id": "stage3-config-2",
+              "kind": "agent_configuration",
+              "version": 1
+            },
+            "estimated_tokens": 1,
+            "handler_id": "synthetic_callback",
+            "handler_version": "1",
+            "input_refs": [
+              {
+                "id": "stage3-synthetic-input",
+                "kind": "stage3_fixture_input",
+                "version": 1
+              }
+            ],
+            "invitation_id": null,
+            "kind": "model",
+            "lane": "c-dependent",
+            "mission_id": "stage3-synthetic-mission",
+            "proposal_ref": {
+              "id": "c-dependent",
+              "kind": "board_proposal",
+              "version": 1
+            },
+            "quota_scopes": [
+              "fixture-route"
+            ],
+            "review": false,
+            "run_id": "stage3-synthetic-run",
+            "work_id": "c-dependent"
+          },
+          "recordedAt": "2026-10-09T02:35:17.687327+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "executor_work",
+          "id": "executor-work:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+          "version": 2
+        },
+        "label": "executor work · executor-work:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b · v2",
+        "data": {
+          "created_at": "2026-10-09T02:35:17.614274+00:00",
+          "phase": "completed",
+          "receipt_ref": {
+            "id": "executor-receipt:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+            "kind": "executor_receipt",
+            "version": 1
+          },
+          "result_ref": {
+            "id": "executor-artifact:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+            "kind": "executor_artifact",
+            "version": 1
+          },
+          "spec": {
+            "actor_id": "agent-35479f72753447fc920b704352994456",
+            "attempt_id": "attempt-a-fast",
+            "call_id": "",
+            "call_version": null,
+            "configuration_ref": {
+              "id": "stage3-config-0",
+              "kind": "agent_configuration",
+              "version": 1
+            },
+            "estimated_tokens": 1,
+            "handler_id": "synthetic_callback",
+            "handler_version": "1",
+            "input_refs": [
+              {
+                "id": "stage3-synthetic-input",
+                "kind": "stage3_fixture_input",
+                "version": 1
+              }
+            ],
+            "invitation_id": null,
+            "kind": "model",
+            "lane": "a-fast",
+            "mission_id": "stage3-synthetic-mission",
+            "proposal_ref": {
+              "id": "a-fast",
+              "kind": "board_proposal",
+              "version": 1
+            },
+            "quota_scopes": [
+              "fixture-route"
+            ],
+            "review": false,
+            "run_id": "stage3-synthetic-run",
+            "work_id": "a-fast"
+          },
+          "recordedAt": "2026-10-09T02:35:17.661114+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "executor_artifact",
+          "id": "executor-artifact:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f",
+          "version": 1
+        },
+        "label": "executor artifact · executor-artifact:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f · v1",
+        "data": {
+          "actor_id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+          "configuration_ref": {
+            "id": "stage3-config-1",
+            "kind": "agent_configuration",
+            "version": 1
+          },
+          "handler_id": "synthetic_callback",
+          "handler_version": "1",
+          "input_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            }
+          ],
+          "mission_id": "stage3-synthetic-mission",
+          "output_refs": [],
+          "proof": "recorded_callback_result",
+          "result_sha256": "8d7ea4fc99fbeeb4da0ff5e2faaffdc757f668f06e27578eddfd93260975709c",
+          "work_id": "b-slow",
+          "payloadAccess": "Saved result content is separate from this diagnostic overview",
+          "recordedAt": "2026-10-09T02:35:17.688990+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "executor_artifact",
+          "id": "executor-artifact:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db",
+          "version": 1
+        },
+        "label": "executor artifact · executor-artifact:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db · v1",
+        "data": {
+          "actor_id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+          "configuration_ref": {
+            "id": "stage3-config-2",
+            "kind": "agent_configuration",
+            "version": 1
+          },
+          "handler_id": "synthetic_callback",
+          "handler_version": "1",
+          "input_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            }
+          ],
+          "mission_id": "stage3-synthetic-mission",
+          "output_refs": [],
+          "proof": "recorded_callback_result",
+          "result_sha256": "10ed4d27e09b7542298c2b568a618fc7fddf92f22d7bba5dcae9a2dafd933ce9",
+          "work_id": "c-dependent",
+          "payloadAccess": "Saved result content is separate from this diagnostic overview",
+          "recordedAt": "2026-10-09T02:35:17.687048+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "executor_artifact",
+          "id": "executor-artifact:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+          "version": 1
+        },
+        "label": "executor artifact · executor-artifact:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b · v1",
+        "data": {
+          "actor_id": "agent-35479f72753447fc920b704352994456",
+          "configuration_ref": {
+            "id": "stage3-config-0",
+            "kind": "agent_configuration",
+            "version": 1
+          },
+          "handler_id": "synthetic_callback",
+          "handler_version": "1",
+          "input_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            }
+          ],
+          "mission_id": "stage3-synthetic-mission",
+          "output_refs": [],
+          "proof": "recorded_callback_result",
+          "result_sha256": "5874229e15b5dbe71aa3507786f723831e820265c09b2fb1b4265ecd1b5c4bf8",
+          "work_id": "a-fast",
+          "payloadAccess": "Saved result content is separate from this diagnostic overview",
+          "recordedAt": "2026-10-09T02:35:17.660679+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "executor_receipt",
+          "id": "executor-receipt:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f",
+          "version": 1
+        },
+        "label": "executor receipt · executor-receipt:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f · v1",
+        "data": {
+          "artifact_ref": {
+            "id": "executor-artifact:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f",
+            "kind": "executor_artifact",
+            "version": 1
+          },
+          "cached_tokens": 0,
+          "capacity_operation_id": "executor-cap:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f",
+          "handler_version": "1",
+          "mission_id": "stage3-synthetic-mission",
+          "result_sha256": "8d7ea4fc99fbeeb4da0ff5e2faaffdc757f668f06e27578eddfd93260975709c",
+          "timing": {
+            "active_seconds": 0.04489707946777344,
+            "elapsed_seconds": 0.05595898628234863,
+            "peer_wait": "not_measured_by_executor",
+            "provider_wait_seconds": 0,
+            "queue_wait_seconds": 0.005515098571777344,
+            "quota_wait_seconds": 0,
+            "retry_wait_seconds": 0,
+            "timing_basis": "store_clock"
+          },
+          "used_tokens": 1,
+          "work_id": "b-slow",
+          "recordedAt": "2026-10-09T02:35:17.689041+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "executor_receipt",
+          "id": "executor-receipt:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db",
+          "version": 1
+        },
+        "label": "executor receipt · executor-receipt:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db · v1",
+        "data": {
+          "artifact_ref": {
+            "id": "executor-artifact:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db",
+            "kind": "executor_artifact",
+            "version": 1
+          },
+          "cached_tokens": 0,
+          "capacity_operation_id": "executor-cap:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db",
+          "handler_version": "1",
+          "mission_id": "stage3-synthetic-mission",
+          "result_sha256": "10ed4d27e09b7542298c2b568a618fc7fddf92f22d7bba5dcae9a2dafd933ce9",
+          "timing": {
+            "active_seconds": 0.014358997344970703,
+            "elapsed_seconds": 0.018604040145874023,
+            "peer_wait": "not_measured_by_executor",
+            "provider_wait_seconds": 0,
+            "queue_wait_seconds": 0.0018181800842285156,
+            "quota_wait_seconds": 0,
+            "retry_wait_seconds": 0,
+            "timing_basis": "store_clock"
+          },
+          "used_tokens": 1,
+          "work_id": "c-dependent",
+          "recordedAt": "2026-10-09T02:35:17.687093+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "executor_receipt",
+          "id": "executor-receipt:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+          "version": 1
+        },
+        "label": "executor receipt · executor-receipt:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b · v1",
+        "data": {
+          "artifact_ref": {
+            "id": "executor-artifact:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+            "kind": "executor_artifact",
+            "version": 1
+          },
+          "cached_tokens": 0,
+          "capacity_operation_id": "executor-cap:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+          "handler_version": "1",
+          "mission_id": "stage3-synthetic-mission",
+          "result_sha256": "5874229e15b5dbe71aa3507786f723831e820265c09b2fb1b4265ecd1b5c4bf8",
+          "timing": {
+            "active_seconds": 0.014648199081420898,
+            "elapsed_seconds": 0.02435302734375,
+            "peer_wait": "not_measured_by_executor",
+            "provider_wait_seconds": 0,
+            "queue_wait_seconds": 0.004843950271606445,
+            "quota_wait_seconds": 0,
+            "retry_wait_seconds": 0,
+            "timing_basis": "store_clock"
+          },
+          "used_tokens": 1,
+          "work_id": "a-fast",
+          "recordedAt": "2026-10-09T02:35:17.660743+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "capacity_operation",
+          "id": "executor-cap:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f",
+          "version": 4
+        },
+        "label": "capacity operation · executor-cap:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f · v4",
+        "data": {
+          "active_seconds": 0.045137882232666016,
+          "admitted_at": 1791513317.638539,
+          "attempt_id": "attempt-b-slow",
+          "call_id": "",
+          "cancel_requested": false,
+          "diagnostic": null,
+          "external_active": false,
+          "generation": 1,
+          "kind": "model",
+          "lane": "b-slow",
+          "last_heartbeat_at": 1791513317.638539,
+          "last_progress_at": 1791513317.638539,
+          "local_active": false,
+          "mission_id": "stage3-synthetic-mission",
+          "output_ref": "executor-artifact:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f",
+          "phase": "completed",
+          "provider_wait_seconds": 0,
+          "queue_wait_seconds": 0.005515098571777344,
+          "queued_at": 1791513317.633024,
+          "quota_wait_seconds": 0,
+          "reservation": false,
+          "retry_wait_seconds": 0,
+          "run_id": "stage3-synthetic-run",
+          "submitted_at": 1791513317.633023,
+          "task_id": "b-slow",
+          "wait_reason": null,
+          "wait_started_at": null,
+          "wake_at": null,
+          "recordedAt": "2026-10-09T02:35:17.689247+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "capacity_operation",
+          "id": "executor-cap:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db",
+          "version": 4
+        },
+        "label": "capacity operation · executor-cap:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db · v4",
+        "data": {
+          "active_seconds": 0.014577865600585938,
+          "admitted_at": 1791513317.6702561,
+          "attempt_id": "attempt-c-dependent",
+          "call_id": "",
+          "cancel_requested": false,
+          "diagnostic": null,
+          "external_active": false,
+          "generation": 1,
+          "kind": "model",
+          "lane": "c-dependent",
+          "last_heartbeat_at": 1791513317.6702561,
+          "last_progress_at": 1791513317.6702561,
+          "local_active": false,
+          "mission_id": "stage3-synthetic-mission",
+          "output_ref": "executor-artifact:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db",
+          "phase": "completed",
+          "provider_wait_seconds": 0,
+          "queue_wait_seconds": 0.0018181800842285156,
+          "queued_at": 1791513317.668438,
+          "quota_wait_seconds": 0,
+          "reservation": false,
+          "retry_wait_seconds": 0,
+          "run_id": "stage3-synthetic-run",
+          "submitted_at": 1791513317.668437,
+          "task_id": "c-dependent",
+          "wait_reason": null,
+          "wait_started_at": null,
+          "wake_at": null,
+          "recordedAt": "2026-10-09T02:35:17.687281+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "capacity_operation",
+          "id": "executor-cap:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+          "version": 4
+        },
+        "label": "capacity operation · executor-cap:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b · v4",
+        "data": {
+          "active_seconds": 0.015009164810180664,
+          "admitted_at": 1791513317.641161,
+          "attempt_id": "attempt-a-fast",
+          "call_id": "",
+          "cancel_requested": false,
+          "diagnostic": null,
+          "external_active": false,
+          "generation": 1,
+          "kind": "model",
+          "lane": "a-fast",
+          "last_heartbeat_at": 1791513317.641161,
+          "last_progress_at": 1791513317.641161,
+          "local_active": false,
+          "mission_id": "stage3-synthetic-mission",
+          "output_ref": "executor-artifact:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+          "phase": "completed",
+          "provider_wait_seconds": 0,
+          "queue_wait_seconds": 0.004843950271606445,
+          "queued_at": 1791513317.636317,
+          "quota_wait_seconds": 0,
+          "reservation": false,
+          "retry_wait_seconds": 0,
+          "run_id": "stage3-synthetic-run",
+          "submitted_at": 1791513317.636317,
+          "task_id": "a-fast",
+          "wait_reason": null,
+          "wait_started_at": null,
+          "wake_at": null,
+          "recordedAt": "2026-10-09T02:35:17.661058+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "board_proposal",
+          "id": "a-fast",
+          "version": 2
+        },
+        "label": "board proposal · a-fast · v2",
+        "data": {
+          "actor_ref": {
+            "id": "agent-35479f72753447fc920b704352994456",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "branch_of": null,
+          "depends_on": [],
+          "expected_artifact": "Local callback receipt",
+          "mission_id": "stage3-synthetic-mission",
+          "next_action": "Run the registered offline callback",
+          "objective": "Inspect the synthetic input for a-fast",
+          "outcome_ref": {
+            "id": "executor-outcome:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+            "kind": "board_outcome",
+            "version": 1
+          },
+          "prerequisite_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            }
+          ],
+          "status": "completed",
+          "recordedAt": "2026-10-09T02:35:17.661260+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "board_proposal",
+          "id": "b-slow",
+          "version": 2
+        },
+        "label": "board proposal · b-slow · v2",
+        "data": {
+          "actor_ref": {
+            "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "branch_of": null,
+          "depends_on": [],
+          "expected_artifact": "Local callback receipt",
+          "mission_id": "stage3-synthetic-mission",
+          "next_action": "Run the registered offline callback",
+          "objective": "Inspect the synthetic input for b-slow",
+          "outcome_ref": {
+            "id": "executor-outcome:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f",
+            "kind": "board_outcome",
+            "version": 1
+          },
+          "prerequisite_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            }
+          ],
+          "status": "completed",
+          "recordedAt": "2026-10-09T02:35:17.689439+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "board_proposal",
+          "id": "c-dependent",
+          "version": 2
+        },
+        "label": "board proposal · c-dependent · v2",
+        "data": {
+          "actor_ref": {
+            "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "branch_of": null,
+          "depends_on": [
+            {
+              "id": "a-fast",
+              "kind": "board_proposal",
+              "version": 1
+            }
+          ],
+          "expected_artifact": "Local callback receipt",
+          "mission_id": "stage3-synthetic-mission",
+          "next_action": "Run the registered offline callback",
+          "objective": "Inspect the synthetic input for c-dependent",
+          "outcome_ref": {
+            "id": "executor-outcome:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db",
+            "kind": "board_outcome",
+            "version": 1
+          },
+          "prerequisite_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            }
+          ],
+          "status": "completed",
+          "recordedAt": "2026-10-09T02:35:17.687507+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "board_claim",
+          "id": "stage3-synthetic-mission:a-fast:1",
+          "version": 1
+        },
+        "label": "board claim · stage3-synthetic-mission:a-fast:1 · v1",
+        "data": {
+          "lease": {
+            "expires_at": 1791513377.643121,
+            "generation": 1,
+            "mission_id": "stage3-synthetic-mission",
+            "owner": "agent-35479f72753447fc920b704352994456",
+            "task_id": "a-fast"
+          },
+          "mission_id": "stage3-synthetic-mission",
+          "owner_ref": {
+            "id": "agent-35479f72753447fc920b704352994456",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "proposal_ref": {
+            "id": "a-fast",
+            "kind": "board_proposal",
+            "version": 1
+          },
+          "recordedAt": "2026-10-09T02:35:17.643143+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "board_claim",
+          "id": "stage3-synthetic-mission:b-slow:1",
+          "version": 1
+        },
+        "label": "board claim · stage3-synthetic-mission:b-slow:1 · v1",
+        "data": {
+          "lease": {
+            "expires_at": 1791513377.640366,
+            "generation": 1,
+            "mission_id": "stage3-synthetic-mission",
+            "owner": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+            "task_id": "b-slow"
+          },
+          "mission_id": "stage3-synthetic-mission",
+          "owner_ref": {
+            "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "proposal_ref": {
+            "id": "b-slow",
+            "kind": "board_proposal",
+            "version": 1
+          },
+          "recordedAt": "2026-10-09T02:35:17.640386+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "board_claim",
+          "id": "stage3-synthetic-mission:c-dependent:1",
+          "version": 1
+        },
+        "label": "board claim · stage3-synthetic-mission:c-dependent:1 · v1",
+        "data": {
+          "lease": {
+            "expires_at": 1791513377.671925,
+            "generation": 1,
+            "mission_id": "stage3-synthetic-mission",
+            "owner": "agent-336c746ae6eb4018aa78e0d82ccce849",
+            "task_id": "c-dependent"
+          },
+          "mission_id": "stage3-synthetic-mission",
+          "owner_ref": {
+            "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "proposal_ref": {
+            "id": "c-dependent",
+            "kind": "board_proposal",
+            "version": 1
+          },
+          "recordedAt": "2026-10-09T02:35:17.671947+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "board_outcome",
+          "id": "executor-outcome:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f",
+          "version": 1
+        },
+        "label": "board outcome · executor-outcome:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f · v1",
+        "data": {
+          "actor_ref": {
+            "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "claim_generation": 1,
+          "mission_id": "stage3-synthetic-mission",
+          "proposal_ref": {
+            "id": "b-slow",
+            "kind": "board_proposal",
+            "version": 1
+          },
+          "result_refs": [
+            {
+              "id": "executor-artifact:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f",
+              "kind": "executor_artifact",
+              "version": 1
+            },
+            {
+              "id": "executor-receipt:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f",
+              "kind": "executor_receipt",
+              "version": 1
+            },
+            {
+              "id": "trace-00e273a35f075656358b711ab61a643bfb3f33475dd6566b0090f580199e3cac",
+              "kind": "coordination_trace",
+              "version": 1
+            }
+          ],
+          "recordedAt": "2026-10-09T02:35:17.689351+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "board_outcome",
+          "id": "executor-outcome:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db",
+          "version": 1
+        },
+        "label": "board outcome · executor-outcome:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db · v1",
+        "data": {
+          "actor_ref": {
+            "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "claim_generation": 1,
+          "mission_id": "stage3-synthetic-mission",
+          "proposal_ref": {
+            "id": "c-dependent",
+            "kind": "board_proposal",
+            "version": 1
+          },
+          "result_refs": [
+            {
+              "id": "executor-artifact:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db",
+              "kind": "executor_artifact",
+              "version": 1
+            },
+            {
+              "id": "executor-receipt:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db",
+              "kind": "executor_receipt",
+              "version": 1
+            },
+            {
+              "id": "trace-e8870271db81895671c7a3a1313be8466fa53a7bb0065053dc4b0c5249889d59",
+              "kind": "coordination_trace",
+              "version": 1
+            }
+          ],
+          "recordedAt": "2026-10-09T02:35:17.687372+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "board_outcome",
+          "id": "executor-outcome:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+          "version": 1
+        },
+        "label": "board outcome · executor-outcome:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b · v1",
+        "data": {
+          "actor_ref": {
+            "id": "agent-35479f72753447fc920b704352994456",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "claim_generation": 1,
+          "mission_id": "stage3-synthetic-mission",
+          "proposal_ref": {
+            "id": "a-fast",
+            "kind": "board_proposal",
+            "version": 1
+          },
+          "result_refs": [
+            {
+              "id": "executor-artifact:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+              "kind": "executor_artifact",
+              "version": 1
+            },
+            {
+              "id": "executor-receipt:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+              "kind": "executor_receipt",
+              "version": 1
+            },
+            {
+              "id": "trace-2a062cd725a4ebe385bfabd03494830bcc724f73f2f76189b2147dde2e78d46c",
+              "kind": "coordination_trace",
+              "version": 1
+            }
+          ],
+          "recordedAt": "2026-10-09T02:35:17.661166+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "board_dissent",
+          "id": "stage3-limited-critique",
+          "version": 1
+        },
+        "label": "board dissent · stage3-limited-critique · v1",
+        "data": {
+          "actor_ref": {
+            "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "critique": "The local callback demonstrates execution, but the synthetic input contains no study passage to appraise.",
+          "evidence_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            }
+          ],
+          "mission_id": "stage3-synthetic-mission",
+          "proposal_ref": {
+            "id": "d-evidence-gap",
+            "kind": "board_proposal",
+            "version": 1
+          },
+          "recordedAt": "2026-10-09T02:35:17.706249+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "coordination_trace",
+          "id": "trace-00e273a35f075656358b711ab61a643bfb3f33475dd6566b0090f580199e3cac",
+          "version": 1
+        },
+        "label": "coordination trace · trace-00e273a35f075656358b711ab61a643bfb3f33475dd6566b0090f580199e3cac · v1",
+        "data": {
+          "action": "Execute peer-selected work",
+          "attempt_id": "attempt-b-slow",
+          "call_id": null,
+          "call_version": null,
+          "capability_state": null,
+          "category": "model",
+          "configuration_ref": {
+            "id": "stage3-config-1",
+            "kind": "agent_configuration",
+            "version": 1
+          },
+          "input_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            }
+          ],
+          "instance_id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+          "mission_id": "stage3-synthetic-mission",
+          "next_action": null,
+          "operation_id": "executor-cap:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f",
+          "output_refs": [
+            {
+              "id": "executor-artifact:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f",
+              "kind": "executor_artifact",
+              "version": 1
+            }
+          ],
+          "parent_operation_id": null,
+          "proof": "recorded_local_callback",
+          "reason_summary": null,
+          "redacted_paths": [],
+          "run_id": "stage3-synthetic-run",
+          "schema": "ora.trace.v1",
+          "status": "completed",
+          "summary": "The registered callback returned and its local result was accepted.",
+          "task_id": "b-slow",
+          "timing": {
+            "active_seconds": 0.04489707946777344,
+            "elapsed_seconds": 0.05595898628234863,
+            "provider_wait_seconds": 0,
+            "queue_wait_seconds": 0.005515098571777344,
+            "quota_wait_seconds": 0,
+            "retry_wait_seconds": 0
+          },
+          "timing_fields_omitted": 2,
+          "turn_id": null,
+          "usage_refs": [],
+          "recordedAt": "2026-10-09T02:35:17.689134+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "coordination_trace",
+          "id": "trace-2a062cd725a4ebe385bfabd03494830bcc724f73f2f76189b2147dde2e78d46c",
+          "version": 1
+        },
+        "label": "coordination trace · trace-2a062cd725a4ebe385bfabd03494830bcc724f73f2f76189b2147dde2e78d46c · v1",
+        "data": {
+          "action": "Execute peer-selected work",
+          "attempt_id": "attempt-a-fast",
+          "call_id": null,
+          "call_version": null,
+          "capability_state": null,
+          "category": "model",
+          "configuration_ref": {
+            "id": "stage3-config-0",
+            "kind": "agent_configuration",
+            "version": 1
+          },
+          "input_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            }
+          ],
+          "instance_id": "agent-35479f72753447fc920b704352994456",
+          "mission_id": "stage3-synthetic-mission",
+          "next_action": null,
+          "operation_id": "executor-cap:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+          "output_refs": [
+            {
+              "id": "executor-artifact:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+              "kind": "executor_artifact",
+              "version": 1
+            }
+          ],
+          "parent_operation_id": null,
+          "proof": "recorded_local_callback",
+          "reason_summary": null,
+          "redacted_paths": [],
+          "run_id": "stage3-synthetic-run",
+          "schema": "ora.trace.v1",
+          "status": "completed",
+          "summary": "The registered callback returned and its local result was accepted.",
+          "task_id": "a-fast",
+          "timing": {
+            "active_seconds": 0.014648199081420898,
+            "elapsed_seconds": 0.02435302734375,
+            "provider_wait_seconds": 0,
+            "queue_wait_seconds": 0.004843950271606445,
+            "quota_wait_seconds": 0,
+            "retry_wait_seconds": 0
+          },
+          "timing_fields_omitted": 2,
+          "turn_id": null,
+          "usage_refs": [],
+          "recordedAt": "2026-10-09T02:35:17.660936+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "coordination_trace",
+          "id": "trace-e8870271db81895671c7a3a1313be8466fa53a7bb0065053dc4b0c5249889d59",
+          "version": 1
+        },
+        "label": "coordination trace · trace-e8870271db81895671c7a3a1313be8466fa53a7bb0065053dc4b0c5249889d59 · v1",
+        "data": {
+          "action": "Execute peer-selected work",
+          "attempt_id": "attempt-c-dependent",
+          "call_id": null,
+          "call_version": null,
+          "capability_state": null,
+          "category": "model",
+          "configuration_ref": {
+            "id": "stage3-config-2",
+            "kind": "agent_configuration",
+            "version": 1
+          },
+          "input_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            }
+          ],
+          "instance_id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+          "mission_id": "stage3-synthetic-mission",
+          "next_action": null,
+          "operation_id": "executor-cap:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db",
+          "output_refs": [
+            {
+              "id": "executor-artifact:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db",
+              "kind": "executor_artifact",
+              "version": 1
+            }
+          ],
+          "parent_operation_id": null,
+          "proof": "recorded_local_callback",
+          "reason_summary": null,
+          "redacted_paths": [],
+          "run_id": "stage3-synthetic-run",
+          "schema": "ora.trace.v1",
+          "status": "completed",
+          "summary": "The registered callback returned and its local result was accepted.",
+          "task_id": "c-dependent",
+          "timing": {
+            "active_seconds": 0.014358997344970703,
+            "elapsed_seconds": 0.018604040145874023,
+            "provider_wait_seconds": 0,
+            "queue_wait_seconds": 0.0018181800842285156,
+            "quota_wait_seconds": 0,
+            "retry_wait_seconds": 0
+          },
+          "timing_fields_omitted": 2,
+          "turn_id": null,
+          "usage_refs": [],
+          "recordedAt": "2026-10-09T02:35:17.687184+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "mail_outbox",
+          "id": "stage3-partial-message",
+          "version": 2
+        },
+        "label": "mail outbox · stage3-partial-message · v2",
+        "data": {
+          "message_ref": {
+            "id": "stage3-partial-message",
+            "kind": "mail_message",
+            "version": 2
+          },
+          "mission_id": "stage3-synthetic-mission",
+          "recipient_ref": {
+            "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "status": "delivered",
+          "updated_at": "2026-10-09T02:35:17.708362+00:00",
+          "recordedAt": "2026-10-09T02:35:17.708413+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "mail_outbox",
+          "id": "stage3-question-message",
+          "version": 2
+        },
+        "label": "mail outbox · stage3-question-message · v2",
+        "data": {
+          "message_ref": {
+            "id": "stage3-question-message",
+            "kind": "mail_message",
+            "version": 2
+          },
+          "mission_id": "stage3-synthetic-mission",
+          "recipient_ref": {
+            "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "status": "delivered",
+          "updated_at": "2026-10-09T02:35:17.703465+00:00",
+          "recordedAt": "2026-10-09T02:35:17.703526+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "mail_request",
+          "id": "stage3-partial-review",
+          "version": 3
+        },
+        "label": "mail request · stage3-partial-review · v3",
+        "data": {
+          "accepted_answer_ref": null,
+          "answer_refs": [
+            {
+              "id": "stage3-partial-answer",
+              "kind": "mail_answer",
+              "version": 1
+            }
+          ],
+          "answered_at": "2026-10-09T02:35:17.710872+00:00",
+          "cause_ref": {
+            "id": "d-evidence-gap",
+            "kind": "board_proposal",
+            "version": 1
+          },
+          "created_at": "2026-10-09T02:35:17.707478+00:00",
+          "delivered_at": "2026-10-09T02:35:17.708362+00:00",
+          "expected_artifact": "A scoped critique with remaining evidence needs",
+          "expected_latency": "unknown",
+          "last_useful_progress_at": null,
+          "message_ref": {
+            "id": "stage3-partial-message",
+            "kind": "mail_message",
+            "version": 1
+          },
+          "mission_id": "stage3-synthetic-mission",
+          "question": "Which part of the synthetic input can be appraised now?",
+          "recipient_id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+          "replacement_request_ref": null,
+          "requester_id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+          "resolved_at": null,
+          "reviewer_id": null,
+          "status": "partial_awaiting_review",
+          "recordedAt": "2026-10-09T02:35:17.710882+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "mail_request",
+          "id": "stage3-question",
+          "version": 2
+        },
+        "label": "mail request · stage3-question · v2",
+        "data": {
+          "accepted_answer_ref": null,
+          "answer_refs": [],
+          "answered_at": null,
+          "cause_ref": {
+            "id": "executor-artifact:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+            "kind": "executor_artifact",
+            "version": 1
+          },
+          "created_at": "2026-10-09T02:35:17.702374+00:00",
+          "delivered_at": "2026-10-09T02:35:17.703465+00:00",
+          "expected_artifact": "Independent, explicitly limited appraisal",
+          "expected_latency": "long",
+          "last_useful_progress_at": null,
+          "message_ref": {
+            "id": "stage3-question-message",
+            "kind": "mail_message",
+            "version": 1
+          },
+          "mission_id": "stage3-synthetic-mission",
+          "question": "Can an independent peer appraise this synthetic callback result?",
+          "recipient_id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+          "replacement_request_ref": null,
+          "requester_id": "agent-35479f72753447fc920b704352994456",
+          "resolved_at": null,
+          "reviewer_id": null,
+          "status": "unanswered",
+          "recordedAt": "2026-10-09T02:35:17.703602+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "mail_answer",
+          "id": "stage3-partial-answer",
+          "version": 1
+        },
+        "label": "mail answer · stage3-partial-answer · v1",
+        "data": {
+          "artifact_ref": {
+            "id": "stage3-limited-critique",
+            "kind": "board_dissent",
+            "version": 1
+          },
+          "created_at": "2026-10-09T02:35:17.710777+00:00",
+          "mission_id": "stage3-synthetic-mission",
+          "partial": true,
+          "request_id": "stage3-partial-review",
+          "responder_id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+          "recordedAt": "2026-10-09T02:35:17.710782+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "mail_message",
+          "id": "stage3-partial-message",
+          "version": 3
+        },
+        "label": "mail message · stage3-partial-message · v3",
+        "data": {
+          "acknowledged_at": "2026-10-09T02:35:17.709638+00:00",
+          "correlation_id": "stage3-partial-review",
+          "created_at": "2026-10-09T02:35:17.707369+00:00",
+          "delivered_at": "2026-10-09T02:35:17.708362+00:00",
+          "duplicate_detection_id": "stage3-partial-message",
+          "evidence_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            }
+          ],
+          "mission_id": "stage3-synthetic-mission",
+          "recipient_ref": {
+            "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "request_id": "stage3-partial-review",
+          "sender_ref": {
+            "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "task_ref": {
+            "id": "d-evidence-gap",
+            "kind": "board_proposal",
+            "version": 1
+          },
+          "payloadAccess": "Saved result content is separate from this diagnostic overview",
+          "recordedAt": "2026-10-09T02:35:17.709652+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "board_proposal",
+          "id": "a-fast",
+          "version": 1
+        },
+        "label": "board proposal · a-fast · v1",
+        "data": {
+          "actor_ref": {
+            "id": "agent-35479f72753447fc920b704352994456",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "branch_of": null,
+          "depends_on": [],
+          "expected_artifact": "Local callback receipt",
+          "mission_id": "stage3-synthetic-mission",
+          "next_action": "Run the registered offline callback",
+          "objective": "Inspect the synthetic input for a-fast",
+          "outcome_ref": null,
+          "prerequisite_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            }
+          ],
+          "status": "open",
+          "recordedAt": "2026-10-09T02:35:17.612623+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "executor_work",
+          "id": "executor-work:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+          "version": 1
+        },
+        "label": "executor work · executor-work:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b · v1",
+        "data": {
+          "created_at": "2026-10-09T02:35:17.614274+00:00",
+          "phase": "pending",
+          "result_ref": null,
+          "spec": {
+            "actor_id": "agent-35479f72753447fc920b704352994456",
+            "attempt_id": "attempt-a-fast",
+            "call_id": "",
+            "call_version": null,
+            "configuration_ref": {
+              "id": "stage3-config-0",
+              "kind": "agent_configuration",
+              "version": 1
+            },
+            "estimated_tokens": 1,
+            "handler_id": "synthetic_callback",
+            "handler_version": "1",
+            "input_refs": [
+              {
+                "id": "stage3-synthetic-input",
+                "kind": "stage3_fixture_input",
+                "version": 1
+              }
+            ],
+            "invitation_id": null,
+            "kind": "model",
+            "lane": "a-fast",
+            "mission_id": "stage3-synthetic-mission",
+            "proposal_ref": {
+              "id": "a-fast",
+              "kind": "board_proposal",
+              "version": 1
+            },
+            "quota_scopes": [
+              "fixture-route"
+            ],
+            "review": false,
+            "run_id": "stage3-synthetic-run",
+            "work_id": "a-fast"
+          },
+          "recordedAt": "2026-10-09T02:35:17.614284+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "board_proposal",
+          "id": "b-slow",
+          "version": 1
+        },
+        "label": "board proposal · b-slow · v1",
+        "data": {
+          "actor_ref": {
+            "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "branch_of": null,
+          "depends_on": [],
+          "expected_artifact": "Local callback receipt",
+          "mission_id": "stage3-synthetic-mission",
+          "next_action": "Run the registered offline callback",
+          "objective": "Inspect the synthetic input for b-slow",
+          "outcome_ref": null,
+          "prerequisite_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            }
+          ],
+          "status": "open",
+          "recordedAt": "2026-10-09T02:35:17.616852+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "executor_work",
+          "id": "executor-work:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f",
+          "version": 1
+        },
+        "label": "executor work · executor-work:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f · v1",
+        "data": {
+          "created_at": "2026-10-09T02:35:17.618450+00:00",
+          "phase": "pending",
+          "result_ref": null,
+          "spec": {
+            "actor_id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+            "attempt_id": "attempt-b-slow",
+            "call_id": "",
+            "call_version": null,
+            "configuration_ref": {
+              "id": "stage3-config-1",
+              "kind": "agent_configuration",
+              "version": 1
+            },
+            "estimated_tokens": 1,
+            "handler_id": "synthetic_callback",
+            "handler_version": "1",
+            "input_refs": [
+              {
+                "id": "stage3-synthetic-input",
+                "kind": "stage3_fixture_input",
+                "version": 1
+              }
+            ],
+            "invitation_id": null,
+            "kind": "model",
+            "lane": "b-slow",
+            "mission_id": "stage3-synthetic-mission",
+            "proposal_ref": {
+              "id": "b-slow",
+              "kind": "board_proposal",
+              "version": 1
+            },
+            "quota_scopes": [
+              "fixture-route"
+            ],
+            "review": false,
+            "run_id": "stage3-synthetic-run",
+            "work_id": "b-slow"
+          },
+          "recordedAt": "2026-10-09T02:35:17.618460+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "board_proposal",
+          "id": "c-dependent",
+          "version": 1
+        },
+        "label": "board proposal · c-dependent · v1",
+        "data": {
+          "actor_ref": {
+            "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "branch_of": null,
+          "depends_on": [
+            {
+              "id": "a-fast",
+              "kind": "board_proposal",
+              "version": 1
+            }
+          ],
+          "expected_artifact": "Local callback receipt",
+          "mission_id": "stage3-synthetic-mission",
+          "next_action": "Run the registered offline callback",
+          "objective": "Inspect the synthetic input for c-dependent",
+          "outcome_ref": null,
+          "prerequisite_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            }
+          ],
+          "status": "open",
+          "recordedAt": "2026-10-09T02:35:17.621832+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "executor_work",
+          "id": "executor-work:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db",
+          "version": 1
+        },
+        "label": "executor work · executor-work:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db · v1",
+        "data": {
+          "created_at": "2026-10-09T02:35:17.622998+00:00",
+          "phase": "pending",
+          "result_ref": null,
+          "spec": {
+            "actor_id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+            "attempt_id": "attempt-c-dependent",
+            "call_id": "",
+            "call_version": null,
+            "configuration_ref": {
+              "id": "stage3-config-2",
+              "kind": "agent_configuration",
+              "version": 1
+            },
+            "estimated_tokens": 1,
+            "handler_id": "synthetic_callback",
+            "handler_version": "1",
+            "input_refs": [
+              {
+                "id": "stage3-synthetic-input",
+                "kind": "stage3_fixture_input",
+                "version": 1
+              }
+            ],
+            "invitation_id": null,
+            "kind": "model",
+            "lane": "c-dependent",
+            "mission_id": "stage3-synthetic-mission",
+            "proposal_ref": {
+              "id": "c-dependent",
+              "kind": "board_proposal",
+              "version": 1
+            },
+            "quota_scopes": [
+              "fixture-route"
+            ],
+            "review": false,
+            "run_id": "stage3-synthetic-run",
+            "work_id": "c-dependent"
+          },
+          "recordedAt": "2026-10-09T02:35:17.623003+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "mail_message",
+          "id": "stage3-question-message",
+          "version": 1
+        },
+        "label": "mail message · stage3-question-message · v1",
+        "data": {
+          "acknowledged_at": null,
+          "correlation_id": "stage3-question",
+          "created_at": "2026-10-09T02:35:17.702238+00:00",
+          "delivered_at": null,
+          "duplicate_detection_id": "stage3-question-message",
+          "evidence_refs": [
+            {
+              "id": "executor-artifact:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+              "kind": "executor_artifact",
+              "version": 1
+            }
+          ],
+          "mission_id": "stage3-synthetic-mission",
+          "recipient_ref": {
+            "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "request_id": "stage3-question",
+          "sender_ref": {
+            "id": "agent-35479f72753447fc920b704352994456",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "task_ref": {
+            "id": "a-fast",
+            "kind": "board_proposal",
+            "version": 1
+          },
+          "payloadAccess": "Saved result content is separate from this diagnostic overview",
+          "recordedAt": "2026-10-09T02:35:17.702246+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "mail_message",
+          "id": "stage3-question-message",
+          "version": 2
+        },
+        "label": "mail message · stage3-question-message · v2",
+        "data": {
+          "acknowledged_at": null,
+          "correlation_id": "stage3-question",
+          "created_at": "2026-10-09T02:35:17.702238+00:00",
+          "delivered_at": "2026-10-09T02:35:17.703465+00:00",
+          "duplicate_detection_id": "stage3-question-message",
+          "evidence_refs": [
+            {
+              "id": "executor-artifact:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+              "kind": "executor_artifact",
+              "version": 1
+            }
+          ],
+          "mission_id": "stage3-synthetic-mission",
+          "recipient_ref": {
+            "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "request_id": "stage3-question",
+          "sender_ref": {
+            "id": "agent-35479f72753447fc920b704352994456",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "task_ref": {
+            "id": "a-fast",
+            "kind": "board_proposal",
+            "version": 1
+          },
+          "payloadAccess": "Saved result content is separate from this diagnostic overview",
+          "recordedAt": "2026-10-09T02:35:17.703475+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "mail_message",
+          "id": "stage3-partial-message",
+          "version": 1
+        },
+        "label": "mail message · stage3-partial-message · v1",
+        "data": {
+          "acknowledged_at": null,
+          "correlation_id": "stage3-partial-review",
+          "created_at": "2026-10-09T02:35:17.707369+00:00",
+          "delivered_at": null,
+          "duplicate_detection_id": "stage3-partial-message",
+          "evidence_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            }
+          ],
+          "mission_id": "stage3-synthetic-mission",
+          "recipient_ref": {
+            "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "request_id": "stage3-partial-review",
+          "sender_ref": {
+            "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "task_ref": {
+            "id": "d-evidence-gap",
+            "kind": "board_proposal",
+            "version": 1
+          },
+          "payloadAccess": "Saved result content is separate from this diagnostic overview",
+          "recordedAt": "2026-10-09T02:35:17.707374+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "mail_request",
+          "id": "stage3-partial-review",
+          "version": 1
+        },
+        "label": "mail request · stage3-partial-review · v1",
+        "data": {
+          "accepted_answer_ref": null,
+          "answer_refs": [],
+          "answered_at": null,
+          "cause_ref": {
+            "id": "d-evidence-gap",
+            "kind": "board_proposal",
+            "version": 1
+          },
+          "created_at": "2026-10-09T02:35:17.707478+00:00",
+          "delivered_at": null,
+          "expected_artifact": "A scoped critique with remaining evidence needs",
+          "expected_latency": "unknown",
+          "last_useful_progress_at": null,
+          "message_ref": {
+            "id": "stage3-partial-message",
+            "kind": "mail_message",
+            "version": 1
+          },
+          "mission_id": "stage3-synthetic-mission",
+          "question": "Which part of the synthetic input can be appraised now?",
+          "recipient_id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+          "replacement_request_ref": null,
+          "requester_id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+          "resolved_at": null,
+          "reviewer_id": null,
+          "status": "unanswered",
+          "recordedAt": "2026-10-09T02:35:17.707482+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "mail_message",
+          "id": "stage3-partial-message",
+          "version": 2
+        },
+        "label": "mail message · stage3-partial-message · v2",
+        "data": {
+          "acknowledged_at": null,
+          "correlation_id": "stage3-partial-review",
+          "created_at": "2026-10-09T02:35:17.707369+00:00",
+          "delivered_at": "2026-10-09T02:35:17.708362+00:00",
+          "duplicate_detection_id": "stage3-partial-message",
+          "evidence_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            }
+          ],
+          "mission_id": "stage3-synthetic-mission",
+          "recipient_ref": {
+            "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "request_id": "stage3-partial-review",
+          "sender_ref": {
+            "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "task_ref": {
+            "id": "d-evidence-gap",
+            "kind": "board_proposal",
+            "version": 1
+          },
+          "payloadAccess": "Saved result content is separate from this diagnostic overview",
+          "recordedAt": "2026-10-09T02:35:17.708371+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "research_snapshot",
+          "id": "stage3-offline-concurrent-snapshot-v1",
+          "version": 1
+        },
+        "label": "research snapshot · stage3-offline-concurrent-snapshot-v1 · v1",
+        "data": {
+          "availability": "not_projected",
+          "explanation": "This record kind has no diagnostic-view policy yet",
+          "recordedAt": "2026-10-09T02:35:17.724918+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "contribution_review_view",
+          "id": "shared-review",
+          "version": 1
+        },
+        "label": "contribution review view · shared-review · v1",
+        "data": {
+          "late_peer_ref": {
+            "id": "agent-3ad0967e5b2749a0b139b76bb7390d7a",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "mission_id": "stage3-synthetic-mission",
+          "proof": "offline_test",
+          "proposal_context": {
+            "entries": [
+              {
+                "records": [
+                  {
+                    "availability": "projected",
+                    "data": {
+                      "actor_ref": {
+                        "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "branch_of": null,
+                      "depends_on": [],
+                      "expected_artifact": "Source-backed appraisal when evidence exists",
+                      "mission_id": "stage3-synthetic-mission",
+                      "next_action": "Find a permitted exact source version, then invite an independent peer",
+                      "objective": "Resolve the remaining synthetic evidence gap",
+                      "outcome_ref": null,
+                      "prerequisite_refs": [
+                        {
+                          "id": "stage3-synthetic-input",
+                          "kind": "stage3_fixture_input",
+                          "version": 1
+                        }
+                      ],
+                      "status": "deferred"
+                    },
+                    "ref": {
+                      "id": "d-evidence-gap",
+                      "kind": "board_proposal",
+                      "version": 1
+                    }
+                  }
+                ],
+                "sequence": 19,
+                "summary": "A peer proposed research work.",
+                "type": "proposal_created"
+              },
+              {
+                "records": [
+                  {
+                    "availability": "projected",
+                    "data": {
+                      "actor_ref": {
+                        "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "critique": "The local callback demonstrates execution, but the synthetic input contains no study passage to appraise.",
+                      "evidence_refs": [
+                        {
+                          "id": "stage3-synthetic-input",
+                          "kind": "stage3_fixture_input",
+                          "version": 1
+                        }
+                      ],
+                      "mission_id": "stage3-synthetic-mission",
+                      "proposal_ref": {
+                        "id": "d-evidence-gap",
+                        "kind": "board_proposal",
+                        "version": 1
+                      }
+                    },
+                    "ref": {
+                      "id": "stage3-limited-critique",
+                      "kind": "board_dissent",
+                      "version": 1
+                    }
+                  }
+                ],
+                "sequence": 24,
+                "summary": "A peer recorded a critique.",
+                "type": "proposal_dissent"
+              },
+              {
+                "records": [
+                  {
+                    "availability": "projected",
+                    "data": {
+                      "acknowledged_at": null,
+                      "correlation_id": "stage3-partial-review",
+                      "created_at": "2026-10-09T02:35:17.707369+00:00",
+                      "delivered_at": null,
+                      "duplicate_detection_id": "stage3-partial-message",
+                      "evidence_refs": [
+                        {
+                          "id": "stage3-synthetic-input",
+                          "kind": "stage3_fixture_input",
+                          "version": 1
+                        }
+                      ],
+                      "mission_id": "stage3-synthetic-mission",
+                      "payloadAccess": "Saved result content is separate from this diagnostic overview",
+                      "recipient_ref": {
+                        "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "request_id": "stage3-partial-review",
+                      "scientific_use": "unknown_from_delivery",
+                      "sender_ref": {
+                        "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "task_ref": {
+                        "id": "d-evidence-gap",
+                        "kind": "board_proposal",
+                        "version": 1
+                      }
+                    },
+                    "ref": {
+                      "id": "stage3-partial-message",
+                      "kind": "mail_message",
+                      "version": 1
+                    }
+                  }
+                ],
+                "sequence": 25,
+                "summary": "A peer sent a message about this work.",
+                "type": "peer_message_pending"
+              },
+              {
+                "records": [
+                  {
+                    "availability": "projected",
+                    "data": {
+                      "accepted_answer_ref": null,
+                      "cause_ref": {
+                        "id": "d-evidence-gap",
+                        "kind": "board_proposal",
+                        "version": 1
+                      },
+                      "message_ref": {
+                        "id": "stage3-partial-message",
+                        "kind": "mail_message",
+                        "version": 1
+                      },
+                      "mission_id": "stage3-synthetic-mission",
+                      "question": "Which part of the synthetic input can be appraised now?",
+                      "recipient_id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+                      "requester_id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+                      "status": "unanswered"
+                    },
+                    "ref": {
+                      "id": "stage3-partial-review",
+                      "kind": "mail_request",
+                      "version": 1
+                    }
+                  }
+                ],
+                "sequence": 26,
+                "summary": "A peer asked for evidence or review.",
+                "type": "peer_request_opened"
+              },
+              {
+                "records": [
+                  {
+                    "availability": "projected",
+                    "data": {
+                      "acknowledged_at": null,
+                      "correlation_id": "stage3-partial-review",
+                      "created_at": "2026-10-09T02:35:17.707369+00:00",
+                      "delivered_at": "2026-10-09T02:35:17.708362+00:00",
+                      "duplicate_detection_id": "stage3-partial-message",
+                      "evidence_refs": [
+                        {
+                          "id": "stage3-synthetic-input",
+                          "kind": "stage3_fixture_input",
+                          "version": 1
+                        }
+                      ],
+                      "mission_id": "stage3-synthetic-mission",
+                      "payloadAccess": "Saved result content is separate from this diagnostic overview",
+                      "recipient_ref": {
+                        "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "request_id": "stage3-partial-review",
+                      "scientific_use": "unknown_from_delivery",
+                      "sender_ref": {
+                        "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "task_ref": {
+                        "id": "d-evidence-gap",
+                        "kind": "board_proposal",
+                        "version": 1
+                      }
+                    },
+                    "ref": {
+                      "id": "stage3-partial-message",
+                      "kind": "mail_message",
+                      "version": 2
+                    }
+                  }
+                ],
+                "sequence": 27,
+                "summary": "A peer message was delivered; its scientific use is unknown.",
+                "type": "peer_message_delivered"
+              },
+              {
+                "records": [
+                  {
+                    "availability": "projected",
+                    "data": {
+                      "acknowledged_at": "2026-10-09T02:35:17.709638+00:00",
+                      "correlation_id": "stage3-partial-review",
+                      "created_at": "2026-10-09T02:35:17.707369+00:00",
+                      "delivered_at": "2026-10-09T02:35:17.708362+00:00",
+                      "duplicate_detection_id": "stage3-partial-message",
+                      "evidence_refs": [
+                        {
+                          "id": "stage3-synthetic-input",
+                          "kind": "stage3_fixture_input",
+                          "version": 1
+                        }
+                      ],
+                      "mission_id": "stage3-synthetic-mission",
+                      "payloadAccess": "Saved result content is separate from this diagnostic overview",
+                      "recipient_ref": {
+                        "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "request_id": "stage3-partial-review",
+                      "scientific_use": "unknown_from_delivery",
+                      "sender_ref": {
+                        "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "task_ref": {
+                        "id": "d-evidence-gap",
+                        "kind": "board_proposal",
+                        "version": 1
+                      }
+                    },
+                    "ref": {
+                      "id": "stage3-partial-message",
+                      "kind": "mail_message",
+                      "version": 3
+                    }
+                  }
+                ],
+                "sequence": 28,
+                "summary": "A peer acknowledged a message; its scientific use is unknown.",
+                "type": "peer_message_acknowledged"
+              },
+              {
+                "records": [
+                  {
+                    "availability": "projected",
+                    "data": {
+                      "accepted_answer_ref": null,
+                      "cause_ref": {
+                        "id": "d-evidence-gap",
+                        "kind": "board_proposal",
+                        "version": 1
+                      },
+                      "message_ref": {
+                        "id": "stage3-partial-message",
+                        "kind": "mail_message",
+                        "version": 1
+                      },
+                      "mission_id": "stage3-synthetic-mission",
+                      "question": "Which part of the synthetic input can be appraised now?",
+                      "recipient_id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+                      "requester_id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+                      "status": "partial_awaiting_review"
+                    },
+                    "ref": {
+                      "id": "stage3-partial-review",
+                      "kind": "mail_request",
+                      "version": 3
+                    }
+                  },
+                  {
+                    "availability": "projected",
+                    "data": {
+                      "artifact_ref": {
+                        "id": "stage3-limited-critique",
+                        "kind": "board_dissent",
+                        "version": 1
+                      },
+                      "created_at": "2026-10-09T02:35:17.710777+00:00",
+                      "mission_id": "stage3-synthetic-mission",
+                      "partial": true,
+                      "request_id": "stage3-partial-review",
+                      "responder_id": "agent-336c746ae6eb4018aa78e0d82ccce849"
+                    },
+                    "ref": {
+                      "id": "stage3-partial-answer",
+                      "kind": "mail_answer",
+                      "version": 1
+                    }
+                  }
+                ],
+                "sequence": 29,
+                "summary": "A peer submitted an answer for review.",
+                "type": "peer_answer_submitted"
+              },
+              {
+                "records": [
+                  {
+                    "availability": "projected",
+                    "data": {
+                      "acknowledged_at": null,
+                      "correlation_id": "shared-input-limits",
+                      "created_at": "2026-10-09T02:35:17.857570+00:00",
+                      "delivered_at": null,
+                      "duplicate_detection_id": "contribution-update",
+                      "evidence_refs": [
+                        {
+                          "id": "stage3-synthetic-input",
+                          "kind": "stage3_fixture_input",
+                          "version": 1
+                        },
+                        {
+                          "id": "stage3-limited-critique",
+                          "kind": "board_dissent",
+                          "version": 1
+                        }
+                      ],
+                      "mission_id": "stage3-synthetic-mission",
+                      "payloadAccess": "Saved result content is separate from this diagnostic overview",
+                      "recipient_ref": {
+                        "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "request_id": null,
+                      "scientific_use": "unknown_from_delivery",
+                      "sender_ref": {
+                        "id": "agent-35479f72753447fc920b704352994456",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "task_ref": {
+                        "id": "d-evidence-gap",
+                        "kind": "board_proposal",
+                        "version": 1
+                      }
+                    },
+                    "ref": {
+                      "id": "contribution-update",
+                      "kind": "mail_message",
+                      "version": 1
+                    }
+                  }
+                ],
+                "sequence": 31,
+                "summary": "A peer sent a message about this work.",
+                "type": "peer_message_pending"
+              },
+              {
+                "records": [
+                  {
+                    "availability": "projected",
+                    "data": {
+                      "acknowledged_at": null,
+                      "correlation_id": "shared-input-limits",
+                      "created_at": "2026-10-09T02:35:17.857570+00:00",
+                      "delivered_at": "2026-10-09T02:35:17.858835+00:00",
+                      "duplicate_detection_id": "contribution-update",
+                      "evidence_refs": [
+                        {
+                          "id": "stage3-synthetic-input",
+                          "kind": "stage3_fixture_input",
+                          "version": 1
+                        },
+                        {
+                          "id": "stage3-limited-critique",
+                          "kind": "board_dissent",
+                          "version": 1
+                        }
+                      ],
+                      "mission_id": "stage3-synthetic-mission",
+                      "payloadAccess": "Saved result content is separate from this diagnostic overview",
+                      "recipient_ref": {
+                        "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "request_id": null,
+                      "scientific_use": "unknown_from_delivery",
+                      "sender_ref": {
+                        "id": "agent-35479f72753447fc920b704352994456",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "task_ref": {
+                        "id": "d-evidence-gap",
+                        "kind": "board_proposal",
+                        "version": 1
+                      }
+                    },
+                    "ref": {
+                      "id": "contribution-update",
+                      "kind": "mail_message",
+                      "version": 2
+                    }
+                  }
+                ],
+                "sequence": 32,
+                "summary": "A peer message was delivered; its scientific use is unknown.",
+                "type": "peer_message_delivered"
+              },
+              {
+                "records": [
+                  {
+                    "availability": "projected",
+                    "data": {
+                      "acknowledged_at": "2026-10-09T02:35:17.860185+00:00",
+                      "correlation_id": "shared-input-limits",
+                      "created_at": "2026-10-09T02:35:17.857570+00:00",
+                      "delivered_at": "2026-10-09T02:35:17.858835+00:00",
+                      "duplicate_detection_id": "contribution-update",
+                      "evidence_refs": [
+                        {
+                          "id": "stage3-synthetic-input",
+                          "kind": "stage3_fixture_input",
+                          "version": 1
+                        },
+                        {
+                          "id": "stage3-limited-critique",
+                          "kind": "board_dissent",
+                          "version": 1
+                        }
+                      ],
+                      "mission_id": "stage3-synthetic-mission",
+                      "payloadAccess": "Saved result content is separate from this diagnostic overview",
+                      "recipient_ref": {
+                        "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "request_id": null,
+                      "scientific_use": "unknown_from_delivery",
+                      "sender_ref": {
+                        "id": "agent-35479f72753447fc920b704352994456",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "task_ref": {
+                        "id": "d-evidence-gap",
+                        "kind": "board_proposal",
+                        "version": 1
+                      }
+                    },
+                    "ref": {
+                      "id": "contribution-update",
+                      "kind": "mail_message",
+                      "version": 3
+                    }
+                  }
+                ],
+                "sequence": 33,
+                "summary": "A peer acknowledged a message; its scientific use is unknown.",
+                "type": "peer_message_acknowledged"
+              },
+              {
+                "records": [
+                  {
+                    "availability": "projected",
+                    "data": {
+                      "actor_ref": {
+                        "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "branch_of": null,
+                      "depends_on": [],
+                      "expected_artifact": "Source-backed appraisal when evidence exists",
+                      "mission_id": "stage3-synthetic-mission",
+                      "next_action": "Seek a permitted study passage before attempting the appraisal.",
+                      "objective": "Resolve the remaining synthetic evidence gap",
+                      "outcome_ref": null,
+                      "prerequisite_refs": [
+                        {
+                          "id": "stage3-synthetic-input",
+                          "kind": "stage3_fixture_input",
+                          "version": 1
+                        }
+                      ],
+                      "status": "deferred"
+                    },
+                    "ref": {
+                      "id": "d-evidence-gap",
+                      "kind": "board_proposal",
+                      "version": 2
+                    }
+                  }
+                ],
+                "sequence": 35,
+                "summary": "A peer revised the proposal.",
+                "type": "proposal_revised"
+              },
+              {
+                "records": [
+                  {
+                    "availability": "projected",
+                    "data": {
+                      "actor_ref": {
+                        "id": "agent-3ad0967e5b2749a0b139b76bb7390d7a",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "disposition": "challenged",
+                      "effect_ref": {
+                        "id": "d-evidence-gap",
+                        "kind": "board_proposal",
+                        "version": 2
+                      },
+                      "evidence_refs": [
+                        {
+                          "id": "stage3-synthetic-input",
+                          "kind": "stage3_fixture_input",
+                          "version": 1
+                        },
+                        {
+                          "id": "stage3-synthetic-input",
+                          "kind": "stage3_fixture_input",
+                          "version": 2
+                        },
+                        {
+                          "id": "stage3-limited-critique",
+                          "kind": "board_dissent",
+                          "version": 1
+                        }
+                      ],
+                      "scientific_status": "peer_statement",
+                      "statement": "I used the prior critique to revise the next action; execution success does not establish study validity.",
+                      "update_ref": {
+                        "id": "contribution-update",
+                        "kind": "mail_message",
+                        "version": 3
+                      }
+                    },
+                    "ref": {
+                      "id": "contribution-challenged",
+                      "kind": "peer_update_uptake",
+                      "version": 1
+                    }
+                  }
+                ],
+                "sequence": 36,
+                "summary": "A peer stated how they handled an update.",
+                "type": "peer_update_uptake_recorded"
+              },
+              {
+                "records": [
+                  {
+                    "availability": "projected",
+                    "data": {
+                      "acknowledged_at": null,
+                      "correlation_id": "source-update-not-yet-reviewed",
+                      "created_at": "2026-10-09T02:35:17.884050+00:00",
+                      "delivered_at": null,
+                      "duplicate_detection_id": "contribution-unassessed",
+                      "evidence_refs": [
+                        {
+                          "id": "stage3-synthetic-input",
+                          "kind": "stage3_fixture_input",
+                          "version": 2
+                        }
+                      ],
+                      "mission_id": "stage3-synthetic-mission",
+                      "payloadAccess": "Saved result content is separate from this diagnostic overview",
+                      "recipient_ref": {
+                        "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "request_id": null,
+                      "scientific_use": "unknown_from_delivery",
+                      "sender_ref": {
+                        "id": "agent-35479f72753447fc920b704352994456",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "task_ref": {
+                        "id": "d-evidence-gap",
+                        "kind": "board_proposal",
+                        "version": 2
+                      }
+                    },
+                    "ref": {
+                      "id": "contribution-unassessed",
+                      "kind": "mail_message",
+                      "version": 1
+                    }
+                  }
+                ],
+                "sequence": 37,
+                "summary": "A peer sent a message about this work.",
+                "type": "peer_message_pending"
+              },
+              {
+                "records": [
+                  {
+                    "availability": "projected",
+                    "data": {
+                      "acknowledged_at": null,
+                      "correlation_id": "source-update-not-yet-reviewed",
+                      "created_at": "2026-10-09T02:35:17.884050+00:00",
+                      "delivered_at": "2026-10-09T02:35:17.885227+00:00",
+                      "duplicate_detection_id": "contribution-unassessed",
+                      "evidence_refs": [
+                        {
+                          "id": "stage3-synthetic-input",
+                          "kind": "stage3_fixture_input",
+                          "version": 2
+                        }
+                      ],
+                      "mission_id": "stage3-synthetic-mission",
+                      "payloadAccess": "Saved result content is separate from this diagnostic overview",
+                      "recipient_ref": {
+                        "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "request_id": null,
+                      "scientific_use": "unknown_from_delivery",
+                      "sender_ref": {
+                        "id": "agent-35479f72753447fc920b704352994456",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "task_ref": {
+                        "id": "d-evidence-gap",
+                        "kind": "board_proposal",
+                        "version": 2
+                      }
+                    },
+                    "ref": {
+                      "id": "contribution-unassessed",
+                      "kind": "mail_message",
+                      "version": 2
+                    }
+                  }
+                ],
+                "sequence": 38,
+                "summary": "A peer message was delivered; its scientific use is unknown.",
+                "type": "peer_message_delivered"
+              },
+              {
+                "records": [
+                  {
+                    "availability": "projected",
+                    "data": {
+                      "acknowledged_at": "2026-10-09T02:35:17.886276+00:00",
+                      "correlation_id": "source-update-not-yet-reviewed",
+                      "created_at": "2026-10-09T02:35:17.884050+00:00",
+                      "delivered_at": "2026-10-09T02:35:17.885227+00:00",
+                      "duplicate_detection_id": "contribution-unassessed",
+                      "evidence_refs": [
+                        {
+                          "id": "stage3-synthetic-input",
+                          "kind": "stage3_fixture_input",
+                          "version": 2
+                        }
+                      ],
+                      "mission_id": "stage3-synthetic-mission",
+                      "payloadAccess": "Saved result content is separate from this diagnostic overview",
+                      "recipient_ref": {
+                        "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "request_id": null,
+                      "scientific_use": "unknown_from_delivery",
+                      "sender_ref": {
+                        "id": "agent-35479f72753447fc920b704352994456",
+                        "kind": "agent_instance",
+                        "version": 1
+                      },
+                      "task_ref": {
+                        "id": "d-evidence-gap",
+                        "kind": "board_proposal",
+                        "version": 2
+                      }
+                    },
+                    "ref": {
+                      "id": "contribution-unassessed",
+                      "kind": "mail_message",
+                      "version": 3
+                    }
+                  }
+                ],
+                "sequence": 39,
+                "summary": "A peer acknowledged a message; its scientific use is unknown.",
+                "type": "peer_message_acknowledged"
+              }
+            ],
+            "has_more": false,
+            "mission_id": "stage3-synthetic-mission",
+            "next_cursor": 41,
+            "proposal_id": "d-evidence-gap",
+            "schema": "ora.proposal_context.v1",
+            "through": 41,
+            "viewer_id": "agent-3ad0967e5b2749a0b139b76bb7390d7a",
+            "visibility": "mission_peer_projected"
+          },
+          "purpose": "Saved peer statements and their linked effects; no scientific correctness is inferred.",
+          "run_id": "stage3-synthetic-run",
+          "source_refs": [
+            {
+              "id": "stage3-limited-critique",
+              "kind": "board_dissent",
+              "version": 1
+            },
+            {
+              "id": "contribution-update",
+              "kind": "mail_message",
+              "version": 3
+            },
+            {
+              "id": "contribution-challenged",
+              "kind": "peer_update_uptake",
+              "version": 1
+            },
+            {
+              "id": "trace-90f3ede7566ffa7cd8ecd288f9d1db563f8f44f735db2a3d991a7c4ac10e2653",
+              "kind": "coordination_trace",
+              "version": 1
+            },
+            {
+              "id": "summary-df2e076f5a9785becca35e5fd0dee36ba2a6b1605422d01a635c87417b5ba761",
+              "kind": "trace_summary",
+              "version": 1
+            },
+            {
+              "id": "summary-441109df65a191b0151c9b2b6d860f09c703b242a83bc8d9aa22d9ddd75e8852",
+              "kind": "trace_summary",
+              "version": 1
+            }
+          ],
+          "summary_views": [
+            {
+              "coverage_basis": "caller_declared_read_boundary",
+              "coverage_status": "declared",
+              "currentness": "newer_scoped_events",
+              "event_refs": [],
+              "generation_state": "partial",
+              "known_gaps": [
+                {
+                  "kind": "omitted",
+                  "reason_code": "private_payloads_not_in_overview"
+                }
+              ],
+              "level": "run",
+              "missing_event_refs": [],
+              "missing_source_refs": [],
+              "newer_scoped_event_count": 1,
+              "newer_unclassified_event_count": 7,
+              "observed_event_sequence": 41,
+              "reference": {
+                "id": "summary-df2e076f5a9785becca35e5fd0dee36ba2a6b1605422d01a635c87417b5ba761",
+                "kind": "trace_summary",
+                "version": 1
+              },
+              "scope": {
+                "instance_ids": [],
+                "run_id": "stage3-synthetic-run",
+                "task_ids": []
+              },
+              "source_completeness": "not_established",
+              "source_refs": [
+                {
+                  "id": "stage3-limited-critique",
+                  "kind": "board_dissent",
+                  "version": 1
+                },
+                {
+                  "id": "contribution-update",
+                  "kind": "mail_message",
+                  "version": 3
+                }
+              ],
+              "summary": "A critique identifies the missing study passage. The update was acknowledged; no use of it is recorded yet.",
+              "through_event_sequence": 33,
+              "unresolved_newer_trace_count": 0
+            },
+            {
+              "coverage_basis": "caller_declared_read_boundary",
+              "coverage_status": "declared",
+              "currentness": "known_gaps",
+              "event_refs": [],
+              "generation_state": "partial",
+              "known_gaps": [
+                {
+                  "kind": "delayed",
+                  "reason_code": "study_passage_not_yet_supplied"
+                }
+              ],
+              "level": "run",
+              "missing_event_refs": [],
+              "missing_source_refs": [],
+              "newer_scoped_event_count": 0,
+              "newer_unclassified_event_count": 0,
+              "observed_event_sequence": 41,
+              "reference": {
+                "id": "summary-441109df65a191b0151c9b2b6d860f09c703b242a83bc8d9aa22d9ddd75e8852",
+                "kind": "trace_summary",
+                "version": 1
+              },
+              "scope": {
+                "instance_ids": [],
+                "run_id": "stage3-synthetic-run",
+                "task_ids": []
+              },
+              "source_completeness": "not_established",
+              "source_refs": [
+                {
+                  "id": "trace-90f3ede7566ffa7cd8ecd288f9d1db563f8f44f735db2a3d991a7c4ac10e2653",
+                  "kind": "coordination_trace",
+                  "version": 1
+                },
+                {
+                  "id": "contribution-challenged",
+                  "kind": "peer_update_uptake",
+                  "version": 1
+                },
+                {
+                  "id": "d-evidence-gap",
+                  "kind": "board_proposal",
+                  "version": 2
+                }
+              ],
+              "summary": "The late peer found the critique and revised the next action. The original question remains open pending a study passage.",
+              "through_event_sequence": 41,
+              "unresolved_newer_trace_count": 0
+            }
+          ],
+          "recordedAt": "2026-10-09T02:35:17.911402+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "agent_instance",
+          "id": "agent-3ad0967e5b2749a0b139b76bb7390d7a",
+          "version": 1
+        },
+        "label": "agent instance · agent-3ad0967e5b2749a0b139b76bb7390d7a · v1",
+        "data": {
+          "display_name": "Follow-up review peer",
+          "kind": "role",
+          "lane_id": null,
+          "mission_id": "stage3-synthetic-mission",
+          "predecessor_id": null,
+          "role_id": "independent_methods_reviewer_critic",
+          "run_id": "stage3-synthetic-run",
+          "recordedAt": "2026-10-09T02:35:17.866020+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "stage3_fixture_input",
+          "id": "stage3-synthetic-input",
+          "version": 2
+        },
+        "label": "stage3 fixture input · stage3-synthetic-input · v2",
+        "data": {
+          "mission_id": "stage3-synthetic-mission",
+          "question": "Inspect a synthetic evidence packet",
+          "uncertainty": "Execution observations remain insufficient for a scientific appraisal.",
+          "recordedAt": "2026-10-09T02:35:17.880347+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "mail_message",
+          "id": "contribution-update",
+          "version": 3
+        },
+        "label": "mail message · contribution-update · v3",
+        "data": {
+          "acknowledged_at": "2026-10-09T02:35:17.860185+00:00",
+          "correlation_id": "shared-input-limits",
+          "created_at": "2026-10-09T02:35:17.857570+00:00",
+          "delivered_at": "2026-10-09T02:35:17.858835+00:00",
+          "duplicate_detection_id": "contribution-update",
+          "evidence_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            },
+            {
+              "id": "stage3-limited-critique",
+              "kind": "board_dissent",
+              "version": 1
+            }
+          ],
+          "mission_id": "stage3-synthetic-mission",
+          "recipient_ref": {
+            "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "request_id": null,
+          "sender_ref": {
+            "id": "agent-35479f72753447fc920b704352994456",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "task_ref": {
+            "id": "d-evidence-gap",
+            "kind": "board_proposal",
+            "version": 1
+          },
+          "payloadAccess": "Saved result content is separate from this diagnostic overview",
+          "recordedAt": "2026-10-09T02:35:17.860193+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "peer_update_uptake",
+          "id": "contribution-challenged",
+          "version": 1
+        },
+        "label": "peer update uptake · contribution-challenged · v1",
+        "data": {
+          "actor_ref": {
+            "id": "agent-3ad0967e5b2749a0b139b76bb7390d7a",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "created_at": "2026-10-09T02:35:17.882693+00:00",
+          "disposition": "challenged",
+          "effect_ref": {
+            "id": "d-evidence-gap",
+            "kind": "board_proposal",
+            "version": 2
+          },
+          "evidence_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            },
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 2
+            },
+            {
+              "id": "stage3-limited-critique",
+              "kind": "board_dissent",
+              "version": 1
+            }
+          ],
+          "mission_id": "stage3-synthetic-mission",
+          "schema": "ora.peer_update_uptake.v1",
+          "scientific_status": "peer_statement",
+          "statement": "I used the prior critique to revise the next action; execution success does not establish study validity.",
+          "update_ref": {
+            "id": "contribution-update",
+            "kind": "mail_message",
+            "version": 3
+          },
+          "recordedAt": "2026-10-09T02:35:17.882699+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "board_proposal",
+          "id": "d-evidence-gap",
+          "version": 2
+        },
+        "label": "board proposal · d-evidence-gap · v2",
+        "data": {
+          "actor_ref": {
+            "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "branch_of": null,
+          "depends_on": [],
+          "expected_artifact": "Source-backed appraisal when evidence exists",
+          "mission_id": "stage3-synthetic-mission",
+          "next_action": "Seek a permitted study passage before attempting the appraisal.",
+          "objective": "Resolve the remaining synthetic evidence gap",
+          "outcome_ref": null,
+          "prerequisite_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            }
+          ],
+          "status": "deferred",
+          "recordedAt": "2026-10-09T02:35:17.881295+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "coordination_trace",
+          "id": "trace-90f3ede7566ffa7cd8ecd288f9d1db563f8f44f735db2a3d991a7c4ac10e2653",
+          "version": 1
+        },
+        "label": "coordination trace · trace-90f3ede7566ffa7cd8ecd288f9d1db563f8f44f735db2a3d991a7c4ac10e2653 · v1",
+        "data": {
+          "action": "Revise the next research action",
+          "attempt_id": "review-follow-up",
+          "call_id": null,
+          "call_version": null,
+          "capability_state": null,
+          "category": "peer_review",
+          "configuration_ref": null,
+          "input_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            },
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 2
+            },
+            {
+              "id": "contribution-update",
+              "kind": "mail_message",
+              "version": 3
+            }
+          ],
+          "instance_id": "agent-3ad0967e5b2749a0b139b76bb7390d7a",
+          "mission_id": "stage3-synthetic-mission",
+          "next_action": null,
+          "operation_id": "contribution-revision",
+          "output_refs": [
+            {
+              "id": "d-evidence-gap",
+              "kind": "board_proposal",
+              "version": 2
+            },
+            {
+              "id": "contribution-challenged",
+              "kind": "peer_update_uptake",
+              "version": 1
+            }
+          ],
+          "parent_operation_id": null,
+          "proof": "recorded_local_event",
+          "reason_summary": null,
+          "redacted_paths": [],
+          "relationships": [
+            {
+              "reference": {
+                "id": "stage3-synthetic-input",
+                "kind": "stage3_fixture_input",
+                "version": 1
+              },
+              "relation": "input_consumed"
+            },
+            {
+              "reference": {
+                "id": "stage3-synthetic-input",
+                "kind": "stage3_fixture_input",
+                "version": 2
+              },
+              "relation": "input_consumed"
+            },
+            {
+              "reference": {
+                "id": "contribution-update",
+                "kind": "mail_message",
+                "version": 3
+              },
+              "relation": "reply_to"
+            },
+            {
+              "reference": {
+                "id": "d-evidence-gap",
+                "kind": "board_proposal",
+                "version": 1
+              },
+              "relation": "revision_of"
+            }
+          ],
+          "run_id": "stage3-synthetic-run",
+          "schema": "ora.trace.v1",
+          "status": "recorded",
+          "summary": "A late peer linked a critique to a revised evidence request.",
+          "task_id": "d-evidence-gap",
+          "timing": {},
+          "timing_fields_omitted": 0,
+          "turn_id": null,
+          "usage_refs": [],
+          "recordedAt": "2026-10-09T02:35:17.888882+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "trace_summary",
+          "id": "summary-df2e076f5a9785becca35e5fd0dee36ba2a6b1605422d01a635c87417b5ba761",
+          "version": 1
+        },
+        "label": "trace summary · summary-df2e076f5a9785becca35e5fd0dee36ba2a6b1605422d01a635c87417b5ba761 · v1",
+        "data": {
+          "coverage": {
+            "basis": "caller_declared_read_boundary",
+            "event_refs": [],
+            "generation_state": "partial",
+            "known_gaps": [
+              {
+                "kind": "omitted",
+                "reason_code": "private_payloads_not_in_overview"
+              }
+            ],
+            "scope": {
+              "instance_ids": [],
+              "run_id": "stage3-synthetic-run",
+              "task_ids": []
+            },
+            "through_event_sequence": 33
+          },
+          "kind": "derived_explanation",
+          "level": "run",
+          "mission_id": "stage3-synthetic-mission",
+          "source_refs": [
+            {
+              "id": "stage3-limited-critique",
+              "kind": "board_dissent",
+              "version": 1
+            },
+            {
+              "id": "contribution-update",
+              "kind": "mail_message",
+              "version": 3
+            }
+          ],
+          "summary": "A critique identifies the missing study passage. The update was acknowledged; no use of it is recorded yet.",
+          "recordedAt": "2026-10-09T02:35:17.862556+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "trace_summary",
+          "id": "summary-441109df65a191b0151c9b2b6d860f09c703b242a83bc8d9aa22d9ddd75e8852",
+          "version": 1
+        },
+        "label": "trace summary · summary-441109df65a191b0151c9b2b6d860f09c703b242a83bc8d9aa22d9ddd75e8852 · v1",
+        "data": {
+          "coverage": {
+            "basis": "caller_declared_read_boundary",
+            "event_refs": [],
+            "generation_state": "partial",
+            "known_gaps": [
+              {
+                "kind": "delayed",
+                "reason_code": "study_passage_not_yet_supplied"
+              }
+            ],
+            "scope": {
+              "instance_ids": [],
+              "run_id": "stage3-synthetic-run",
+              "task_ids": []
+            },
+            "through_event_sequence": 41
+          },
+          "kind": "derived_explanation",
+          "level": "run",
+          "mission_id": "stage3-synthetic-mission",
+          "source_refs": [
+            {
+              "id": "trace-90f3ede7566ffa7cd8ecd288f9d1db563f8f44f735db2a3d991a7c4ac10e2653",
+              "kind": "coordination_trace",
+              "version": 1
+            },
+            {
+              "id": "contribution-challenged",
+              "kind": "peer_update_uptake",
+              "version": 1
+            },
+            {
+              "id": "d-evidence-gap",
+              "kind": "board_proposal",
+              "version": 2
+            }
+          ],
+          "summary": "The late peer found the critique and revised the next action. The original question remains open pending a study passage.",
+          "recordedAt": "2026-10-09T02:35:17.890789+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "mail_message",
+          "id": "contribution-update",
+          "version": 1
+        },
+        "label": "mail message · contribution-update · v1",
+        "data": {
+          "acknowledged_at": null,
+          "correlation_id": "shared-input-limits",
+          "created_at": "2026-10-09T02:35:17.857570+00:00",
+          "delivered_at": null,
+          "duplicate_detection_id": "contribution-update",
+          "evidence_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            },
+            {
+              "id": "stage3-limited-critique",
+              "kind": "board_dissent",
+              "version": 1
+            }
+          ],
+          "mission_id": "stage3-synthetic-mission",
+          "recipient_ref": {
+            "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "request_id": null,
+          "sender_ref": {
+            "id": "agent-35479f72753447fc920b704352994456",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "task_ref": {
+            "id": "d-evidence-gap",
+            "kind": "board_proposal",
+            "version": 1
+          },
+          "payloadAccess": "Saved result content is separate from this diagnostic overview",
+          "recordedAt": "2026-10-09T02:35:17.857579+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "mail_message",
+          "id": "contribution-update",
+          "version": 2
+        },
+        "label": "mail message · contribution-update · v2",
+        "data": {
+          "acknowledged_at": null,
+          "correlation_id": "shared-input-limits",
+          "created_at": "2026-10-09T02:35:17.857570+00:00",
+          "delivered_at": "2026-10-09T02:35:17.858835+00:00",
+          "duplicate_detection_id": "contribution-update",
+          "evidence_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 1
+            },
+            {
+              "id": "stage3-limited-critique",
+              "kind": "board_dissent",
+              "version": 1
+            }
+          ],
+          "mission_id": "stage3-synthetic-mission",
+          "recipient_ref": {
+            "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "request_id": null,
+          "sender_ref": {
+            "id": "agent-35479f72753447fc920b704352994456",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "task_ref": {
+            "id": "d-evidence-gap",
+            "kind": "board_proposal",
+            "version": 1
+          },
+          "payloadAccess": "Saved result content is separate from this diagnostic overview",
+          "recordedAt": "2026-10-09T02:35:17.858848+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "mail_message",
+          "id": "contribution-unassessed",
+          "version": 1
+        },
+        "label": "mail message · contribution-unassessed · v1",
+        "data": {
+          "acknowledged_at": null,
+          "correlation_id": "source-update-not-yet-reviewed",
+          "created_at": "2026-10-09T02:35:17.884050+00:00",
+          "delivered_at": null,
+          "duplicate_detection_id": "contribution-unassessed",
+          "evidence_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 2
+            }
+          ],
+          "mission_id": "stage3-synthetic-mission",
+          "recipient_ref": {
+            "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "request_id": null,
+          "sender_ref": {
+            "id": "agent-35479f72753447fc920b704352994456",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "task_ref": {
+            "id": "d-evidence-gap",
+            "kind": "board_proposal",
+            "version": 2
+          },
+          "payloadAccess": "Saved result content is separate from this diagnostic overview",
+          "recordedAt": "2026-10-09T02:35:17.884060+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "mail_message",
+          "id": "contribution-unassessed",
+          "version": 2
+        },
+        "label": "mail message · contribution-unassessed · v2",
+        "data": {
+          "acknowledged_at": null,
+          "correlation_id": "source-update-not-yet-reviewed",
+          "created_at": "2026-10-09T02:35:17.884050+00:00",
+          "delivered_at": "2026-10-09T02:35:17.885227+00:00",
+          "duplicate_detection_id": "contribution-unassessed",
+          "evidence_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 2
+            }
+          ],
+          "mission_id": "stage3-synthetic-mission",
+          "recipient_ref": {
+            "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "request_id": null,
+          "sender_ref": {
+            "id": "agent-35479f72753447fc920b704352994456",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "task_ref": {
+            "id": "d-evidence-gap",
+            "kind": "board_proposal",
+            "version": 2
+          },
+          "payloadAccess": "Saved result content is separate from this diagnostic overview",
+          "recordedAt": "2026-10-09T02:35:17.885239+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "mail_message",
+          "id": "contribution-unassessed",
+          "version": 3
+        },
+        "label": "mail message · contribution-unassessed · v3",
+        "data": {
+          "acknowledged_at": "2026-10-09T02:35:17.886276+00:00",
+          "correlation_id": "source-update-not-yet-reviewed",
+          "created_at": "2026-10-09T02:35:17.884050+00:00",
+          "delivered_at": "2026-10-09T02:35:17.885227+00:00",
+          "duplicate_detection_id": "contribution-unassessed",
+          "evidence_refs": [
+            {
+              "id": "stage3-synthetic-input",
+              "kind": "stage3_fixture_input",
+              "version": 2
+            }
+          ],
+          "mission_id": "stage3-synthetic-mission",
+          "recipient_ref": {
+            "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "request_id": null,
+          "sender_ref": {
+            "id": "agent-35479f72753447fc920b704352994456",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "task_ref": {
+            "id": "d-evidence-gap",
+            "kind": "board_proposal",
+            "version": 2
+          },
+          "payloadAccess": "Saved result content is separate from this diagnostic overview",
+          "recordedAt": "2026-10-09T02:35:17.886284+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "mail_message",
+          "id": "contribution-clarification",
+          "version": 1
+        },
+        "label": "mail message · contribution-clarification · v1",
+        "data": {
+          "acknowledged_at": null,
+          "correlation_id": "stage3-question",
+          "created_at": "2026-10-09T02:35:17.887389+00:00",
+          "delivered_at": null,
+          "duplicate_detection_id": "contribution-clarification",
+          "evidence_refs": [],
+          "mission_id": "stage3-synthetic-mission",
+          "recipient_ref": {
+            "id": "agent-35479f72753447fc920b704352994456",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "request_id": null,
+          "sender_ref": {
+            "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+            "kind": "agent_instance",
+            "version": 1
+          },
+          "task_ref": {
+            "id": "a-fast",
+            "kind": "board_proposal",
+            "version": 1
+          },
+          "payloadAccess": "Saved result content is separate from this diagnostic overview",
+          "recordedAt": "2026-10-09T02:35:17.887395+00:00",
+          "reviewRequired": []
+        }
+      },
+      {
+        "reference": {
+          "kind": "research_snapshot",
+          "id": "stage3-contribution-review-snapshot-v1",
+          "version": 1
+        },
+        "label": "research snapshot · stage3-contribution-review-snapshot-v1 · v1",
+        "data": {
+          "availability": "not_projected",
+          "explanation": "This record kind has no diagnostic-view policy yet",
+          "recordedAt": "2026-10-09T02:35:17.924461+00:00",
+          "reviewRequired": []
+        }
+      }
+    ],
+    "acceptedOutputReferences": [],
+    "followupTarget": null,
+    "timingBasis": "observed_local",
+    "steps": [
+      {
+        "id": "event-969effa84fdc4528a4eb657e3cc7113c",
+        "sequence": 1,
+        "recordedAt": "2026-10-09T02:35:17.600519+00:00",
+        "actorName": "Acquisition peer",
+        "action": "Register a named research agent",
+        "summary": "A permanent instance identity and readable name were saved; this does not establish competence.",
+        "outcome": "registered",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "agent_instance",
+            "id": "agent-35479f72753447fc920b704352994456",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved local state; no model execution inferred"
+      },
+      {
+        "id": "event-34f60d0be0a3441495fbc48f5c6d5b10",
+        "sequence": 2,
+        "recordedAt": "2026-10-09T02:35:17.601982+00:00",
+        "actorName": "Synthesis peer",
+        "action": "Register a named research agent",
+        "summary": "A permanent instance identity and readable name were saved; this does not establish competence.",
+        "outcome": "registered",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "agent_instance",
+            "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved local state; no model execution inferred"
+      },
+      {
+        "id": "event-c8032cd38af94bb7a15e978950b03d48",
+        "sequence": 3,
+        "recordedAt": "2026-10-09T02:35:17.603972+00:00",
+        "actorName": "Review peer",
+        "action": "Register a named research agent",
+        "summary": "A permanent instance identity and readable name were saved; this does not establish competence.",
+        "outcome": "registered",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "agent_instance",
+            "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved local state; no model execution inferred"
+      },
+      {
+        "id": "event-6cf047e8de8f4239a527de3c485f1e31",
+        "sequence": 4,
+        "recordedAt": "2026-10-09T02:35:17.612724+00:00",
+        "actorName": "Acquisition peer",
+        "action": "Propose research work",
+        "summary": "A peer saved a question, expected contribution and next action.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "board_proposal",
+            "id": "a-fast",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-46b4e259b28947b797866f6a71a7e5a8",
+        "sequence": 5,
+        "recordedAt": "2026-10-09T02:35:17.614348+00:00",
+        "actorName": null,
+        "action": "Save ready-to-run work",
+        "summary": "The host saved exact inputs, configuration and callback version; execution is separate.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "executor_work",
+            "id": "executor-work:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-441fff05dfbf416c81b6194350571d53",
+        "sequence": 6,
+        "recordedAt": "2026-10-09T02:35:17.616954+00:00",
+        "actorName": "Synthesis peer",
+        "action": "Propose research work",
+        "summary": "A peer saved a question, expected contribution and next action.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "board_proposal",
+            "id": "b-slow",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-c698c0409ed84c1e917a56624c042267",
+        "sequence": 7,
+        "recordedAt": "2026-10-09T02:35:17.618533+00:00",
+        "actorName": null,
+        "action": "Save ready-to-run work",
+        "summary": "The host saved exact inputs, configuration and callback version; execution is separate.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "executor_work",
+            "id": "executor-work:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-51c2718c03374dc8b117d7f0e1a60903",
+        "sequence": 8,
+        "recordedAt": "2026-10-09T02:35:17.621948+00:00",
+        "actorName": "Review peer",
+        "action": "Propose research work",
+        "summary": "A peer saved a question, expected contribution and next action.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "board_proposal",
+            "id": "c-dependent",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-caedcaf6dfcc472394bf5b710868cd18",
+        "sequence": 9,
+        "recordedAt": "2026-10-09T02:35:17.623048+00:00",
+        "actorName": null,
+        "action": "Save ready-to-run work",
+        "summary": "The host saved exact inputs, configuration and callback version; execution is separate.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "executor_work",
+            "id": "executor-work:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-4ac1afda6ddc4f45a6e630635f2c49fc",
+        "sequence": 10,
+        "recordedAt": "2026-10-09T02:35:17.640452+00:00",
+        "actorName": "Synthesis peer",
+        "action": "Claim an eligible contribution",
+        "summary": "A peer acquired a time-limited claim to this exact work version.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "board_claim",
+            "id": "stage3-synthetic-mission:b-slow:1",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-a92b4d4f96a34c8e8b5902306d48f45e",
+        "sequence": 11,
+        "recordedAt": "2026-10-09T02:35:17.643221+00:00",
+        "actorName": "Acquisition peer",
+        "action": "Claim an eligible contribution",
+        "summary": "A peer acquired a time-limited claim to this exact work version.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "board_claim",
+            "id": "stage3-synthetic-mission:a-fast:1",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-aecbda1b93b54747bf2f54548506ce82",
+        "sequence": 12,
+        "recordedAt": "2026-10-09T02:35:17.661004+00:00",
+        "actorName": "Acquisition peer",
+        "action": "Execute peer-selected work",
+        "summary": "The registered callback returned and its local result was accepted.",
+        "outcome": "completed",
+        "inputReferences": [
+          {
+            "kind": "stage3_fixture_input",
+            "id": "stage3-synthetic-input",
+            "version": 1
+          }
+        ],
+        "outputReferences": [
+          {
+            "kind": "executor_artifact",
+            "id": "executor-artifact:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+            "version": 1
+          },
+          {
+            "kind": "coordination_trace",
+            "id": "trace-2a062cd725a4ebe385bfabd03494830bcc724f73f2f76189b2147dde2e78d46c",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "recorded_local_callback"
+      },
+      {
+        "id": "event-325a46d6643a40a7b2661519b7480c8b",
+        "sequence": 13,
+        "recordedAt": "2026-10-09T02:35:17.661311+00:00",
+        "actorName": "Acquisition peer",
+        "action": "Accept a peer contribution",
+        "summary": "The contribution and its related local records committed together.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "board_outcome",
+            "id": "executor-outcome:dfa8b163f679291447bbb7c56fa93109190ad2dc8262e8150ca73d431130c93b",
+            "version": 1
+          },
+          {
+            "kind": "board_proposal",
+            "id": "a-fast",
+            "version": 2
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-877f92feec734b6597273fe3458c472a",
+        "sequence": 14,
+        "recordedAt": "2026-10-09T02:35:17.672020+00:00",
+        "actorName": "Review peer",
+        "action": "Claim an eligible contribution",
+        "summary": "A peer acquired a time-limited claim to this exact work version.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "board_claim",
+            "id": "stage3-synthetic-mission:c-dependent:1",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-fb84de62ef3e44d789bf4f592042a6ca",
+        "sequence": 15,
+        "recordedAt": "2026-10-09T02:35:17.687238+00:00",
+        "actorName": "Review peer",
+        "action": "Execute peer-selected work",
+        "summary": "The registered callback returned and its local result was accepted.",
+        "outcome": "completed",
+        "inputReferences": [
+          {
+            "kind": "stage3_fixture_input",
+            "id": "stage3-synthetic-input",
+            "version": 1
+          }
+        ],
+        "outputReferences": [
+          {
+            "kind": "executor_artifact",
+            "id": "executor-artifact:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db",
+            "version": 1
+          },
+          {
+            "kind": "coordination_trace",
+            "id": "trace-e8870271db81895671c7a3a1313be8466fa53a7bb0065053dc4b0c5249889d59",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "recorded_local_callback"
+      },
+      {
+        "id": "event-963a6ee442fe4919896cb66f30577b82",
+        "sequence": 16,
+        "recordedAt": "2026-10-09T02:35:17.687563+00:00",
+        "actorName": "Review peer",
+        "action": "Accept a peer contribution",
+        "summary": "The contribution and its related local records committed together.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "board_outcome",
+            "id": "executor-outcome:7d0a66f954dc23174207871485184c1edc23548f6085366124784ab5d698b1db",
+            "version": 1
+          },
+          {
+            "kind": "board_proposal",
+            "id": "c-dependent",
+            "version": 2
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-6c62d8f639fd46d68da79eb31958b3b5",
+        "sequence": 17,
+        "recordedAt": "2026-10-09T02:35:17.689195+00:00",
+        "actorName": "Synthesis peer",
+        "action": "Execute peer-selected work",
+        "summary": "The registered callback returned and its local result was accepted.",
+        "outcome": "completed",
+        "inputReferences": [
+          {
+            "kind": "stage3_fixture_input",
+            "id": "stage3-synthetic-input",
+            "version": 1
+          }
+        ],
+        "outputReferences": [
+          {
+            "kind": "executor_artifact",
+            "id": "executor-artifact:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f",
+            "version": 1
+          },
+          {
+            "kind": "coordination_trace",
+            "id": "trace-00e273a35f075656358b711ab61a643bfb3f33475dd6566b0090f580199e3cac",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "recorded_local_callback"
+      },
+      {
+        "id": "event-0e294d3d20a646e9b3c9f3a62de9a9fb",
+        "sequence": 18,
+        "recordedAt": "2026-10-09T02:35:17.689489+00:00",
+        "actorName": "Synthesis peer",
+        "action": "Accept a peer contribution",
+        "summary": "The contribution and its related local records committed together.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "board_outcome",
+            "id": "executor-outcome:36061c44fac06d1eacc0959964c2276959d695e31fc294e6e72c08e57cefe84f",
+            "version": 1
+          },
+          {
+            "kind": "board_proposal",
+            "id": "b-slow",
+            "version": 2
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-a230235566d647d0bf068977621c4bf5",
+        "sequence": 19,
+        "recordedAt": "2026-10-09T02:35:17.700524+00:00",
+        "actorName": "Review peer",
+        "action": "Propose research work",
+        "summary": "A peer saved a question, expected contribution and next action.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "board_proposal",
+            "id": "d-evidence-gap",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-b1c2d200a2624336bce738889f8d650d",
+        "sequence": 20,
+        "recordedAt": "2026-10-09T02:35:17.702350+00:00",
+        "actorName": "Acquisition peer",
+        "action": "Queue a peer message",
+        "summary": "A message and its delivery intent were saved together.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "mail_message",
+            "id": "stage3-question-message",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-e1d011111a5f46ffb392aea759aeb8bc",
+        "sequence": 21,
+        "recordedAt": "2026-10-09T02:35:17.702421+00:00",
+        "actorName": "Acquisition peer",
+        "action": "Ask a peer for evidence or review",
+        "summary": "A request names the question, expected contribution and exact supporting records.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "mail_request",
+            "id": "stage3-question",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-8d63ecf825b5495faf50b7332ea12840",
+        "sequence": 22,
+        "recordedAt": "2026-10-09T02:35:17.703632+00:00",
+        "actorName": "Acquisition peer",
+        "action": "Deliver a peer message",
+        "summary": "Delivery was recorded; this does not establish that the requested work is answered.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "mail_message",
+            "id": "stage3-question-message",
+            "version": 2
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-305a0f3feda1488e97ee14991db9166a",
+        "sequence": 23,
+        "recordedAt": "2026-10-09T02:35:17.705095+00:00",
+        "actorName": "Acquisition peer",
+        "action": "Acknowledge a peer message",
+        "summary": "The recipient acknowledged the message; a scientific response is still separate.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "mail_message",
+            "id": "stage3-question-message",
+            "version": 3
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-b20044b8810b485e89d75b26916a8dbf",
+        "sequence": 24,
+        "recordedAt": "2026-10-09T02:35:17.706355+00:00",
+        "actorName": "Review peer",
+        "action": "Preserve an alternative interpretation",
+        "summary": "A peer recorded disagreement without deleting the existing interpretation.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "board_dissent",
+            "id": "stage3-limited-critique",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-bd294e057c4b4541af4843c8565fc477",
+        "sequence": 25,
+        "recordedAt": "2026-10-09T02:35:17.707457+00:00",
+        "actorName": "Synthesis peer",
+        "action": "Queue a peer message",
+        "summary": "A message and its delivery intent were saved together.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "mail_message",
+            "id": "stage3-partial-message",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-f515bd0400ed449795d459087a78e3e1",
+        "sequence": 26,
+        "recordedAt": "2026-10-09T02:35:17.707516+00:00",
+        "actorName": "Synthesis peer",
+        "action": "Ask a peer for evidence or review",
+        "summary": "A request names the question, expected contribution and exact supporting records.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "mail_request",
+            "id": "stage3-partial-review",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-81ff5022d1c240d0a270f0724617d0c7",
+        "sequence": 27,
+        "recordedAt": "2026-10-09T02:35:17.708520+00:00",
+        "actorName": "Synthesis peer",
+        "action": "Deliver a peer message",
+        "summary": "Delivery was recorded; this does not establish that the requested work is answered.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "mail_message",
+            "id": "stage3-partial-message",
+            "version": 2
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-fa45c01661404c3daf534b433a2b64bc",
+        "sequence": 28,
+        "recordedAt": "2026-10-09T02:35:17.709776+00:00",
+        "actorName": "Synthesis peer",
+        "action": "Acknowledge a peer message",
+        "summary": "The recipient acknowledged the message; a scientific response is still separate.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "mail_message",
+            "id": "stage3-partial-message",
+            "version": 3
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-82076fc790e6406c9fcb6adf73e466e7",
+        "sequence": 29,
+        "recordedAt": "2026-10-09T02:35:17.710943+00:00",
+        "actorName": "Synthesis peer",
+        "action": "Submit a peer answer",
+        "summary": "A saved contribution was offered for review; the requester has not necessarily accepted it.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "mail_answer",
+            "id": "stage3-partial-answer",
+            "version": 1
+          },
+          {
+            "kind": "mail_request",
+            "id": "stage3-partial-review",
+            "version": 3
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-0b413a8a51c6463486a04998dd1b4ea6",
+        "sequence": 30,
+        "recordedAt": "2026-10-09T02:35:17.724806+00:00",
+        "actorName": null,
+        "action": "Accept a research view for review",
+        "summary": "The host saved a review view and its exact accepted outputs.",
+        "outcome": "accepted",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "research_snapshot",
+            "id": "stage3-offline-concurrent-snapshot-v1",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved local state; no model execution inferred"
+      },
+      {
+        "id": "event-b347bcf38bc64fdc83c3302e43758a9a",
+        "sequence": 31,
+        "recordedAt": "2026-10-09T02:35:17.857706+00:00",
+        "actorName": "Acquisition peer",
+        "action": "Queue a peer message",
+        "summary": "A message and its delivery intent were saved together.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "mail_message",
+            "id": "contribution-update",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-8a42ebfbe373478992cb2920bb46c89b",
+        "sequence": 32,
+        "recordedAt": "2026-10-09T02:35:17.858986+00:00",
+        "actorName": "Acquisition peer",
+        "action": "Deliver a peer message",
+        "summary": "Delivery was recorded; this does not establish that the requested work is answered.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "mail_message",
+            "id": "contribution-update",
+            "version": 2
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-41f32613deed44f79e702e149225fa2a",
+        "sequence": 33,
+        "recordedAt": "2026-10-09T02:35:17.860292+00:00",
+        "actorName": "Acquisition peer",
+        "action": "Acknowledge a peer message",
+        "summary": "The recipient acknowledged the message; a scientific response is still separate.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "mail_message",
+            "id": "contribution-update",
+            "version": 3
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-206e020324904b098da2f4e3f556ed35",
+        "sequence": 34,
+        "recordedAt": "2026-10-09T02:35:17.866067+00:00",
+        "actorName": "Follow-up review peer",
+        "action": "Register a named research agent",
+        "summary": "A permanent instance identity and readable name were saved; this does not establish competence.",
+        "outcome": "registered",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "agent_instance",
+            "id": "agent-3ad0967e5b2749a0b139b76bb7390d7a",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved local state; no model execution inferred"
+      },
+      {
+        "id": "event-c2f3553a76514ec49998a6c385c6546d",
+        "sequence": 35,
+        "recordedAt": "2026-10-09T02:35:17.881476+00:00",
+        "actorName": "Review peer",
+        "action": "Revise proposed work",
+        "summary": "A peer saved a new work version; older claims cannot publish against it.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "board_proposal",
+            "id": "d-evidence-gap",
+            "version": 2
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-82371dc0857041ad87a3a8fc7204b607",
+        "sequence": 36,
+        "recordedAt": "2026-10-09T02:35:17.882786+00:00",
+        "actorName": null,
+        "action": "Record a state change",
+        "summary": "The host saved a state event.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved local state; no model execution inferred"
+      },
+      {
+        "id": "event-c004f831abb643f48b373e9792ce96ad",
+        "sequence": 37,
+        "recordedAt": "2026-10-09T02:35:17.884171+00:00",
+        "actorName": "Acquisition peer",
+        "action": "Queue a peer message",
+        "summary": "A message and its delivery intent were saved together.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "mail_message",
+            "id": "contribution-unassessed",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-3bf571add37c495f91123dfa7c996ef9",
+        "sequence": 38,
+        "recordedAt": "2026-10-09T02:35:17.885363+00:00",
+        "actorName": "Acquisition peer",
+        "action": "Deliver a peer message",
+        "summary": "Delivery was recorded; this does not establish that the requested work is answered.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "mail_message",
+            "id": "contribution-unassessed",
+            "version": 2
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-b920d7a1a5724ac0b382bfd23fa26624",
+        "sequence": 39,
+        "recordedAt": "2026-10-09T02:35:17.886372+00:00",
+        "actorName": "Acquisition peer",
+        "action": "Acknowledge a peer message",
+        "summary": "The recipient acknowledged the message; a scientific response is still separate.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "mail_message",
+            "id": "contribution-unassessed",
+            "version": 3
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-304614940b074fd5bec0fec3afd39184",
+        "sequence": 40,
+        "recordedAt": "2026-10-09T02:35:17.887475+00:00",
+        "actorName": "Review peer",
+        "action": "Queue a peer message",
+        "summary": "A message and its delivery intent were saved together.",
+        "outcome": "recorded",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "mail_message",
+            "id": "contribution-clarification",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved coordination state; scientific usefulness requires separate review"
+      },
+      {
+        "id": "event-46826825de8243588436f3f6e50c94d6",
+        "sequence": 41,
+        "recordedAt": "2026-10-09T02:35:17.888999+00:00",
+        "actorName": "Follow-up review peer",
+        "action": "Revise the next research action",
+        "summary": "A late peer linked a critique to a revised evidence request.",
+        "outcome": "recorded",
+        "inputReferences": [
+          {
+            "kind": "stage3_fixture_input",
+            "id": "stage3-synthetic-input",
+            "version": 1
+          },
+          {
+            "kind": "stage3_fixture_input",
+            "id": "stage3-synthetic-input",
+            "version": 2
+          },
+          {
+            "kind": "mail_message",
+            "id": "contribution-update",
+            "version": 3
+          }
+        ],
+        "outputReferences": [
+          {
+            "kind": "board_proposal",
+            "id": "d-evidence-gap",
+            "version": 2
+          },
+          {
+            "kind": "peer_update_uptake",
+            "id": "contribution-challenged",
+            "version": 1
+          },
+          {
+            "kind": "coordination_trace",
+            "id": "trace-90f3ede7566ffa7cd8ecd288f9d1db563f8f44f735db2a3d991a7c4ac10e2653",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "recorded_local_event"
+      },
+      {
+        "id": "event-5731fe3d1201404fac04c015bae4a590",
+        "sequence": 42,
+        "recordedAt": "2026-10-09T02:35:17.924358+00:00",
+        "actorName": null,
+        "action": "Accept a research view for review",
+        "summary": "The host saved a review view and its exact accepted outputs.",
+        "outcome": "accepted",
+        "inputReferences": [],
+        "outputReferences": [
+          {
+            "kind": "research_snapshot",
+            "id": "stage3-contribution-review-snapshot-v1",
+            "version": 1
+          }
+        ],
+        "reasonSummary": null,
+        "nextAction": null,
+        "proof": "saved local state; no model execution inferred"
+      }
+    ]
+  },
+  "snapshotId": "stage3-contribution-review-snapshot-v1",
+  "sampleVersion": "stage3-contribution-review-1",
+  "capturedAt": "2026-10-09T02:35:17.912933+00:00",
+  "mission": {
+    "id": "stage3-synthetic-mission",
+    "version": 1,
+    "question": "How do three peers process one synthetic input?",
+    "scope": "Offline callback and coordination fixture; no scientific conclusion",
+    "status": "active",
+    "latencyClass": "long",
+    "latencyBasis": "A peer request and deferred proposal remain open",
+    "startedAt": "2026-10-09T02:35:17.600444+00:00",
+    "reportArtifactId": null
+  },
+  "agents": [
+    {
+      "id": "agent-35479f72753447fc920b704352994456",
+      "name": "Acquisition peer",
+      "role": "literature acquisition",
+      "status": "completed"
+    },
+    {
+      "id": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+      "name": "Synthesis peer",
+      "role": "evidence preparation synthesis",
+      "status": "completed"
+    },
+    {
+      "id": "agent-336c746ae6eb4018aa78e0d82ccce849",
+      "name": "Review peer",
+      "role": "independent methods reviewer critic",
+      "status": "completed"
+    },
+    {
+      "id": "agent-3ad0967e5b2749a0b139b76bb7390d7a",
+      "name": "Follow-up review peer",
+      "role": "Review peer",
+      "status": "waiting"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "a-fast",
+      "parentTaskId": null,
+      "targetArtifactId": null,
+      "title": "Inspect synthetic input: a-fast",
+      "status": "completed",
+      "latencyClass": "medium",
+      "latencyBasis": "Offline callback; no provider timing",
+      "firstUsefulAt": "2026-10-09T02:35:17.660679+00:00",
+      "activeOrWaiting": "completed",
+      "attemptIds": [
+        "attempt-a-fast"
+      ]
+    },
+    {
+      "id": "b-slow",
+      "parentTaskId": null,
+      "targetArtifactId": null,
+      "title": "Inspect synthetic input: b-slow",
+      "status": "completed",
+      "latencyClass": "medium",
+      "latencyBasis": "Offline callback; no provider timing",
+      "firstUsefulAt": "2026-10-09T02:35:17.688990+00:00",
+      "activeOrWaiting": "completed",
+      "attemptIds": [
+        "attempt-b-slow"
+      ]
+    },
+    {
+      "id": "c-dependent",
+      "parentTaskId": "a-fast",
+      "targetArtifactId": null,
+      "title": "Inspect synthetic input: c-dependent",
+      "status": "completed",
+      "latencyClass": "medium",
+      "latencyBasis": "Offline callback; no provider timing",
+      "firstUsefulAt": "2026-10-09T02:35:17.687048+00:00",
+      "activeOrWaiting": "completed",
+      "attemptIds": [
+        "attempt-c-dependent"
+      ]
+    },
+    {
+      "id": "d-evidence-gap",
+      "parentTaskId": null,
+      "targetArtifactId": null,
+      "title": "Resolve the remaining synthetic evidence gap",
+      "status": "waiting",
+      "latencyClass": "long",
+      "latencyBasis": "Peer deferred pending more synthetic evidence",
+      "firstUsefulAt": null,
+      "activeOrWaiting": "waiting",
+      "attemptIds": []
+    }
+  ],
+  "attempts": [
+    {
+      "id": "attempt-a-fast",
+      "taskId": "a-fast",
+      "agentId": "agent-35479f72753447fc920b704352994456",
+      "status": "completed",
+      "startedAt": "2026-10-09T02:35:17.646022Z",
+      "endedAt": "2026-10-09T02:35:17.661031Z",
+      "toolCalls": [],
+      "selectedModel": null,
+      "skillVersions": [],
+      "resultSummary": "Local callback a-fast completed",
+      "returnedReasoning": {
+        "availability": "absent",
+        "text": null
+      }
+    },
+    {
+      "id": "attempt-b-slow",
+      "taskId": "b-slow",
+      "agentId": "agent-836be60e1dd64469bdca0335e4ab1d2d",
+      "status": "completed",
+      "startedAt": "2026-10-09T02:35:17.644085Z",
+      "endedAt": "2026-10-09T02:35:17.689223Z",
+      "toolCalls": [],
+      "selectedModel": null,
+      "skillVersions": [],
+      "resultSummary": "Local callback b-slow completed",
+      "returnedReasoning": {
+        "availability": "absent",
+        "text": null
+      }
+    },
+    {
+      "id": "attempt-c-dependent",
+      "taskId": "c-dependent",
+      "agentId": "agent-336c746ae6eb4018aa78e0d82ccce849",
+      "status": "completed",
+      "startedAt": "2026-10-09T02:35:17.672682Z",
+      "endedAt": "2026-10-09T02:35:17.687260Z",
+      "toolCalls": [],
+      "selectedModel": null,
+      "skillVersions": [],
+      "resultSummary": "Local callback c-dependent completed",
+      "returnedReasoning": {
+        "availability": "absent",
+        "text": null
+      }
+    }
+  ],
+  "messages": [
+    {
+      "id": "stage3-question-message",
+      "requestId": "stage3-question",
+      "fromAgentId": "agent-35479f72753447fc920b704352994456",
+      "toAgentId": "agent-336c746ae6eb4018aa78e0d82ccce849",
+      "taskId": "a-fast",
+      "status": "acknowledged",
+      "summary": "Can an independent peer appraise this synthetic callback result?",
+      "createdAt": "2026-10-09T02:35:17.702374+00:00",
+      "updatedAt": "2026-10-09T02:35:17.704962+00:00",
+      "sourceId": null,
+      "claimId": null
+    }
+  ],
+  "sources": [],
+  "claims": [],
+  "artifacts": [],
+  "events": [
+    {
+      "id": "event-6cf047e8de8f4239a527de3c485f1e31",
+      "time": "2026-10-09T02:35:17.612724+00:00",
+      "kind": "proposal_created",
+      "taskId": "a-fast",
+      "agentId": null,
+      "summary": "proposal created"
+    },
+    {
+      "id": "event-46b4e259b28947b797866f6a71a7e5a8",
+      "time": "2026-10-09T02:35:17.614348+00:00",
+      "kind": "executor_work_submitted",
+      "taskId": null,
+      "agentId": null,
+      "summary": "executor work submitted"
+    },
+    {
+      "id": "event-441fff05dfbf416c81b6194350571d53",
+      "time": "2026-10-09T02:35:17.616954+00:00",
+      "kind": "proposal_created",
+      "taskId": "b-slow",
+      "agentId": null,
+      "summary": "proposal created"
+    },
+    {
+      "id": "event-c698c0409ed84c1e917a56624c042267",
+      "time": "2026-10-09T02:35:17.618533+00:00",
+      "kind": "executor_work_submitted",
+      "taskId": null,
+      "agentId": null,
+      "summary": "executor work submitted"
+    },
+    {
+      "id": "event-51c2718c03374dc8b117d7f0e1a60903",
+      "time": "2026-10-09T02:35:17.621948+00:00",
+      "kind": "proposal_created",
+      "taskId": "c-dependent",
+      "agentId": null,
+      "summary": "proposal created"
+    },
+    {
+      "id": "event-caedcaf6dfcc472394bf5b710868cd18",
+      "time": "2026-10-09T02:35:17.623048+00:00",
+      "kind": "executor_work_submitted",
+      "taskId": null,
+      "agentId": null,
+      "summary": "executor work submitted"
+    },
+    {
+      "id": "event-325a46d6643a40a7b2661519b7480c8b",
+      "time": "2026-10-09T02:35:17.661311+00:00",
+      "kind": "proposal_result_accepted",
+      "taskId": "a-fast",
+      "agentId": null,
+      "summary": "proposal result accepted"
+    },
+    {
+      "id": "event-963a6ee442fe4919896cb66f30577b82",
+      "time": "2026-10-09T02:35:17.687563+00:00",
+      "kind": "proposal_result_accepted",
+      "taskId": "c-dependent",
+      "agentId": null,
+      "summary": "proposal result accepted"
+    },
+    {
+      "id": "event-0e294d3d20a646e9b3c9f3a62de9a9fb",
+      "time": "2026-10-09T02:35:17.689489+00:00",
+      "kind": "proposal_result_accepted",
+      "taskId": "b-slow",
+      "agentId": null,
+      "summary": "proposal result accepted"
+    },
+    {
+      "id": "event-a230235566d647d0bf068977621c4bf5",
+      "time": "2026-10-09T02:35:17.700524+00:00",
+      "kind": "proposal_created",
+      "taskId": "d-evidence-gap",
+      "agentId": null,
+      "summary": "proposal created"
+    },
+    {
+      "id": "event-e1d011111a5f46ffb392aea759aeb8bc",
+      "time": "2026-10-09T02:35:17.702421+00:00",
+      "kind": "peer_request_opened",
+      "taskId": "a-fast",
+      "agentId": null,
+      "summary": "peer request opened"
+    },
+    {
+      "id": "event-8d63ecf825b5495faf50b7332ea12840",
+      "time": "2026-10-09T02:35:17.703632+00:00",
+      "kind": "peer_message_delivered",
+      "taskId": null,
+      "agentId": null,
+      "summary": "peer message delivered"
+    },
+    {
+      "id": "event-305a0f3feda1488e97ee14991db9166a",
+      "time": "2026-10-09T02:35:17.705095+00:00",
+      "kind": "peer_message_acknowledged",
+      "taskId": null,
+      "agentId": null,
+      "summary": "peer message acknowledged"
+    },
+    {
+      "id": "event-f515bd0400ed449795d459087a78e3e1",
+      "time": "2026-10-09T02:35:17.707516+00:00",
+      "kind": "peer_request_opened",
+      "taskId": "d-evidence-gap",
+      "agentId": null,
+      "summary": "peer request opened"
+    },
+    {
+      "id": "event-81ff5022d1c240d0a270f0724617d0c7",
+      "time": "2026-10-09T02:35:17.708520+00:00",
+      "kind": "peer_message_delivered",
+      "taskId": null,
+      "agentId": null,
+      "summary": "peer message delivered"
+    },
+    {
+      "id": "event-fa45c01661404c3daf534b433a2b64bc",
+      "time": "2026-10-09T02:35:17.709776+00:00",
+      "kind": "peer_message_acknowledged",
+      "taskId": null,
+      "agentId": null,
+      "summary": "peer message acknowledged"
+    }
+  ],
+  "diagnostics": [
+    {
+      "id": "stage3-fixture-overlap",
+      "taskId": null,
+      "attemptId": null,
+      "kind": "local_callback_overlap",
+      "status": "observed",
+      "message": "Independent local callbacks overlapped; the dependent callback began while another sibling was still active. No provider call occurred.",
+      "occurredAt": "2026-10-09T02:35:17.723197+00:00"
+    },
+    {
+      "id": "stage3-deferred-next-action",
+      "taskId": "d-evidence-gap",
+      "attemptId": null,
+      "kind": "deferred_work",
+      "status": "waiting",
+      "message": "Find a permitted exact source version, then invite an independent peer",
+      "occurredAt": "2026-10-09T02:35:17.723198+00:00"
+    },
+    {
+      "id": "stage3-unanswered-request",
+      "taskId": "a-fast",
+      "attemptId": null,
+      "kind": "peer_request",
+      "status": "unanswered",
+      "message": "Delivery and acknowledgment were saved; the peer question remains unanswered.",
+      "occurredAt": "2026-10-09T02:35:17.723200+00:00"
+    }
+  ]
+}

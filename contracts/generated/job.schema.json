@@ -28,6 +28,7 @@
       "title": "ArtifactRef",
       "type": "object"
     },
+    "JsonValue": {},
     "ModelSelection": {
       "additionalProperties": false,
       "properties": {
@@ -66,20 +67,7 @@
         },
         "settings": {
           "additionalProperties": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "integer"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "boolean"
-              }
-            ]
+            "$ref": "#/$defs/JsonValue"
           },
           "title": "Settings",
           "type": "object"

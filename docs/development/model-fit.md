@@ -24,6 +24,11 @@ received opaque answer IDs and source packets without the model, variant mapping
 or usage data. The coordinating reviewer checked the findings against the sources.
 This was agent review, not a human panel or blinded clinical validation.
 
+The active benchmark now uses real clinical labels in A v1.0.3, bundle v1.0.6.
+That later revision preserves simulated counts but changes input text and hashes;
+it has not been tested on a model. This report and its saved requests still refer
+to the original placeholder-labelled inputs, not the current offline plan.
+
 Requests used high reasoning, `include_reasoning=false`, no tools and no streaming.
 The 4,096-token pilot returned `finish_reason=length` and an empty final answer.
 The matched comparison therefore used 8,192 completion tokens for each case.

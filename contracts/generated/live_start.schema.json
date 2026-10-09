@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "agentIds": {
+      "items": {
+        "maxLength": 160,
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Agentids",
+      "type": "array"
+    },
+    "evidenceText": {
+      "minLength": 1,
+      "title": "Evidencetext",
+      "type": "string"
+    },
+    "question": {
+      "minLength": 1,
+      "title": "Question",
+      "type": "string"
+    },
+    "requestId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Requestid",
+      "type": "string"
+    },
+    "scope": {
+      "default": "",
+      "title": "Scope",
+      "type": "string"
+    }
+  },
+  "required": [
+    "requestId",
+    "question",
+    "evidenceText",
+    "agentIds"
+  ],
+  "title": "LiveStartRequest",
+  "type": "object"
+}

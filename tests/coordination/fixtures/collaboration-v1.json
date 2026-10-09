@@ -1,0 +1,77 @@
+{
+  "schema": "ora.collaboration_qualification.v1",
+  "fixture_id": "synthetic-peer-collaboration-v1",
+  "version": "1.0.0",
+  "synthetic": true,
+  "purpose": "Frozen inputs and mechanical expectations for later selected-model qualification; no model responses are included.",
+  "peers": [
+    {"id": "peer-acquisition", "role": "literature_acquisition"},
+    {"id": "peer-synthesis", "role": "evidence_preparation_synthesis"},
+    {"id": "peer-review", "role": "evidence_preparation_synthesis"},
+    {"id": "peer-reporting", "role": "reporting", "available": false}
+  ],
+  "scenarios": [
+    {
+      "id": "disagreement-and-corroboration",
+      "input": {
+        "question": "Does a synthetic digital intervention improve a prespecified outcome?",
+        "source_refs": [
+          {"kind": "source_copy", "id": "synthetic-abstract-v1", "version": 1}
+        ],
+        "source_note": "The abstract reports a favorable direction but does not state the comparator or attrition method.",
+        "peer_objection": "Direction alone does not establish a reliable effect."
+      },
+      "expected_state_changes": [
+        "A scientific peer proposes a question and a separate independent corroboration proposal linked to the first.",
+        "A reviewer records dissent with the exact source version; dissent and alternative branches remain visible.",
+        "New contradictory evidence reopens only proposals that depend on the affected source version; unrelated accepted work remains current."
+      ],
+      "mechanical_failures": [
+        "Two current owners of one proposal",
+        "A stale owner commits after its lease expires and another owner claims",
+        "The host chooses a winning scientific interpretation"
+      ]
+    },
+    {
+      "id": "redirected-request-and-partial-answer",
+      "input": {
+        "question": "Which comparator and attrition rule were used?",
+        "expected_artifact": "A methods note with exact source references",
+        "first_recipient_state": "unavailable",
+        "partial_evidence": {"comparator": "reported", "attrition_rule": null}
+      },
+      "expected_state_changes": [
+        "The request, message and outbox intent save in one transaction.",
+        "Delivery and acknowledgment leave the request unanswered.",
+        "A partial answer remains linked to its request and exact artifact version, with the unresolved attrition question visible.",
+        "A replacement request retains the old request as replaced, names the new recipient and keeps the shared correlation lineage.",
+        "An offline requester may have an independent, qualified replacement reviewer assess a later answer."
+      ],
+      "mechanical_failures": [
+        "Delivery marks the scientific request answered",
+        "A duplicate or late failure erases a newer accepted answer",
+        "A replacement reviewer is the responder or shares the prohibited predecessor lineage"
+      ]
+    },
+    {
+      "id": "defer-and-replan",
+      "input": {
+        "question": "Can the primary finding be appraised without accessible full text?",
+        "available_evidence": "Abstract only",
+        "recipient_capacity": "temporarily unavailable",
+        "expected_latency": "long"
+      },
+      "expected_state_changes": [
+        "The proposal stays open or deferred with a specific next action and no fixed scientific-round cap.",
+        "An independent ready sibling continues while the blocked proposal waits.",
+        "A partial progress report labels the evidence limit while the mission remains open.",
+        "A later source update wakes only relevant subscriptions from their saved cursors."
+      ],
+      "mechanical_failures": [
+        "No visible next action",
+        "The unavailable recipient blocks all branches",
+        "The host silently closes the mission because time elapsed"
+      ]
+    }
+  ]
+}
