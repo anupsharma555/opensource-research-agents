@@ -1,0 +1,4 @@
+interface:
+  display_name: "OS · Qualify a run"
+  short_description: "Inspect saved research-run proof and usage"
+  default_prompt: "Use $os-qualify-run to diagnose the selected saved research run and prepare a private qualification receipt."

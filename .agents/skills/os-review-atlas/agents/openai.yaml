@@ -1,0 +1,4 @@
+interface:
+  display_name: "OS · Review Atlas"
+  short_description: "Check Atlas views against saved research"
+  default_prompt: "Use $os-review-atlas to inspect the selected saved run in Research Atlas and report visible evidence and gaps."
