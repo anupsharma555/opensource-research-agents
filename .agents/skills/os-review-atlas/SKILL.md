@@ -7,7 +7,10 @@ metadata:
 
 # Review Research Atlas
 
-This is a Codex development review workflow, not a restriction on scientific agents. Read `AGENTS.md`, `README.md`, `docs/development/setup.md`, `docs/development/stage4-local.md`, and `docs/development/stage4-atlas.md`. Preserve the chosen workspace, run, exact records and current app build. The [Atlas review map](../../../docs/development/stage4-atlas.md) identifies each view's saved authority and proof limits.
+Before using Stage 4 commands or documentation, check that this checkout contains `src/ora/mission/`, `docs/development/stage4-local.md` and `docs/development/stage4-atlas.md`. These skills may be synchronized before their implementation dependencies. If any prerequisite is absent, report that Stage 4 workflow as unavailable in this checkout and stop before running its commands; do not infer working mission or interface support from this skill package.
+
+
+This is a Codex development review workflow, not a restriction on scientific agents. Read `AGENTS.md`, `README.md`, `docs/development/setup.md`, `docs/development/stage4-local.md`, and `docs/development/stage4-atlas.md`. Preserve the chosen workspace, run, exact records and current app build. The Atlas review map at `docs/development/stage4-atlas.md` identifies each view's saved authority and proof limits.
 
 Use the existing host's read-only status and call commands to identify the run, workspace, host `hostBuildId`, parent/follow-up target, saved snapshot and outstanding work before opening its view. A recorded example, live workspace and UI poll are different events. Record both the viewer observation time and the saved run/event timestamps; do not turn a refresh into research progress. Opening a disconnected viewer does not stop the host. Do not start, resume, cancel or submit a live mission during a review unless that action was separately authorized.
 

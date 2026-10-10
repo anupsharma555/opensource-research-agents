@@ -7,6 +7,9 @@ metadata:
 
 # Qualify a saved research run
 
+Before using Stage 4 commands or documentation, check that this checkout contains `src/ora/mission/`, `docs/development/stage4-local.md` and `docs/development/stage4-atlas.md`. These skills may be synchronized before their implementation dependencies. If any prerequisite is absent, report that Stage 4 workflow as unavailable in this checkout and stop before running its commands; do not infer working mission or interface support from this skill package.
+
+
 This is a Codex development workflow, not a runtime rule for scientific peers. Read `AGENTS.md`, `README.md`, `docs/development/setup.md`, `docs/development/stage4-local.md`, and the current mission and provenance docs before changing a run. Preserve the selected Groq `openai/gpt-oss-120b` and high-reasoning configuration and each saved attempt's lineage. The host owns mechanical resources; peers choose scientific work and may continue after a report appears. Do not impose a scientific turn limit, consensus gate, or arbitrary call or research budget.
 
 ## Inspect before another test
