@@ -118,6 +118,42 @@ def test_tool_error_can_lead_to_repaired_choice(tmp_path: Path) -> None:
     }
 
 
+def test_provider_usage_keeps_observed_reasoning_and_cache_breakdowns(tmp_path: Path) -> None:
+    adapter = GroqSelectedAdapter(tmp_path)
+    response = reply(calls=[call("tool_1", "A")])
+    response["usage"].update({
+        "prompt_tokens_details": {"cached_tokens": 12, "unrecognized_text": "omit"},
+        "completion_tokens_details": {"reasoning_tokens": 28},
+    })
+    outcome = adapter.decode(prepare(adapter), response)
+    assert outcome.usage["prompt_tokens_details"] == {"cached_tokens": 12}
+    assert outcome.usage["completion_tokens_details"] == {"reasoning_tokens": 28}
+    assert outcome.usage["total_tokens"] == 70  # Breakdowns are subsets, not extra usage.
+
+
+@pytest.mark.parametrize("value", [None, -1, True, "12", 71])
+def test_invalid_or_missing_usage_details_remain_unknown(tmp_path: Path, value) -> None:
+    adapter = GroqSelectedAdapter(tmp_path)
+    response = reply(calls=[call("tool_1", "A")])
+    response["usage"].update({
+        "prompt_tokens_details": {"cached_tokens": value},
+        "completion_tokens_details": {"reasoning_tokens": value},
+    })
+    outcome = adapter.decode(prepare(adapter), response)
+    assert "prompt_tokens_details" not in outcome.usage
+    assert "completion_tokens_details" not in outcome.usage
+    assert outcome.usage["total_tokens"] == 70
+
+
+def test_reported_zero_usage_details_are_not_treated_as_missing(tmp_path: Path) -> None:
+    adapter = GroqSelectedAdapter(tmp_path)
+    response = reply(calls=[call("tool_1", "A")])
+    response["usage"]["prompt_tokens_details"] = {"cached_tokens": 0}
+    outcome = adapter.decode(prepare(adapter), response)
+    assert outcome.usage["prompt_tokens_details"] == {"cached_tokens": 0}
+    assert "completion_tokens_details" not in outcome.usage
+
+
 @pytest.mark.parametrize("route", ["direct", "cache", "peer"])
 @pytest.mark.parametrize("use,allowed", [("restricted", False), ("unknown", False),
                                           ("permitted", False)])
@@ -264,19 +300,61 @@ def test_interrupted_stream_without_reasoning_is_unknown(tmp_path: Path) -> None
     assert result.reasoning_status == "unknown"
 
 
-def test_cutoff_and_malformed_calls_never_executable(tmp_path: Path) -> None:
+def test_completed_stream_with_length_cutoff_never_exposes_tool_fragment(tmp_path: Path) -> None:
+    adapter = GroqSelectedAdapter(tmp_path)
+    prepared = adapter.prepare(replace(config(), stream=True), call_id="c", attempt_id="a",
+                               task_category="collect", phase="collect",
+                               messages=[{"role": "user", "content": "Find A"}], tools=TOOLS)
+    chunks = [
+        {"id": "stream-fixture", "model": "openai/gpt-oss-120b", "choices": [{
+            "delta": {"content": "Visible partial answer", "tool_calls": [{
+                "index": 0, "id": "stream-tool", "type": "function",
+                "function": {"name": "lookup", "arguments": '{"key":'},
+            }]}, "finish_reason": "length",
+        }]},
+        {"id": "stream-fixture", "model": "openai/gpt-oss-120b", "choices": [],
+         "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}},
+    ]
+    raw = b"".join(b"data: " + json.dumps(chunk).encode() + b"\n\n" for chunk in chunks)
+    result = adapter.decode_stream(prepared, raw + b"data: [DONE]\n\n")
+    assert result.status == "partial" and result.finish_reason == "length"
+    assert result.content == "Visible partial answer"
+    assert result.usage["total_tokens"] == 30
+    assert result.tool_calls == result.executable_tool_calls == ()
+
+
+@pytest.mark.parametrize("shape", ["text", "malformed_tool", "complete_tool"])
+def test_length_cutoff_preserves_visible_response_without_executable_tools(
+    tmp_path: Path, shape: str,
+) -> None:
     adapter = GroqSelectedAdapter(tmp_path)
     prepared = prepare(adapter)
-    cutoff = adapter.decode(prepared, reply(content="partial", calls=[call("t1", "A")],
+    calls = [] if shape == "text" else [call("t1", "A")]
+    if shape == "malformed_tool":
+        calls[0]["function"]["arguments"] = '{"key":'
+    cutoff = adapter.decode(prepared, reply(content="Visible partial answer", calls=calls,
                                             finish="length"))
     assert cutoff.status == "partial"
+    assert cutoff.finish_reason == "length" and cutoff.error_kind is None
+    assert cutoff.content == "Visible partial answer"
     assert cutoff.reasoning_status == "truncated"
-    assert cutoff.executable_tool_calls == ()
+    assert cutoff.usage["total_tokens"] == 70
+    assert cutoff.response_id == "chatcmpl-fixture"
+    assert cutoff.provider_request_id == "req_fixture"
+    assert cutoff.response_sha256 is not None
+    assert cutoff.tool_calls == cutoff.executable_tool_calls == ()
+    assert "Returned reasoning" not in repr(cutoff)
     with pytest.raises(ModelPreflightError):
         cutoff.assistant_tool_message()
+
+
+@pytest.mark.parametrize("finish", ["stop", "tool_calls"])
+def test_malformed_non_cutoff_tool_call_remains_failed(tmp_path: Path, finish: str) -> None:
+    adapter = GroqSelectedAdapter(tmp_path)
+    prepared = prepare(adapter)
     malformed = call("t1", "A")
     malformed["function"]["arguments"] = '{"key":'
-    bad = adapter.decode(prepared, reply(calls=[malformed]))
+    bad = adapter.decode(prepared, reply(calls=[malformed], finish=finish))
     assert bad.status == "failed"
     assert bad.error_kind == "invalid_tool_calls"
     assert bad.executable_tool_calls == ()
@@ -380,6 +458,64 @@ def test_http_error_is_typed_and_not_retried(
     assert outcome.retry_after_seconds == 2
     assert outcome.reasoning_status == "unknown"
     assert "private" not in str(outcome)
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("Tool call validation failed: attempted to call tool 'pubmed.pmid' which was not in request.tools", "route_used_as_function_name"),
+        ("Tool call validation failed: attempted to call tool 'unlisted_function' which was not in request.tools", "unregistered_tool_function"),
+        ("Tool call validation failed: generated arguments could not be parsed", "http_error"),
+        ("Tool call validation failed: attempted to call tool 'search_scholarly' which was not in request.tools", "http_error"),
+        ("Tool call validation error: parameters for tool search_scholarly do not match schema: selected_id expected integer or string but got null", "optional_selected_id_null"),
+    ],
+)
+def test_http_400_tool_failure_is_classified_only_against_exact_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, message: str, expected: str,
+) -> None:
+    monkeypatch.setenv("GROQ_API_KEY", "synthetic-token")
+    route_tool = {"type": "function", "function": {
+        "name": "search_scholarly", "description": "Search an enabled route",
+        "parameters": {"type": "object", "properties": {
+            "route": {"type": "string", "enum": ["pubmed.search", "pubmed.pmid"]},
+            "selected_id": {"type": ["string", "integer"]},
+        }, "required": ["route"], "additionalProperties": False},
+    }}
+    raw = json.dumps({"error": {"type": "invalid_request_error", "code": "tool_use_failed", "message": message}}).encode()
+
+    def rejected(_request, timeout):
+        raise urllib.error.HTTPError("https://api.groq.com", 400, "rejected", {}, io.BytesIO(raw))
+
+    adapter = GroqSelectedAdapter(tmp_path, transport=rejected)
+    prepared = adapter.prepare(
+        config(), call_id="c1", attempt_id="a1", task_category="collect", phase="collect",
+        messages=[{"role": "user", "content": "Find a saved publication."}],
+        sources=(), tools=(route_tool,),
+    )
+    outcome = adapter.invoke(prepared)
+    assert outcome.status == "failed" and outcome.http_status == 400
+    assert outcome.error_kind == expected
+    assert outcome.provider_error["code"] == "tool_use_failed"
+    assert message not in repr(outcome)
+
+
+def test_oversized_request_keeps_structured_error_for_repair_without_retry(tmp_path, monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "synthetic-token")
+    raw = json.dumps({"error": {"type": "tokens", "code": "request_too_large",
+                               "message": "Requested 9000 input tokens; allowance 8000."}}).encode()
+
+    def failing(_request, timeout):
+        raise urllib.error.HTTPError("https://api.groq.com", 413, "too large", {
+            "Retry-After": "60", "x-ratelimit-limit-tokens": "8000",
+        }, io.BytesIO(raw))
+
+    adapter = GroqSelectedAdapter(tmp_path, transport=failing)
+    outcome = adapter.invoke(prepare(adapter))
+    assert outcome.http_status == 413
+    assert outcome.provider_error["code"] == "request_too_large"
+    assert outcome.provider_error["message"] == "Requested 9000 input tokens; allowance 8000."
+    assert outcome.response_sha256 == hashlib.sha256(raw).hexdigest()
+    assert "Requested 9000" not in repr(outcome)
 
 
 def test_no_credential_is_a_typed_failure_without_transport(

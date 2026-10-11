@@ -45,6 +45,21 @@ def response(
     }
 
 
+def test_operator_primary_hold_blocks_legacy_provider_before_key_or_network(tmp_path, monkeypatch):
+    config = tmp_path / ".local/groq-credential-profiles.json"
+    config.parent.mkdir()
+    config.write_text(json.dumps({"version": 1, "profiles": {"primary": {"enabled": False}}}))
+    provider = live.GroqProvider(tmp_path)
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("A held profile must not read a key or dispatch a request")
+
+    monkeypatch.setattr(provider, "_key", unexpected)
+    monkeypatch.setattr(live.urllib.request, "urlopen", unexpected)
+    with pytest.raises(live.CredentialUnavailable, match="paused by operator"):
+        provider.complete([{"role": "user", "content": "Fixture question"}])
+
+
 def test_serial_tool_call_round_trip_and_safe_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

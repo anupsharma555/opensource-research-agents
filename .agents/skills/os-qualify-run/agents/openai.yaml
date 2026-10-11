@@ -1,0 +1,4 @@
+interface:
+  display_name: "OS · Qualify a run"
+  short_description: "Evaluate research runs across project stages"
+  default_prompt: "Use $os-qualify-run to evaluate the selected run or explicit parallel batch against its task criteria and available runtime evidence, and prepare a private qualification receipt."

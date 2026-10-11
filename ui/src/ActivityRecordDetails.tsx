@@ -3,8 +3,9 @@
    inventing missing explanations or treating elapsed time as model latency. */
 import type { ResearchSnapshot } from './generated/contracts';
 import { AttemptInspection } from './InspectionDetails';
+import { describeLiveAttempt, showsOriginalRunningRecord } from './attemptOutcome';
 
-export type ActivityItem = { id: string; time: string; category: 'agent' | 'communication' | 'event'; title: string; summary: string; taskId?: string; attemptId?: string; sourceId?: string; status?: string; timeLabel: string; agentId?: string | null; fromAgentId?: string; toAgentId?: string };
+export type ActivityItem = { id: string; time: string; category: 'agent' | 'communication' | 'event'; title: string; summary: string; taskId?: string; attemptId?: string; sourceId?: string; status?: string; badgeStatus?: string; timeLabel: string; agentId?: string | null; fromAgentId?: string; toAgentId?: string };
 
 function dateParts(value: string) {
   const date = new Date(value);
@@ -20,9 +21,10 @@ export function formatActivityTimestamp(value: string) {
   return `${parts.date} · ${parts.time}`;
 }
 
-export function ActivityTimestamp({ item }: { item: ActivityItem }) {
+export function ActivityTimestamp({ item, id, attempt }: { item: ActivityItem; id?: string; attempt?: ResearchSnapshot['attempts'][number] }) {
   const parts = dateParts(item.time);
-  return <div className="activity-timestamp"><span>{item.timeLabel}</span><time dateTime={item.time}><span>{parts.date}</span><strong>{parts.time}</strong></time></div>;
+  if (attempt) return <div id={id} className="activity-timestamp"><span>{dateParts(attempt.startedAt).date}</span><time dateTime={attempt.startedAt}><span>Started</span><strong>{dateParts(attempt.startedAt).time}</strong></time>{attempt.endedAt ? <time dateTime={attempt.endedAt}><span>Finished</span><strong>{dateParts(attempt.endedAt).time}</strong>{dateParts(attempt.endedAt).date !== dateParts(attempt.startedAt).date && <span>{dateParts(attempt.endedAt).date}</span>}</time> : <span>No finish saved</span>}</div>;
+  return <div id={id} className="activity-timestamp"><span>{item.timeLabel}</span><time dateTime={item.time}><span>{parts.date}</span><strong>{parts.time}</strong></time></div>;
 }
 
 const attemptStatus: Record<string, string> = {
@@ -32,6 +34,7 @@ const attemptStatus: Record<string, string> = {
   waiting: 'This attempt was waiting when the snapshot was saved. Waiting is separate from a completed result.',
   cancelled: 'This attempt was stopped before it completed.',
   uncertain: 'The saved record does not establish whether this attempt completed.',
+  superseded: 'This attempt was superseded. Its successor and any provider response need separate saved evidence.',
 };
 const messageStatus: Record<string, string> = {
   requested: 'One agent asked another agent to do work. No delivery or response is established by this record alone.',
@@ -53,7 +56,7 @@ function elapsed(start: string, end: string) {
   return `${Math.floor(seconds / 60)} min ${seconds % 60} sec`;
 }
 
-export function ActivityRecordDetails({ item, snapshot }: { item: ActivityItem; snapshot: ResearchSnapshot }) {
+export function ActivityRecordDetails({ item, snapshot, compactSummary }: { item: ActivityItem; snapshot: ResearchSnapshot; compactSummary: string }) {
   const task = snapshot.tasks.find(task => task.id === item.taskId);
   const attempt = snapshot.attempts.find(attempt => attempt.id === item.attemptId);
   const message = item.category === 'communication' ? snapshot.messages.find(message => message.id === item.id) : undefined;
@@ -67,13 +70,24 @@ export function ActivityRecordDetails({ item, snapshot }: { item: ActivityItem; 
   const name = (id: string) => snapshot.agents.find(agent => agent.id === id)?.name ?? `Agent identity unavailable (${id})`;
   const throughSnapshot = attempt && !attempt.endedAt && (attempt.status === 'running' || attempt.status === 'waiting');
   const end = attempt?.endedAt || (throughSnapshot ? snapshot.capturedAt : undefined);
+  const outcome = attempt ? describeLiveAttempt(snapshot, attempt) : null;
+  const originalRunningRecord = attempt ? showsOriginalRunningRecord(snapshot, attempt, outcome) : false;
+  const attributedSummary = attempt?.resultSummary || outcome?.summary || 'No result summary was saved.';
+  const meaning = outcome?.explanation ?? (attempt ? attemptStatus[attempt.status] : deliveredReply ? 'A saved peer reply was delivered back to the requester.' : message ? messageStatus[message.status] : event ? eventKind[event.kind] || event.summary : 'No additional explanation was recorded.');
+  const repeatedMeaning = item.category === 'agent' && (compactSummary.trim() === meaning.trim() || (!attempt?.resultSummary && attributedSummary.trim() === meaning.trim()));
   return <div className="activity-record-details">
     <dl className="activity-detail-grid">
-      <div><dt>What this means</dt><dd>{attempt ? attemptStatus[attempt.status] : deliveredReply ? 'A saved peer reply was delivered back to the requester.' : message ? messageStatus[message.status] : event ? eventKind[event.kind] || event.summary : 'No additional explanation was recorded.'}</dd></div>
+      {!repeatedMeaning && <div><dt>What this means</dt><dd>{meaning}</dd></div>}
+      {outcome && attempt && <div><dt>{originalRunningRecord ? 'Snapshot attempt state' : 'Stored attempt status'}</dt><dd>{attempt.status}{originalRunningRecord ? ' (saved attempt record: running)' : ''}. This records the model turn or host attempt; the provider, tool and report outcomes are identified separately above.</dd></div>}
       <div><dt>{message ? 'Request between agents' : 'Who acted'}</dt><dd>{message ? `${name(message.fromAgentId)} → ${name(message.toAgentId)}` : agent ? `${agent.name} · ${agent.role}` : attempt?.agentId || event?.agentId || 'Run/host'}</dd></div>
-      {task && <div><dt>Work toward the research question</dt><dd><strong>{task.title}</strong><p>{task.latencyBasis}</p></dd></div>}
+      {task && <>{item.category !== 'agent' && <div><dt>Work toward the research question</dt><dd><strong>{task.title}</strong></dd></div>}<div><dt>Timing expectation</dt><dd>{task.latencyClass ? `${task.latencyClass.replaceAll('_', ' ')} · ` : 'Not yet estimated · '}{task.latencyBasis}</dd></div>{task.status === 'waiting' && <div><dt>Current wait</dt><dd>{task.waitingReason || 'Reason not recorded in this snapshot'}</dd></div>}{task.status === 'waiting' && task.waitingOperationReference && <div><dt>Next eligible model attempt</dt><dd>{task.waitingUntil ? formatActivityTimestamp(task.waitingUntil) : 'Time not recorded'}. Eligibility does not guarantee dispatch at that time.</dd></div>}</>}
+      {task?.firstContributionAt && <div><dt>First saved contribution</dt><dd>{formatActivityTimestamp(task.firstContributionAt)}</dd></div>}
+      {task && !task.firstContributionAt && task.firstUsefulAt && <div><dt>First useful result in this older snapshot</dt><dd>{formatActivityTimestamp(task.firstUsefulAt)}</dd></div>}
       {original && <div><dt>Original request</dt><dd>{original.summary}</dd></div>}
       {attempt && <><div><dt>Started</dt><dd>{formatActivityTimestamp(attempt.startedAt)}</dd></div><div><dt>{throughSnapshot ? 'Last saved view' : 'Finished'}</dt><dd>{end ? formatActivityTimestamp(end) : 'Finish time not recorded'}</dd></div><div><dt>Recorded time span</dt><dd>{end ? elapsed(attempt.startedAt, end) : 'Not available'}<p>Elapsed time for this attempt, including any waiting; this is not a separate measure of model response time.</p></dd></div></>}
+      {outcome?.responseStatus && <div><dt>Saved provider response</dt><dd>{outcome.responseStatus.replaceAll('_', ' ')}{outcome.httpStatus !== null ? ` · HTTP ${outcome.httpStatus}` : ''}{outcome.responseAt ? ` · ${formatActivityTimestamp(outcome.responseAt)}` : ''}</dd></div>}
+      {outcome?.configuredProvider && <div><dt>Configured model provider</dt><dd>{outcome.configuredProvider}</dd></div>}
+      {outcome?.retryAfterSeconds !== null && outcome?.retryAfterSeconds !== undefined && <div><dt>Provider retry guidance</dt><dd>{outcome.retryAfterSeconds} seconds after its response. This is saved guidance, not proof a later request was sent.</dd></div>}
       {source && <div><dt>Source contribution</dt><dd>{source.id} · {source.title}</dd></div>}
       {claim && <div><dt>Saved claim revision</dt><dd>Version {claim.version}: {claim.text}</dd></div>}
     </dl>

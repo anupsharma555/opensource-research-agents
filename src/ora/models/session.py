@@ -15,6 +15,11 @@ from pathlib import Path
 from typing import Any, Literal
 
 from ora.agents.capabilities import content_hash
+from ora.agents.configuration import (
+    ConfigurationError,
+    _call_manifest_body,
+    _call_request,
+)
 from ora.coordination.traces import TraceContext, TraceJournal, ref
 from ora.retrieval.redact import redact_text
 from ora.state import StateStore
@@ -48,6 +53,7 @@ class SourceSelection:
     use: Literal["permitted", "restricted", "unknown"]
     allowed_for_model: bool
     route: Literal["direct", "cache", "peer"] = "direct"
+    passage_refs: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -82,6 +88,99 @@ def _explicit_prohibition(body: dict) -> bool:
     )
 
 
+def _current_model_use(reader, copy_ref: dict) -> dict | None:
+    """Respect a separately versioned source policy at the actual send boundary.
+
+    Older supplied-evidence records use the policy saved on the copy itself.
+    A newer intake policy, when present, must refer to this exact copy/version.
+    """
+    policy = reader.resolve("source_use.copy", f"{copy_ref['id']}:{copy_ref['version']}")
+    if policy is None:
+        return None
+    body = policy["body"]
+    if policy["kind"] != "source_use" or body.get("copy_ref") != copy_ref:
+        raise SessionError("Current source-use policy does not match the selected copy")
+    if (_explicit_prohibition(body) or not isinstance(body.get("allowed_uses"), list)
+            or "model_input" not in body["allowed_uses"]):
+        raise SessionError("Current source-use policy revoked model input for this copy")
+    return ref(policy)
+
+
+def _inherited_context_copy(reader, copy_ref: dict, mission_id: str,
+                            call_ref: dict) -> bool:
+    """Recognize only a source in this call's exact accepted parent snapshot."""
+    def matching_source(item: object) -> bool:
+        pointer = item.get("copyReference") if isinstance(item, dict) else None
+        if not isinstance(pointer, dict):
+            return False
+        if set(pointer) == {"kind", "id", "version", "sha256"}:
+            exact = {key: pointer[key] for key in ("kind", "id", "version")}
+            copy = reader.get(**exact) if exact["kind"] == "source_copy" else None
+            if copy is None or content_hash(copy["body"]) != pointer["sha256"]:
+                return False
+            pointer = exact
+        return set(pointer) == {"kind", "id", "version"} and pointer == copy_ref
+
+    call = reader.get(**call_ref)
+    actor = reader.get("agent_instance", call["body"].get("instance_id"), 1) if call else None
+    run = reader.get("mission_run", actor["body"].get("run_id")) if actor else None
+    parent_id = run["body"].get("parent_run_id") if run else None
+    parent = reader.get("mission_run", parent_id) if isinstance(parent_id, str) else None
+    snapshot = reader.get(
+        "research_snapshot", run["body"].get("parent_snapshot_id"), 1
+    ) if run else None
+    target_ref = run["body"].get("target_ref") if run else None
+    target = reader.get(**target_ref) if isinstance(target_ref, dict) else None
+    return bool(
+        call and actor and run and parent and snapshot and target
+        and call["body"].get("mission_id") == mission_id
+        and actor["body"].get("mission_id") == mission_id
+        and run["body"].get("mission_id") == mission_id
+        and snapshot["body"].get("mission_id") == parent["body"].get("mission_id")
+        and target["kind"] == "report"
+        and target["body"].get("mission_id") == parent["body"].get("mission_id")
+        and target_ref in snapshot["body"].get("inspection", {}).get(
+            "acceptedOutputReferences", []
+        )
+        and any(matching_source(item) for item in snapshot["body"].get(
+            "inspection", {}).get("sources", []))
+    )
+
+
+def _current_context_dependency_use(reader, copy_ref: dict, mission_id: str,
+                                    call_ref: dict) -> dict | None:
+    """Check a copy represented by derived context text, including explicit grant."""
+    _exact_ref(copy_ref, "source_copy")
+    copy = reader.get(**copy_ref)
+    if (copy is None or _explicit_prohibition(copy["body"])):
+        raise SessionError("Context source dependency is unavailable for model input")
+    if (copy["body"].get("mission_id") not in (None, mission_id)
+            and not _inherited_context_copy(reader, copy_ref, mission_id, call_ref)):
+        raise SessionError("Context source dependency is unavailable for model input")
+    current = reader.get("source_copy", copy_ref["id"])
+    if current is not None and _explicit_prohibition(current["body"]):
+        raise SessionError("Current context source copy prohibits model input")
+    policy = reader.resolve("source_use.copy", f"{copy_ref['id']}:{copy_ref['version']}")
+    if policy is None:
+        encounter_ref = copy["body"].get("encounter")
+        encounter = reader.get(**encounter_ref) if isinstance(encounter_ref, dict) else None
+        if (
+            encounter is not None
+            and encounter["body"].get("route") == "user_supplied"
+            and copy["body"].get("rights_status") in {None, "permitted"}
+        ):
+            # Historical user submissions can predate source_use records. The
+            # report reader permits this exact route; a later policy record
+            # removes this exception at the dispatch-time recheck.
+            return None
+    if policy is None or policy["body"].get("policy_status") != "granted":
+        raise SessionError("Context source dependency lacks a current model-use grant")
+    policy_ref = _current_model_use(reader, copy_ref)
+    if policy_ref is None:
+        raise SessionError("Context source dependency lacks a current model-use grant")
+    return policy_ref
+
+
 class ModelSession:
     """Prepare, invoke and capture one selected-model call against saved state."""
 
@@ -98,6 +197,9 @@ class ModelSession:
         call = self.store.get("agent_call", call_id, call_version)
         if call is None:
             raise SessionError("Saved call manifest is unavailable")
+        return self._selection_for_call(call)
+
+    def _selection_for_call(self, call: dict) -> tuple[dict, dict, dict]:
         body = call["body"]
         config = self.store.get("agent_configuration", body.get("configuration_id"), 1)
         if config is None or config["body"].get("mission_id") != body.get("mission_id"):
@@ -112,6 +214,8 @@ class ModelSession:
                     "reasoning_settings", "instructions_sha256", "input_refs"):
             if body.get(key) != saved.get(key):
                 raise SessionError("Call and saved selection differ")
+        if body.get("permitted_tools") != saved.get("permitted_tools"):
+            raise SessionError("Saved tool descriptor changed")
         actor = self.store.get("agent_instance", body.get("instance_id"), 1)
         if actor is None or actor["body"].get("mission_id") != body.get("mission_id"):
             raise SessionError("Call actor is unavailable in its mission")
@@ -121,6 +225,45 @@ class ModelSession:
             raise SessionError("Selected provider, endpoint or model is unsupported")
         return call, config, actor
 
+    def _preview_selection(self, call: dict) -> tuple[dict, dict, dict]:
+        if (
+            type(call) is not dict or set(call) != {"kind", "id", "version", "body"}
+            or call["kind"] != "agent_call" or not isinstance(call["id"], str)
+            or not call["id"] or type(call["version"]) is not int or call["version"] != 1
+            or type(call["body"]) is not dict
+        ):
+            raise SessionError("Exact provisional v1 call manifest is required")
+        if self.store.get("agent_call", call["id"]) is not None:
+            raise SessionError("Provisional call ID is already allocated")
+        body = call["body"]
+        try:
+            request = _call_request(
+                call_id=body["call_id"], configuration_id=body["configuration_id"],
+                mission_id=body["mission_id"], task_id=body["task_id"],
+                attempt_id=body["attempt_id"],
+                loaded_skill_ids=body["loaded_skill_ids"],
+                exposed_tool_ids=body["exposed_tool_ids"],
+                require_common_tools=body.get("require_common_tools", True),
+            )
+        except (ConfigurationError, KeyError, TypeError) as exc:
+            raise SessionError("Provisional call request is invalid") from exc
+        if call["id"] != request["call_id"]:
+            raise SessionError("Provisional call ID differs from its manifest")
+        try:
+            selected, config, actor = self._selection_for_call(call)
+        except (KeyError, TypeError) as exc:
+            raise SessionError("Provisional call selection is invalid") from exc
+        try:
+            expected = _call_manifest_body(config, request)
+        except (ConfigurationError, KeyError, TypeError) as exc:
+            raise SessionError("Provisional call capabilities are invalid") from exc
+        if body != expected:
+            raise SessionError("Provisional call differs from canonical configuration")
+        task = self.store.get("board_proposal", body["task_id"])
+        if task is None or task["body"].get("mission_id") != body["mission_id"]:
+            raise SessionError("Provisional call task is unavailable in its mission")
+        return selected, config, actor
+
     @staticmethod
     def _configuration(config: dict) -> tuple[CallConfiguration, str, dict | None]:
         saved = config["body"]
@@ -128,7 +271,7 @@ class ModelSession:
         reasoning = saved.get("reasoning_settings")
         if (type(settings) is not dict
             or set(settings) - {"max_completion_tokens", "stream", "unknown_source_policy",
-                                "response_format"}
+                                "response_format", "credential_profile", "quota_domain"}
             or type(reasoning) is not dict
             or reasoning != {"reasoning_effort": "high", "include_reasoning": True}):
             raise SessionError("Saved model settings are unsupported or unpinned")
@@ -155,6 +298,8 @@ class ModelSession:
             include_reasoning=reasoning["include_reasoning"],
             max_completion_tokens=settings["max_completion_tokens"],
             stream=settings["stream"],
+            credential_profile=settings.get("credential_profile", "primary"),
+            quota_domain=settings.get("quota_domain", "groq-selected"),
         )
         return selection, unknown_policy, response_format
 
@@ -192,21 +337,33 @@ class ModelSession:
                 raise SessionError("Current saved copy-use record revoked model input")
             blob = body.get("blob")
             retained = body.get("retain_bytes") is True and isinstance(blob, dict)
+            original_sha = None
             if selected.use == "permitted" and selected.allowed_for_model is True:
+                _current_model_use(self.store, pointer)
                 if body.get("rights_status") not in (None, "permitted"):
                     raise SessionError("Saved source rights are not confirmed for model input")
                 if not retained:
                     raise SessionError("Permitted model input needs retained source bytes")
-                if not str(body.get("mime_type", "")).startswith("text/"):
-                    raise SessionError("Model input needs a text source copy")
                 raw = self.store.read_blob(blob["sha256"])
                 if body.get("content_sha256") != _sha(raw):
                     raise SessionError("Retained source bytes disagree with their checksum")
-                try:
-                    text = raw.decode("utf-8")
-                except UnicodeError as exc:
-                    raise SessionError("Model input needs UTF-8 source text") from exc
-                checksum = _sha(raw)
+                if selected.passage_refs:
+                    from ora.evidence import EvidenceLibrary
+                    from ora.evidence.intake import checked_model_text
+
+                    checked = checked_model_text(EvidenceLibrary(self.store), pointer,
+                                                 list(selected.passage_refs))
+                    text = checked["text"]
+                    checksum = checked["text_sha256"]
+                    original_sha = checked["content_sha256"]
+                else:
+                    if not str(body.get("mime_type", "")).startswith("text/"):
+                        raise SessionError("Model input needs a text copy or checked passage references")
+                    try:
+                        text = raw.decode("utf-8")
+                    except UnicodeError as exc:
+                        raise SessionError("Model input needs UTF-8 source text") from exc
+                    checksum = _sha(raw)
             elif (selected.use == "unknown" and selected.allowed_for_model is False
                   and unknown_policy == "allow_metadata_only"):
                 text = None
@@ -218,7 +375,8 @@ class ModelSession:
             resolved.append(SourceUse(pointer["id"], pointer["version"], checksum,
                                       selected.use, selected.allowed_for_model,
                                       unknown_policy=unknown_policy, text=text,
-                                      route=selected.route))
+                                      route=selected.route, copy_sha256=original_sha,
+                                      passage_refs=selected.passage_refs))
         if supplied != set(pinned):
             raise SessionError("Every saved source copy needs a model-use decision")
         return tuple(resolved)
@@ -233,17 +391,20 @@ class ModelSession:
         for name in selected:
             descriptor = descriptors.get(name)
             if (not isinstance(descriptor, dict) or descriptor.get("tool_id") != name
-                or content_hash(descriptor.get("schema")) != descriptor.get("schema_sha256")):
+                or content_hash(descriptor.get("schema")) != descriptor.get("schema_sha256")
+                or not isinstance(descriptor.get("description", ""), str)):
                 raise SessionError("Saved tool descriptor changed")
             result.append({"type": "function", "function": {
                 "name": name, "parameters": descriptor["schema"],
+                **({"description": descriptor["description"]} if descriptor.get("description") else {}),
             }})
         return tuple(result)
 
-    def prepare(self, *, call_id: str, call_version: int, phase: Literal["collect", "final"],
-                messages: list[dict[str, Any]], sources: tuple[SourceSelection, ...],
-                parent_call_ref: dict[str, Any] | None = None) -> SessionPrepared:
-        call, config, _actor = self._selection(call_id, call_version)
+    def _prepare_request(
+        self, call: dict, config: dict, *, phase: Literal["collect", "final"],
+        messages: list[dict[str, Any]], sources: tuple[SourceSelection, ...],
+        parent_call_ref: dict[str, Any] | None,
+    ) -> tuple[PreparedCall, CallConfiguration, str]:
         if parent_call_ref is not None:
             _exact_ref(parent_call_ref, "agent_call")
             parent = self.store.get(**parent_call_ref)
@@ -263,7 +424,7 @@ class ModelSession:
             tools = self._tools(call)
         try:
             prepared = self.adapter.prepare(
-                selected, call_id=call_id, attempt_id=call["body"]["attempt_id"],
+                selected, call_id=call["id"], attempt_id=call["body"]["attempt_id"],
                 task_category=call["body"]["task_scope"], phase=phase,
                 messages=messages, sources=source_inputs, tools=tools,
                 schema_name=schema_spec["name"] if schema_spec else None,
@@ -275,6 +436,41 @@ class ModelSession:
         request_bytes = canonical(prepared.body).encode()
         if _sha(request_bytes) != prepared.request_sha256:
             raise SessionError("Prepared request body hash disagrees with the manifest")
+        return prepared, selected, unknown_policy
+
+    def preview_request(
+        self, *, call: dict, phase: Literal["collect", "final"],
+        messages: list[dict[str, Any]], sources: tuple[SourceSelection, ...],
+        parent_call_ref: dict[str, Any] | None = None,
+    ) -> PreparedCall:
+        """Build exact input from a canonical preview or saved call, without writes."""
+        saved = (
+            self.store.get("agent_call", call["id"], call["version"])
+            if type(call) is dict and call.get("kind") == "agent_call"
+            and isinstance(call.get("id"), str) and type(call.get("version")) is int
+            else None
+        )
+        if saved is not None and saved == call:
+            selected_call, config, _actor = self._selection(call["id"], call["version"])
+        else:
+            selected_call, config, _actor = self._preview_selection(call)
+        prepared, _selected, _unknown_policy = self._prepare_request(
+            selected_call, config, phase=phase, messages=messages, sources=sources,
+            parent_call_ref=parent_call_ref,
+        )
+        return prepared
+
+    def prepare(self, *, call_id: str, call_version: int, phase: Literal["collect", "final"],
+                messages: list[dict[str, Any]], sources: tuple[SourceSelection, ...],
+                parent_call_ref: dict[str, Any] | None = None,
+                context_source_dependency_refs: tuple[dict[str, Any], ...] = (),
+                ) -> SessionPrepared:
+        call, config, _actor = self._selection(call_id, call_version)
+        prepared, selected, unknown_policy = self._prepare_request(
+            call, config, phase=phase, messages=messages, sources=sources,
+            parent_call_ref=parent_call_ref,
+        )
+        request_bytes = canonical(prepared.body).encode()
         blob = self.store.put_blob(request_bytes)
         call_ref, config_ref = ref(call), ref(config)
         source_refs = [selected.copy_ref for selected in sources]
@@ -285,11 +481,16 @@ class ModelSession:
                 "request_sha256": prepared.request_sha256, "blob": blob,
                 "phase": phase, "parent_call_ref": parent_call_ref,
                 "source_refs": source_refs,
+                "context_source_dependency_refs": list(context_source_dependency_refs),
                 "evidence_refs": list(prepared.evidence_refs),
                 "source_decisions": [{"copy_ref": s.copy_ref, "use": s.use,
                                       "allowed_for_model": s.allowed_for_model,
-                                      "route": s.route, "unknown_policy": unknown_policy}
+                                      "route": s.route, "unknown_policy": unknown_policy,
+                                      "passage_refs": list(s.passage_refs)}
                                      for s in sources]}
+        if "credential_profile" in config["body"]["settings"]:
+            body.update(credential_profile=selected.credential_profile,
+                        quota_domain=selected.quota_domain)
         intent_id = f"model-intent:{call_id}:{call_version}"
 
         def save(tx):
@@ -304,11 +505,21 @@ class ModelSession:
                 current = tx.get("source_copy", pointer["id"])
                 if current is not None and _explicit_prohibition(current["body"]):
                     raise SessionError("Current copy-use record revoked model input")
+                if next(s.allowed_for_model for s in sources if s.copy_ref == pointer):
+                    _current_model_use(tx, pointer)
+            for pointer in context_source_dependency_refs:
+                _current_context_dependency_use(tx, pointer, body["mission_id"], call_ref)
             intent = tx.put("model_request_intent", intent_id, body)
             tx.link(intent, saved_call, "prepared_from")
             tx.link(intent, saved_config, "uses_configuration")
             for pointer in source_refs:
                 tx.link(intent, tx.get(**pointer), "uses_source_copy")
+            for selection in sources:
+                for pointer in selection.passage_refs:
+                    passage = tx.get(**pointer)
+                    if passage is None or passage["body"].get("copy_ref") != selection.copy_ref:
+                        raise SessionError("Prepared passage is not from the selected source copy")
+                    tx.link(intent, passage, "uses_source_passage")
             return ref(intent)
 
         intent_ref = self.store.transact(f"model-intent-save:{intent_id}", body, save,
@@ -325,12 +536,20 @@ class ModelSession:
         call, config, _actor = self._selection(call_ref["id"], call_ref["version"])
         if saved["configuration_ref"] != ref(config) or saved["call_ref"] != ref(call):
             raise SessionError("Prepared request lineage changed")
+        selected, unknown_policy, _format = self._configuration(config)
+        if (saved.get("credential_profile", "primary") != selected.credential_profile
+                or saved.get("quota_domain", "groq-selected") != selected.quota_domain):
+            raise SessionError("Prepared credential profile differs from saved configuration")
         if for_dispatch:
-            _selected, unknown_policy, _format = self._configuration(config)
             decisions = tuple(SourceSelection(item["copy_ref"], item["use"],
-                                              item["allowed_for_model"], item["route"])
+                                              item["allowed_for_model"], item["route"],
+                                              tuple(item.get("passage_refs", [])))
                               for item in saved["source_decisions"])
             self._sources(call, decisions, unknown_policy)
+            for pointer in saved.get("context_source_dependency_refs", []):
+                _current_context_dependency_use(
+                    self.store, pointer, saved["mission_id"], saved["call_ref"]
+                )
         request_bytes = self.store.read_blob(saved["blob"]["sha256"])
         if _sha(request_bytes) != saved["request_sha256"]:
             raise SessionError("Prepared request bytes changed")
@@ -344,6 +563,8 @@ class ModelSession:
             configuration_sha256=saved["configuration_sha256"],
             evidence_refs=tuple(saved["evidence_refs"]),
             body=body, request_sha256=saved["request_sha256"],
+            credential_profile=selected.credential_profile,
+            quota_domain=selected.quota_domain,
         )
         return SessionPrepared(intent_ref, prepared)
 
@@ -391,6 +612,10 @@ class ModelSession:
                           "redacted": bool(redacted), "origin": "provider_returned",
                           "access": "restricted_diagnostics"}
         private_payload = {"content": outcome.content, "tool_calls": outcome.tool_calls}
+        if outcome.provider_error is not None:
+            # Error text can contain account details. Retain it only with the
+            # private response, separate from findings and ordinary trace summaries.
+            private_payload["provider_error"] = outcome.provider_error
         private_blob = self.store.put_blob(canonical(private_payload).encode())
         receipt_body = {
             "schema": "ora.model_response_receipt.v1", "mission_id": body["mission_id"],
@@ -411,6 +636,8 @@ class ModelSession:
             "timings": outcome.timings, "error_kind": outcome.error_kind,
             "http_status": outcome.http_status,
             "retry_after_seconds": outcome.retry_after_seconds,
+            "credential_profile": prepared.request.credential_profile,
+            "quota_domain": prepared.request.quota_domain,
         }
         usage = [{"receipt_id": f"{intent['id']}:{outcome.provider_request_id or outcome.response_sha256 or 'unknown'}",
                   "scope": "groq:selected-model", "unit": key, "amount": value,
@@ -472,6 +699,8 @@ class ModelSession:
                        "intent_ref": intent_ref,
                        "call_ref": intent["body"]["call_ref"],
                        "request_sha256": prepared.request.request_sha256,
+                       "credential_profile": prepared.request.credential_profile,
+                       "quota_domain": prepared.request.quota_domain,
                        "status": "attempted_external_effect"}
 
         def mark(tx):
@@ -489,6 +718,7 @@ class ModelSession:
             pinned = {(item["kind"], item["id"], item["version"]): item["sha256"]
                       for item in call["body"]["input_refs"]
                       if item["kind"] == "source_copy"}
+            policy_refs = []
             for pointer in intent["body"]["source_refs"]:
                 key = (pointer["kind"], pointer["id"], pointer["version"])
                 expected_hash = pinned.pop(key, None)
@@ -500,9 +730,22 @@ class ModelSession:
                 current = tx.get("source_copy", pointer["id"])
                 if current is not None and _explicit_prohibition(current["body"]):
                     raise SessionError("Current saved copy-use record revoked model input")
+                decision = next(item for item in intent["body"]["source_decisions"]
+                                if item["copy_ref"] == pointer)
+                if decision["allowed_for_model"]:
+                    policy_ref = _current_model_use(tx, pointer)
+                    if policy_ref:
+                        policy_refs.append(policy_ref)
             if pinned:
                 raise SessionError("Prepared request omitted a pinned source copy")
-            saved = tx.put("model_dispatch_attempt", marker_id, marker_body)
+            for pointer in intent["body"].get("context_source_dependency_refs", []):
+                policy_ref = _current_context_dependency_use(
+                    tx, pointer, intent["body"]["mission_id"], intent["body"]["call_ref"]
+                )
+                if policy_ref is not None:
+                    policy_refs.append(policy_ref)
+            saved = tx.put("model_dispatch_attempt", marker_id,
+                           {**marker_body, "source_use_refs": policy_refs})
             tx.link(saved, saved_intent, "attempts_request")
             return {"marker_ref": ref(saved)}
 

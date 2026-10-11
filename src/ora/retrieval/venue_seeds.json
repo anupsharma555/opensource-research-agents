@@ -1,0 +1,483 @@
+{
+  "schema": "ora.venue_catalog.v1",
+  "version": 1,
+  "entries": [
+    {
+      "id": "venue-american-journal-of-psychiatry",
+      "version": 1,
+      "name": "American Journal of Psychiatry",
+      "type": "journal",
+      "topic_scope": "General and clinical psychiatry",
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://psychiatryonline.org/journal/ajp",
+          "type": "journal_navigation",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-jama-psychiatry",
+      "version": 1,
+      "name": "JAMA Psychiatry",
+      "type": "journal",
+      "topic_scope": "Clinical, epidemiological and translational psychiatry",
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://jamanetwork.com/journals/jamapsychiatry/newonline",
+          "type": "journal_new_online",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-world-psychiatry",
+      "version": 1,
+      "name": "World Psychiatry",
+      "type": "journal",
+      "topic_scope": "Broad international psychiatry and synthesis",
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://onlinelibrary.wiley.com/journal/20515545",
+          "type": "journal_navigation",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-biological-psychiatry",
+      "version": 1,
+      "name": "Biological Psychiatry",
+      "type": "journal",
+      "topic_scope": "Biological and translational mechanisms",
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://www.biologicalpsychiatryjournal.com/",
+          "type": "journal_navigation",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-molecular-psychiatry",
+      "version": 1,
+      "name": "Molecular Psychiatry",
+      "type": "journal",
+      "topic_scope": "Molecular, genetic and neuroscience research",
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://www.nature.com/mp/",
+          "type": "journal_navigation",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-journal-of-clinical-psychiatry",
+      "version": 1,
+      "name": "Journal of Clinical Psychiatry",
+      "type": "journal",
+      "topic_scope": "Clinical treatment and psychopharmacology",
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://www.psychiatrist.com/jcp/archive/",
+          "type": "journal_archive",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-british-journal-of-psychiatry",
+      "version": 1,
+      "name": "British Journal of Psychiatry",
+      "type": "journal",
+      "topic_scope": "Broad psychiatric research",
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://www.cambridge.org/core/journals/the-british-journal-of-psychiatry",
+          "type": "journal_navigation",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-journal-of-child-psychology-and-psychiatry",
+      "version": 1,
+      "name": "Journal of Child Psychology and Psychiatry",
+      "type": "journal",
+      "topic_scope": "Developmental and child mental health",
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://acamh.onlinelibrary.wiley.com/journal/loi/14697610",
+          "type": "journal_archive",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-journal-of-the-american-academy-of-child-adolescent-psychiatry",
+      "version": 1,
+      "name": "Journal of the American Academy of Child & Adolescent Psychiatry",
+      "type": "journal",
+      "topic_scope": "Child and adolescent psychiatry",
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://www.aacap.org/aacap/About_AACAP/Transparency/JAACAP.aspx",
+          "type": "journal_navigation",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-jmir-mental-health",
+      "version": 1,
+      "name": "JMIR Mental Health",
+      "type": "journal",
+      "topic_scope": "Digital mental health and clinical implementation",
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://mental.jmir.org/2026",
+          "type": "journal_volume",
+          "resource_year": 2026,
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-nejm-ai",
+      "version": 1,
+      "name": "NEJM AI",
+      "type": "journal",
+      "topic_scope": "Adjacent clinical-AI methods and evaluation",
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://www.nejmgroup.org/discover-our-products/know/nejm-ai/",
+          "type": "journal_navigation",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-american-psychiatric-association-annual-meeting",
+      "version": 1,
+      "name": "American Psychiatric Association Annual Meeting",
+      "type": "conference",
+      "topic_scope": null,
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://www.psychiatry.org/psychiatrists/meetings/annual-meeting/learning-opportunities/program-topics",
+          "type": "conference_program_navigation",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; APA conference-publication generative-AI input requires written permission."
+    },
+    {
+      "id": "venue-american-college-of-neuropsychopharmacology",
+      "version": 1,
+      "name": "American College of Neuropsychopharmacology",
+      "type": "conference",
+      "topic_scope": null,
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://acnp.org/annual-meeting/dates-locations/",
+          "type": "conference_meeting_navigation",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-american-academy-of-child-and-adolescent-psychiatry",
+      "version": 1,
+      "name": "American Academy of Child and Adolescent Psychiatry",
+      "type": "conference",
+      "topic_scope": null,
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://www.aacap.org/meetings",
+          "type": "conference_meeting_navigation",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-society-of-biological-psychiatry",
+      "version": 1,
+      "name": "Society of Biological Psychiatry",
+      "type": "conference",
+      "topic_scope": null,
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://sobp.org/meetings/past-meetings/",
+          "type": "conference_program_navigation",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-amia-annual-symposium",
+      "version": 1,
+      "name": "AMIA Annual Symposium",
+      "type": "conference",
+      "topic_scope": null,
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://amia.org/education-events/amia-2026-annual-symposium/schedule",
+          "type": "conference_program",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only",
+          "resource_year": 2026
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-nimh-data-archive",
+      "version": 1,
+      "name": "NIMH Data Archive",
+      "type": "repository",
+      "topic_scope": null,
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://nda.nih.gov/search.html",
+          "type": "repository_search",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-psychiatric-genomics-consortium",
+      "version": 1,
+      "name": "Psychiatric Genomics Consortium",
+      "type": "repository",
+      "topic_scope": null,
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://pgc.unc.edu/for-researchers/download-results/",
+          "type": "repository_search",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; data downloads have separate terms."
+    },
+    {
+      "id": "venue-openneuro",
+      "version": 1,
+      "name": "OpenNeuro",
+      "type": "repository",
+      "topic_scope": null,
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://openneuro.org/search",
+          "type": "repository_search",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-dbgap",
+      "version": 1,
+      "name": "dbGaP",
+      "type": "repository",
+      "topic_scope": null,
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://www.ncbi.nlm.nih.gov/gap/advanced_search/",
+          "type": "repository_search",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-all-of-us-research-hub",
+      "version": 1,
+      "name": "All of Us Research Hub",
+      "type": "repository",
+      "topic_scope": null,
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://researchallofus.org/",
+          "type": "repository_search",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-clinicaltrials-gov",
+      "version": 1,
+      "name": "ClinicalTrials.gov",
+      "type": "registry",
+      "topic_scope": null,
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://clinicaltrials.gov/",
+          "type": "registry_search",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-who-ictrp",
+      "version": 1,
+      "name": "WHO ICTRP",
+      "type": "registry",
+      "topic_scope": null,
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://www.who.int/tools/clinical-trials-registry-platform/the-ictrp-search-portal",
+          "type": "registry_search",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-eu-clinical-trials-information-system",
+      "version": 1,
+      "name": "EU Clinical Trials Information System",
+      "type": "registry",
+      "topic_scope": null,
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://euclinicaltrials.eu/ctis-public/search",
+          "type": "registry_search",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    },
+    {
+      "id": "venue-open-science-framework",
+      "version": 1,
+      "name": "Open Science Framework",
+      "type": "registry",
+      "topic_scope": null,
+      "geographic_scope": null,
+      "links": [
+        {
+          "url": "https://osf.io/search/",
+          "type": "registry_search",
+          "last_checked": "2026-10-07",
+          "qualification": "navigation_verified_by_plan",
+          "source": "nine-role-plan section 5.5",
+          "verified_route": "navigation_only"
+        }
+      ],
+      "access_note": "Navigation only; publisher or repository terms require copy-level qualification."
+    }
+  ]
+}

@@ -21,8 +21,10 @@ Text = Annotated[str, Field(min_length=1)]
 Version = Annotated[int, Field(ge=1)]
 Latency = Literal["minimal", "medium", "long", "very_long"]
 MissionStatus = Literal["active", "waiting", "completed", "cancelled"]
-TaskStatus = Literal["queued", "running", "waiting", "completed", "failed", "cancelled"]
-AttemptStatus = Literal["running", "waiting", "completed", "failed", "cancelled", "uncertain"]
+TaskStatus = Literal["queued", "running", "waiting", "completed", "failed", "cancelled", "deferred"]
+AttemptStatus = Literal[
+    "running", "waiting", "completed", "failed", "cancelled", "uncertain", "superseded"
+]
 
 
 class WireModel(BaseModel):
@@ -287,7 +289,7 @@ class MissionView(WireModel):
     question: Text
     scope: str
     status: MissionStatus
-    latency_class: Latency
+    latency_class: Latency | None = None
     latency_basis: Text
     started_at: str
     report_artifact_id: str | None = None
@@ -302,14 +304,20 @@ class AgentView(WireModel):
 
 class TaskView(WireModel):
     id: Identifier
+    display_number: Version | None = None
+    version: Version | None = None
     parent_task_id: str | None = None
     target_artifact_id: str | None = None
     title: Text
     status: TaskStatus
-    latency_class: Latency
+    latency_class: Latency | None = None
     latency_basis: Text
     first_useful_at: str | None = None
+    first_contribution_at: str | None = None
     active_or_waiting: str
+    waiting_reason: str | None = None
+    waiting_until: AwareDatetime | None = None
+    waiting_operation_reference: "SavedRecordRef | None" = None
     attempt_ids: list[Identifier]
 
 
@@ -344,7 +352,7 @@ class MessageView(WireModel):
     from_agent_id: Identifier
     to_agent_id: Identifier
     task_id: Identifier
-    status: Literal["requested", "delivered", "acknowledged", "fulfilled"]
+    status: Literal["requested", "delivered", "acknowledged", "awaiting_review", "fulfilled"]
     summary: Text
     created_at: str
     updated_at: str | None = None
@@ -481,7 +489,11 @@ class SnapshotInspection(WireModel):
 class ResearchSnapshot(WireModel):
     schema_version: Literal["1.0"] = "1.0"
     proof_kind: Literal[
-        "synthetic_sample", "live_model_on_supplied_evidence", "offline_test"
+        "synthetic_sample",
+        "live_model_on_supplied_evidence",
+        "offline_test",
+        "live_mission_pending",
+        "live_model_with_retrieval",
     ] = "synthetic_sample"
     parent_snapshot_id: Identifier | None = None
     input_question: str | None = None
@@ -506,14 +518,29 @@ class LiveAgent(WireModel):
     name: Text
     role: Text
     skill_version: Text
+    model: Text | None = None
+    availability: Text | None = None
+    unavailable_reason: str | None = None
+    configuration_reference: SavedRecordRef | None = None
+    role_template_id: Identifier | None = None
 
 
 class LiveStartRequest(WireModel):
     request_id: Identifier
     question: Text
     scope: str = ""
-    evidence_text: Text
+    evidence_text: str = ""
     agent_ids: list[Identifier] = Field(min_length=1)
+    required_agent_ids: list[Identifier] = Field(default_factory=list)
+    credential_profile: Literal["primary", "backup"] | None = None
+
+    @model_validator(mode="after")
+    def required_agents_are_selected(self):
+        if len(set(self.required_agent_ids)) != len(self.required_agent_ids) or set(
+            self.required_agent_ids
+        ) - set(self.agent_ids):
+            raise ValueError("requiredAgentIds must be distinct starting agentIds")
+        return self
 
 
 class LiveFollowupRequest(WireModel):
@@ -525,6 +552,16 @@ class LiveFollowupRequest(WireModel):
     question: Text
     scope: str = ""
     agent_ids: list[Identifier] = Field(min_length=1)
+    required_agent_ids: list[Identifier] = Field(default_factory=list)
+    credential_profile: Literal["primary", "backup"] | None = None
+
+    @model_validator(mode="after")
+    def required_agents_are_selected(self):
+        if len(set(self.required_agent_ids)) != len(self.required_agent_ids) or set(
+            self.required_agent_ids
+        ) - set(self.agent_ids):
+            raise ValueError("requiredAgentIds must be distinct starting agentIds")
+        return self
 
 
 class LiveReceipt(WireModel):
@@ -541,6 +578,16 @@ class LiveRunSummary(WireModel):
     status: Text
     parent_run_id: Identifier | None = None
     agent_ids: list[Identifier] = Field(default_factory=list)
+    required_agent_ids: list[Identifier] | None = None
+    participation_policy_version: Version | None = None
+    continuing_task_ids: list[Identifier] | None = None
+    requested_agent_names: dict[str, str] = Field(default_factory=dict)
+    title: Text | None = None
+    created_at: str | None = None
+    last_progress_at: str | None = None
+    completed_at: str | None = None
+    waiting_reason: str | None = None
+    workspace_label: str | None = None
 
 
 class LiveState(WireModel):
@@ -552,6 +599,11 @@ class LiveState(WireModel):
     comparison_snapshot: ResearchSnapshot | None = None
     run_id: Identifier | None = None
     error: str | None = None
+    workspace_id: Identifier | None = None
+    workspace_label: str | None = None
+    workflow_version: Text | None = None
+    retrieval_routes: list[str] = Field(default_factory=list)
+
 
 Sha256 = Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
 
@@ -670,13 +722,19 @@ class RetrievalRequest(WireModel):
     filters: dict = Field(default_factory=dict)  # Sanitized before validation/persistence.
     requested_at: AwareDatetime  # Require timezone-aware in canonical validator.
     requested_window: RetrievalWindow
+    resume_esearch_ref: SavedRecordRef | None = None
 
 
 class RetrievalFailure(WireModel):
-    category: Literal["provider_error", "quota_wait", "malformed_payload"]
+    category: Literal["provider_error", "quota_wait", "malformed_payload", "oversized_response"]
     code: Literal[
-        "route_unavailable", "rate_limited", "unauthorized", "not_found",
-        "timeout", "upstream_error", "unspecified",
+        "route_unavailable",
+        "rate_limited",
+        "unauthorized",
+        "not_found",
+        "timeout",
+        "upstream_error",
+        "unspecified",
     ]
     retry_after_seconds: float | None = Field(default=None, ge=0)
 
@@ -687,7 +745,8 @@ class RetrievalEnvelope(WireModel):
     request: RetrievalRequest
     retrieved_at: AwareDatetime  # Require timezone-aware in canonical validator.
     outcome: Literal[
-        "empty", "success", "partial", "provider_failure", "item_failure", "malformed_payload"
+        "empty", "success", "partial", "provider_failure", "item_failure", "malformed_payload",
+        "oversized_response"
     ]
     failure: RetrievalFailure | None = None
     returned_window: RetrievalResultWindow

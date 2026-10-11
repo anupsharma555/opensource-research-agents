@@ -51,7 +51,15 @@ def test_recorded_workflow_explains_saved_steps_without_inventing_calls(tmp_path
     child = build_recorded_workflow(ROOT, tmp_path)["child"]
     store = StateStore(tmp_path, read_only=True)
     steps = child["inspection"]["steps"]
-    assert len(steps) == len(store.events(child["mission"]["id"]))
+    saved_snapshot = store.get(**child["inspection"]["snapshotReference"])
+    # Snapshot acceptance is storage bookkeeping, not agent work. Match the
+    # saved event boundary exactly rather than including later store activity.
+    visible_events = [
+        event for event in store.events(child["mission"]["id"])
+        if event["sequence"] <= saved_snapshot["body"]["event_cursor"]
+        and event["type"] != "snapshot_accepted"
+    ]
+    assert [step["id"] for step in steps] == [event["id"] for event in visible_events]
     assert all(
         step["action"] and step["summary"] and step["outcome"] and step["proof"] for step in steps
     )

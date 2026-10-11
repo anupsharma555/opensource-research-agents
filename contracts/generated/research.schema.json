@@ -233,7 +233,8 @@
             "completed",
             "failed",
             "cancelled",
-            "uncertain"
+            "uncertain",
+            "superseded"
           ],
           "title": "Status",
           "type": "string"
@@ -472,6 +473,7 @@
             "requested",
             "delivered",
             "acknowledged",
+            "awaiting_review",
             "fulfilled"
           ],
           "title": "Status",
@@ -534,14 +536,22 @@
           "type": "string"
         },
         "latencyClass": {
-          "enum": [
-            "minimal",
-            "medium",
-            "long",
-            "very_long"
+          "anyOf": [
+            {
+              "enum": [
+                "minimal",
+                "medium",
+                "long",
+                "very_long"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "title": "Latencyclass",
-          "type": "string"
+          "default": null,
+          "title": "Latencyclass"
         },
         "question": {
           "minLength": 1,
@@ -590,7 +600,6 @@
         "question",
         "scope",
         "status",
-        "latencyClass",
         "latencyBasis",
         "startedAt"
       ],
@@ -1066,6 +1075,31 @@
           "title": "Attemptids",
           "type": "array"
         },
+        "displayNumber": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Displaynumber"
+        },
+        "firstContributionAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Firstcontributionat"
+        },
         "firstUsefulAt": {
           "anyOf": [
             {
@@ -1090,14 +1124,22 @@
           "type": "string"
         },
         "latencyClass": {
-          "enum": [
-            "minimal",
-            "medium",
-            "long",
-            "very_long"
+          "anyOf": [
+            {
+              "enum": [
+                "minimal",
+                "medium",
+                "long",
+                "very_long"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "title": "Latencyclass",
-          "type": "string"
+          "default": null,
+          "title": "Latencyclass"
         },
         "parentTaskId": {
           "anyOf": [
@@ -1118,7 +1160,8 @@
             "waiting",
             "completed",
             "failed",
-            "cancelled"
+            "cancelled",
+            "deferred"
           ],
           "title": "Status",
           "type": "string"
@@ -1139,13 +1182,61 @@
           "minLength": 1,
           "title": "Title",
           "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        },
+        "waitingOperationReference": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SavedRecordRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "waitingReason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Waitingreason"
+        },
+        "waitingUntil": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Waitinguntil"
         }
       },
       "required": [
         "id",
         "title",
         "status",
-        "latencyClass",
         "latencyBasis",
         "activeOrWaiting",
         "attemptIds"
@@ -1344,7 +1435,9 @@
       "enum": [
         "synthetic_sample",
         "live_model_on_supplied_evidence",
-        "offline_test"
+        "offline_test",
+        "live_mission_pending",
+        "live_model_with_retrieval"
       ],
       "title": "Proofkind",
       "type": "string"

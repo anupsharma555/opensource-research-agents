@@ -46,6 +46,15 @@ A descriptive latency class is not a timeout. A request timeout and lease apply 
 
 ## Local live extension (unreleased)
 
+Current task views add optional `waitingUntil` and `waitingOperationReference`.
+They describe an exact saved capacity wait, not a promise of dispatch at that
+time; older snapshots leave them absent. The retrieval outcome/failure enums add
+`oversized_response`, distinct from invalid data or an empty search. Requests
+may carry an exact `resumeEsearchRef` for a caller-selected PubMed summary retry;
+omitting it keeps a fresh search. These are matched-checkout additions: regenerate
+clients with the host, since older strict readers may reject new fields or enums.
+Saved provider receipts and source history are not rewritten.
+
 Research snapshots add defaulted `proofKind`, `parentSnapshotId` and `inputQuestion`
 fields; source access adds `supplied_text`. New Live request/receipt/state schemas
 include requested agent IDs and exact parent/target versions. Existing snapshots
@@ -98,3 +107,47 @@ checks are the cross-language proof. Live provenance uses a separate versioned
 ledger in the same SQLite file; its explicit migration retains historical
 payloads and marks reconstructed or unavailable facts rather than replacing
 them with current settings. See the [live inspection guide](../development/live-provenance.md).
+
+## Stage 4 inspection fields (unreleased)
+
+The matched client/host adds optional saved-run title, creation/progress/completion
+times, wait explanation and workspace label. Peer entries may include the selected
+model, availability, exact configuration reference and role-template identity.
+State may expose a workspace identity, workflow version and available retrieval
+routes. Missing historical values stay absent; viewer refresh times never replace
+research progress. These additions need the regenerated client and host together;
+older strict readers are not qualified for the new fields.
+
+`TaskView.version` is optional. New exact-version tasks can identify their own
+saved revision. Historical tasks without one continue using their saved mission
+version for the legacy follow-up path. A null default must be treated like a
+missing field, not passed onward as a task revision.
+
+Task and mission `latencyClass` may be absent or null when no expectation has
+been recorded. The reader shows this as not yet estimated, rather than assigning
+an unsupported duration. Existing recorded classes remain readable. The optional
+task `waitingReason` explains a saved wait independently of the timing estimate;
+neither field creates a deadline or changes scheduling.
+`TaskView.firstContributionAt` names the first saved contribution when known.
+It is distinct from the legacy `firstUsefulAt` designation: accepting a record
+does not establish its scientific usefulness.
+
+`LiveStartRequest.evidenceText` now defaults to an empty string. A host that offers
+retrieval can accept a question without pasted evidence. The legacy supplied-text
+host still explains that it requires evidence. The form uses the connected
+host's declared retrieval routes to show the appropriate capability; changing
+the request shape does not itself establish a working search adapter.
+
+`requiredAgentIds` is an optional subset of starting `agentIds` on new mission
+commands. The shared runtime saves participation policy version 2: starting a
+peer does not by itself require that peer to approve or finish before the
+requested scope is complete. Explicitly required contributions remain separate.
+Run summaries expose both the saved required set and policy version. Missing
+historical fields mean older semantics, not a silently inferred empty set.
+Optional `continuingTaskIds` identifies work still progressing after the
+requested scope is complete; null means unrecorded, while an empty list means
+no continuing task was observed. Task read views also accept `deferred`, which
+means a peer postponed that work; it is neither queued execution nor cancellation.
+The legacy supplied-evidence host rejects nonempty requirement selections and
+excludes the empty new field from its historical request fingerprint. A resumed
+shared mission also preserves its original policy and request identity.

@@ -1,4 +1,9 @@
-# Local live research in Atlas
+# Earlier supplied-evidence live extension
+
+This guide describes the legacy runtime and its historical saved workspaces.
+For the shared mission loop with retrieval, use [Stage 4 local research](stage4-local.md).
+Select `--runtime legacy` explicitly when continuing the supplied-evidence extension;
+the two storage formats are not silently converted into one another.
 
 Atlas can submit a real model task and follow up on an exact saved answer. This
 optional local extension uses Groq `openai/gpt-oss-120b` with high reasoning,
@@ -15,7 +20,7 @@ Provide `GROQ_API_KEY` through the process environment or the untracked root `.e
 Then run:
 
 ```sh
-scripts/dev live serve --allow-model-calls --state-dir .local/live --run-budget-usd 0.08
+scripts/dev live serve --runtime legacy --allow-model-calls --state-dir .local/live --run-budget-usd 0.08
 ```
 
 Leave that process running. In a second terminal:

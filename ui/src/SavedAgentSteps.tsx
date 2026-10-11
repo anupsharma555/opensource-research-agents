@@ -8,6 +8,8 @@ const proofLabel: Record<NonNullable<ResearchSnapshot['proofKind']>, string> = {
   synthetic_sample: 'Simulated sample',
   offline_test: 'Recorded offline test; times and actions are fixture evidence',
   live_model_on_supplied_evidence: 'Live model work on supplied evidence',
+  live_mission_pending: 'Live mission accepted; no completed model or source result is implied',
+  live_model_with_retrieval: 'Live model work with saved retrieval records; inspect source and call receipts for exact actions',
 };
 
 export function SavedAgentSteps({ snapshot }: { snapshot: ResearchSnapshot }) {

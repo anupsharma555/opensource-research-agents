@@ -1,23 +1,88 @@
 # OpenSource Research Agents
 
-**Collaborative research that stays inspectable—from the source passage to the
-reason a conclusion changed.**
+[![SPONSORED BY E2B FOR STARTUPS](https://img.shields.io/badge/SPONSORED%20BY-E2B%20FOR%20STARTUPS-ff8800?style=for-the-badge)](https://e2b.dev/startups)
 
-This project is building a persistent research workspace in which specialist
-agents share evidence, ask one another for help, critique results and develop
-follow-up work. Agents can work independently in parallel and return to earlier
-questions when new evidence arrives. A mechanical host will preserve work and
-coordinate resources; scientific decisions remain with the collaborating agents.
+**A collaborative research workspace where AI agents discover literature, examine evidence, challenge interpretations, and build on one another's work.**
 
-The current release is a **tested foundation and sample Mac app**, not a deployed
-autonomous research pipeline. It provides executable interfaces, evaluation
-packets, reusable skill packages and small architecture experiments. The default app uses
-clearly labeled simulated data. An explicitly launched [local live extension](docs/development/live-research.md)
-connects Start and Follow-up to Groq over supplied evidence; it does not search the web.
+OpenSource Research Agents brings persistent agent collaboration and traceable
+evidence into **Research Atlas**, a visual workspace for following research from
+the initial question to source passages, peer exchanges, and evolving findings.
+The aim is to make complex research easier to pursue, inspect, and extend over time.
 
-## Try the foundation
+**Explore:** [The problem](#the-problem) · [The solution](#the-solution) · [How it works](#how-it-works) · [Capabilities](#current-capabilities) · [Run locally](#run-locally) · [Documentation](#documentation)
 
-From a checkout, use the shared setup commands:
+![Research Atlas work overview showing source reading, tool lookups, peer exchanges, and saved activity across two agents](docs/assets/research-atlas-work-overview.png)
+
+*Research Atlas groups related work into an interactive timeline. Select a row to
+explore the saved steps, participating agents, and outcomes behind it.*
+
+## The problem
+
+Research unfolds across papers, notes, analyses, and conversations. As questions
+evolve, it becomes difficult to track which sources support a finding, what a
+collaborator contributed, and why an interpretation changed. AI can accelerate
+individual tasks, but a useful research partner also needs shared context,
+durable memory, and work that people can examine.
+
+## The solution
+
+A shared research workspace where agents can pursue complementary tasks, exchange
+evidence, request critique, and revisit earlier work. Research Atlas connects
+these activities to their sources and saved history, giving researchers a clear
+view of both the findings and the process that produced them.
+
+The design separates scientific judgment from execution: **agents choose what to
+investigate; the host preserves records, coordinates resources, and manages recovery.**
+This supports flexible collaboration while keeping the research history traceable.
+
+## How it works
+
+1. **Frame a question.** Define the scope and choose the starting research peers.
+2. **Discover and read.** Agents select searches, inspect publications, and retain source passages with their provenance.
+3. **Collaborate.** Peers share work, ask focused questions, and contribute reviews through a persistent research board.
+4. **Inspect the evidence.** Follow findings, source copies, peer exchanges, and recorded activity in Research Atlas.
+5. **Build on the work.** Start a follow-up from an exact saved result and compare how the evidence and conclusions develop.
+
+## Current capabilities
+
+| Capability | What it brings to the research workflow |
+| --- | --- |
+| **Scholarly discovery** | Search and publication lookup through PubMed, Europe PMC, Crossref, and optional Exa routes. |
+| **Traceable evidence** | Retained source copies, passage locators, reading coverage, and versioned links between evidence and findings. |
+| **Persistent collaboration** | Named peers, shared proposals, directed requests and replies, and concurrent execution of independent work. |
+| **Model-driven research** | A local research loop connecting selected-model turns, tool use, source inspection, and saved context. |
+| **Research Atlas** | Connected views for research review, communication, evidence, activity, saved runs, and report comparison. |
+| **Recovery and continuity** | Durable state, exact follow-up references, replay protection, and visible handling of provider waits and interrupted work. |
+| **Reusable research roles** | Nine role definitions spanning literature acquisition, synthesis, critique, hypotheses, design, data, analysis, planning, and shared memory. |
+| **Reproducible evaluation** | Versioned benchmark packets, shared contract fixtures, behavioral tests, and separate quality and resource measures. |
+
+The current version is a local development workspace with a browser interface
+and a native Mac app. The default experience includes recorded examples;
+model-backed research uses an explicitly launched local host. Implementation and
+evaluation details are collected in the [documentation](docs/README.md).
+
+### Inside Research Atlas
+
+<p>
+  <a href="docs/assets/research-atlas-peer-exchange.png"><img src="docs/assets/research-atlas-peer-exchange.png" width="32%" alt="Peer exchange reader showing a saved request for independent review"></a>
+  <a href="docs/assets/research-atlas-source-reader.png"><img src="docs/assets/research-atlas-source-reader.png" width="32%" alt="Evidence reader showing retained source excerpts and passage references"></a>
+  <a href="docs/assets/research-atlas-activity.png"><img src="docs/assets/research-atlas-activity.png" width="32%" alt="Chronological activity showing agent actions, timing, and recorded outcomes"></a>
+</p>
+
+*Peer exchanges · Source passages · Recorded activity. Select an image to view it at full size.*
+
+## Why this approach
+
+- **Follow the evidence.** Move from a finding to the source copy and passage behind it.
+- **Understand collaboration.** See who contributed, what was exchanged, and how the work progressed.
+- **Keep research cumulative.** Preserve earlier results and develop new questions without losing their context.
+- **Extend a shared foundation.** Add tools, skills, and research workflows around versioned interfaces and durable records.
+
+## Run locally
+
+### Explore Research Atlas
+
+From the repository root:
 
 ```sh
 scripts/dev bootstrap
@@ -26,100 +91,76 @@ scripts/dev check
 scripts/dev ui
 ```
 
-Python 3.12.12, Node 24.21.0 LTS and package-manager versions are pinned.
-Bootstrap installs missing tools locally; setup uses committed lockfiles.
-No provider keys are needed. See [development setup](docs/development/setup.md)
-for prerequisites, optional comparisons and troubleshooting.
+Bootstrap installs the pinned toolchain locally; setup uses committed lockfiles.
+The sample workspace and offline checks need no provider keys. See
+[development setup](docs/development/setup.md) for prerequisites and troubleshooting.
 
-On a Mac with Rust 1.93 and Xcode Command Line Tools, build the standalone sample:
+### Build the Mac app
+
+With Rust 1.93 and Xcode Command Line Tools installed:
 
 ```sh
 scripts/dev desktop
 ```
 
 Open `desktop/src-tauri/target/debug/bundle/macos/Research Atlas Sample.app`.
-This unsigned development bundle embeds its React assets and needs no Vite server.
-The [prototype guide](ui/README.md) explains its review journeys and sample limits.
+The development app includes its frontend assets and can also connect to a local
+research workspace.
 
-## What can be inspected today
+### Start model-backed research
 
-| Foundation | What it establishes |
-| --- | --- |
-| Research benchmark packets | Versioned simulated sources, hidden evaluator references, fair-comparison conditions and separate quality/resource measures. |
-| Shared interfaces | Typed commands, read models, events, receipts and independent state transitions; Python and JavaScript validate the same fixtures. |
-| Recovery examples | Repeated-command handling, missed-event replay, peer-request semantics, delayed operations, pinned model configuration and stale-worker protection. |
-| Persistent state and evidence | Versioned SQLite records, immutable source files, stable agent identities, pinned configurations, normalized retrieval receipts and source-to-finding links. [Stage 2 checks](docs/development/stage2-verification.md) exercise recovery and recorded parent/child review without provider calls. |
-| Peer coordination and model turns | Durable proposals, reliable peer requests, separate resource permits, concurrent callbacks and exact selected-model request/response records. [Stage 3 checks](docs/development/stage3-verification.md) distinguish offline integration, bounded live protocol proof and the later mission host. |
-| Role and skill packages | Nine role definitions, a shared evidence-linking skill and an independent-appraisal skill, with provenance and private attempt state. |
-| Runtime and storage experiments | The same scripted collaboration tested through custom asyncio, LangGraph and Microsoft Agent Framework; local SQLite failure and recovery examples. |
-| React Mac prototype | Linked findings, source passages, claim versions, peer work, attempts, follow-up requests and separate diagnostics. |
+Follow the [local research guide](docs/development/stage4-local.md) to configure
+the selected provider and launch the host. The current text research adapter
+uses Groq's `openai/gpt-oss-120b`. The guide covers credentials, saved workspaces,
+peer selection, follow-ups, and browser or native connections.
 
-You can inspect the same sample evidence from a terminal or a Codex task:
-
-```sh
-.venv/bin/ora inspect-sample --view sources
-.venv/bin/ora inspect-sample --view findings
-.venv/bin/ora inspect-sample --view diagnostics
-```
-
-These commands read the shared sample snapshot. They do not imply a live research
-run or certify the scientific validity of the fictional findings.
-
-For the persisted recorded workflow, use Atlas's **Open recorded Stage 2 review**
-entry point and the matching [read-only state inspector](docs/development/state-records.md).
-Both expose saved sources, exact configuration/input versions and readable agent
-steps separately from the findings.
-
-The [Stage 3 collaboration fixture](docs/development/stage3-inspection.md) shows
-independent callbacks progressing together, a dependent callback consuming saved
-work, and a peer request that remains open. Its Atlas view and command-line
-inspection read the same saved records; they do not start a research run.
-
-## Architecture at a glance
+## Architecture
 
 ```mermaid
 flowchart LR
-  Researcher --> App[React Mac app]
-  App <--> API[Review and command interface]
-  API <--> Host[Persistent mechanical host]
-  Host <--> Board[Shared evidence and peer requests]
-  Board <--> Peers[Collaborating scientific agents]
-  Peers --> Sources[Search, literature and execution tools]
-  Host --> State[(Durable records)]
-  Host --> Evidence[(Immutable source and result files)]
+  Researcher --> Atlas[Research Atlas]
+  Atlas <--> Host[Local research host]
+  Host <--> Peers[Collaborating agents]
+  Peers <--> Board[Shared evidence and peer requests]
+  Peers --> Tools[Discovery and source tools]
+  Host <--> State[(Versioned records)]
+  Tools --> Evidence[(Retained source files)]
 ```
 
-The production host and full source adapters in this diagram remain implementation
-targets. The optional local live extension exercises a smaller supplied-evidence path. The first
-supported design uses SQLite plus immutable files on a single host, with a small
-asyncio execution boundary. The Mac shell uses Tauri v2. These decisions are
-provisional and include evidence, alternatives and explicit conditions for change.
-See [system architecture](docs/architecture/system.md),
-[storage](docs/decisions/storage.md), [runtime comparison](docs/decisions/runtime-comparison.md)
-and [desktop shell](docs/decisions/desktop-shell.md).
+| Layer | Technology and role |
+| --- | --- |
+| Research interface | React and TypeScript connect findings, evidence, collaboration, and activity; Tauri v2 provides the Mac shell. |
+| Research host | Python and asyncio coordinate model turns, tool execution, resources, and recovery. |
+| Shared interfaces | Pydantic models generate JSON Schema and TypeScript types for consistent commands and records. |
+| Persistent workspace | SQLite and immutable files preserve versioned state, source copies, and research history. |
+| Research capabilities | Provider adapters, role definitions, and reusable skills connect discovery, evidence preparation, and review. |
 
-## Read and extend
+See the [system architecture](docs/architecture/system.md) and
+[module map](docs/development/modules.md) for component ownership and design decisions.
 
-- [Documentation index](docs/README.md): orientation and implementation evidence.
-- [Contract guide](docs/interfaces/contract-guide.md): commands, state, authority and recovery.
-- [Benchmark proof matrix](docs/benchmarks/proof-matrix.md): evaluation packets and honest comparison.
-- [Roles and skills](docs/development/skills.md): reusable instructions and helper provenance.
-- [Module map](docs/development/modules.md): ownership, callers and implemented versus planned commands.
-- [Contributing](CONTRIBUTING.md): focused changes, decision rationale and verification.
+## Development direction
 
-The existing [classifier example](examples/codiv-classification.mjs) remains
-available. Its default mode prints saved example results. The explicit `--live`
-mode is separate from the foundation checks and requires its provider credential.
+The next steps focus on broader scientific-role evaluation, richer source and
+figure understanding, longer research workflows, and a persistent service for
+ongoing use. The central aim remains the same: collaborative research that grows
+more useful over time while keeping its evidence and decisions accessible.
 
-## Scope and evidence
+## Documentation
 
-A passing fixture demonstrates the behavior exercised by that fixture. It does
-not establish scientific superiority, provider reliability, secure production
-isolation or ten-hour endurance. The next implementation stages connect the
-authenticated service, persistent research host, provider adapters and real
-scientific review. Source-backed decision summaries will remain readable, while
-traces and operational metadata remain separately accessible.
+| I want to… | Start here |
+| --- | --- |
+| Install, develop, or run checks | [Development setup](docs/development/setup.md) |
+| Launch a research workspace | [Local research guide](docs/development/stage4-local.md) |
+| Explore the interface | [Atlas guide](docs/development/stage4-atlas.md) · [Sample walkthrough](ui/README.md) |
+| Understand discovery and source reading | [Discovery](docs/development/stage4-discovery.md) · [Source intake](docs/development/stage4-intake.md) |
+| Extend agents and shared interfaces | [Roles and skills](docs/development/skills.md) · [Contract guide](docs/interfaces/contract-guide.md) |
+| Review evaluation evidence | [Benchmark matrix](docs/benchmarks/proof-matrix.md) · [Foundation checks](docs/development/foundation-evidence.md) |
+| Contribute a change | [Contributing](CONTRIBUTING.md) · [Module map](docs/development/modules.md) |
 
-This repository is currently developed privately. A redistribution license for
-project-owned code has not yet been selected; upstream dependencies retain their
-own licenses. No secret or private research corpus is needed for the offline work.
+Browse the [full documentation index](docs/README.md) for implementation guides,
+design decisions, and evaluation records.
+
+## License
+
+A redistribution license for project-owned code has not yet been selected.
+Upstream dependencies retain their own licenses.

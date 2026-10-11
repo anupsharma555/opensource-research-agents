@@ -272,7 +272,10 @@ class ResearchHost:
                 for ref in refs
             ):
                 raise LiveError(f"Required skill unavailable for {name}", 503)
-            self.agents.append(LiveAgent(id=agent_id, name=name, role=role, skill_version=versions))
+            self.agents.append(LiveAgent(
+                id=agent_id, name=name, role=role, skill_version=versions,
+                model=self.provider.model, availability="available", role_template_id=role_id,
+            ))
             self._role_ids[agent_id] = role_id
         self._require_explicit_saved_state_migration()
         self._provenance = LiveProvenance(self.root, self.state_dir, TOOLS)
@@ -468,6 +471,10 @@ class ResearchHost:
     @staticmethod
     def _fingerprint(request: Any) -> str:
         body = request.model_dump(by_alias=True)
+        # This legacy host predates optional contribution requirements. Empty
+        # additions must not change the identity of an unchanged saved request.
+        body.pop("requiredAgentIds", None)
+        body.pop("credentialProfile", None)
         return hashlib.sha256(_json(body).encode()).hexdigest()
 
     def _duplicate(self, db: sqlite3.Connection, request: Any) -> LiveReceipt | None:
@@ -489,6 +496,10 @@ class ResearchHost:
             raise LiveError("Host is closed", 503)
         if not isinstance(request, LiveStartRequest):
             request = LiveStartRequest.model_validate(request)
+        if request.required_agent_ids:
+            raise LiveError("Required contribution choices need the shared mission runtime")
+        if request.credential_profile not in {None, "primary"}:
+            raise LiveError("Backup credential selection needs the shared mission runtime")
         agents = self._agent_ids(request.agent_ids)
         if not request.evidence_text.strip():
             raise LiveError("Supplied evidence is required")
@@ -532,6 +543,10 @@ class ResearchHost:
             raise LiveError("Host is closed", 503)
         if not isinstance(request, LiveFollowupRequest):
             request = LiveFollowupRequest.model_validate(request)
+        if request.required_agent_ids:
+            raise LiveError("Required contribution choices need the shared mission runtime")
+        if request.credential_profile not in {None, "primary"}:
+            raise LiveError("Backup credential selection needs the shared mission runtime")
         agents = self._agent_ids(request.agent_ids)
         with self._lock, self._connect() as db:
             duplicate = self._duplicate(db, request)
@@ -723,7 +738,10 @@ class ResearchHost:
     def state(self, run_id: str | None = None) -> LiveState:
         with self._lock, self._connect() as db:
             runs = db.execute(
-                "SELECT id,question,status,parent_run_id,agent_ids FROM runs ORDER BY created_at DESC, rowid DESC"
+                "SELECT r.id,r.question,r.status,r.parent_run_id,r.agent_ids,r.created_at,r.error,"
+                "s.created_at AS last_progress_at,json_extract(s.body,'$.agents') AS saved_agents "
+                "FROM runs r LEFT JOIN snapshots s ON s.id=r.snapshot_id "
+                "ORDER BY r.created_at DESC, r.rowid DESC"
             ).fetchall()
             if run_id is None and runs:
                 run_id = runs[0]["id"]
@@ -753,6 +771,16 @@ class ResearchHost:
                     status=row["status"],
                     parent_run_id=row["parent_run_id"],
                     agent_ids=json.loads(row["agent_ids"]),
+                    requested_agent_names={
+                        item["id"]: item["name"] for item in json.loads(row["saved_agents"] or "[]")
+                        if item["id"] in json.loads(row["agent_ids"])
+                    },
+                    title=row["question"] if len(row["question"]) <= 88 else row["question"][:85].rstrip() + "…",
+                    created_at=row["created_at"],
+                    last_progress_at=row["last_progress_at"],
+                    completed_at=row["last_progress_at"] if row["status"] == "completed" else None,
+                    waiting_reason=row["error"] if row["status"] == "waiting" else None,
+                    workspace_label=self.state_dir.name,
                 )
                 for row in runs
             ],
@@ -760,6 +788,9 @@ class ResearchHost:
             comparison_snapshot=comparison,
             run_id=run_id,
             error=error,
+            workspace_id="workspace-" + hashlib.sha256(str(self.state_dir).encode()).hexdigest()[:24],
+            workspace_label=self.state_dir.name,
+            workflow_version="supplied-evidence-legacy-v1",
         )
 
     def calls(self, run_id: str, attempt_id: str | None = None) -> list[dict]:
@@ -1401,7 +1432,7 @@ class ResearchHost:
                         target = {
                             "kind": group[:-1],
                             "id": target_id,
-                            "version": record.get("version", baseline["mission"]["version"]),
+                            "version": record.get("version") or baseline["mission"]["version"],
                             "record": record,
                             "parentRunId": run["parent_run_id"],
                             "parentSnapshotId": run["parent_snapshot_id"],

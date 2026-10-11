@@ -112,8 +112,10 @@ class PeerMailbox:
         expected_latency: str = "unknown", last_useful_progress_at: str | None = None,
     ) -> dict:
         """Save the question, its message and outbox intent as one local commit."""
-        for value in (request_id, question, expected_artifact):
-            identifier(value)
+        identifier(request_id)
+        for label, value in (("Question", question), ("Expected artifact", expected_artifact)):
+            if not isinstance(value, str) or not value.strip():
+                raise MailError(f"{label} needs nonempty text")
         if expected_latency not in {"short", "medium", "long", "unknown"}:
             raise MailError("Expected latency needs a known category")
         if last_useful_progress_at is not None:

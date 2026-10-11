@@ -54,3 +54,14 @@ export function classifyAttemptLineage(snapshot: ResearchSnapshot, parent?: Rese
     return [attempt.id, unchanged ? 'inherited' : 'revised'];
   }));
 }
+
+/** Keep step numbers stable across filters, tabs and the earlier-run toggle. */
+export function workStepNumbers(snapshot: ResearchSnapshot, earlierIds: ReadonlySet<string> = new Set()): Map<string, number> {
+  let current = 0;
+  let earlier = 0;
+  const ordered = [...snapshot.attempts].sort((a, b) => {
+    const elapsed = Date.parse(a.startedAt) - Date.parse(b.startedAt);
+    return (Number.isFinite(elapsed) ? elapsed : a.startedAt.localeCompare(b.startedAt)) || a.id.localeCompare(b.id);
+  });
+  return new Map(ordered.map(attempt => [attempt.id, earlierIds.has(attempt.id) ? ++earlier : ++current]));
+}

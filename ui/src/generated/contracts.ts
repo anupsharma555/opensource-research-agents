@@ -24,7 +24,7 @@ export type Text = string | null;
 export type Selectedmodel = string | null;
 export type Skillversions = string[];
 export type Startedat = string;
-export type Status1 = "running" | "waiting" | "completed" | "failed" | "cancelled" | "uncertain";
+export type Status1 = "running" | "waiting" | "completed" | "failed" | "cancelled" | "uncertain" | "superseded";
 export type Taskid = string;
 export type Name1 = string;
 export type Provider = string | null;
@@ -95,7 +95,7 @@ export type Fromagentid = string;
 export type Id8 = string;
 export type Requestid = string | null;
 export type Sourceid2 = string | null;
-export type Status4 = "requested" | "delivered" | "acknowledged" | "fulfilled";
+export type Status4 = "requested" | "delivered" | "acknowledged" | "awaiting_review" | "fulfilled";
 export type Summary2 = string;
 export type Taskid4 = string;
 export type Toagentid = string;
@@ -103,7 +103,7 @@ export type Updatedat = string | null;
 export type Messages = MessageView[];
 export type Id9 = string;
 export type Latencybasis = string;
-export type Latencyclass = "minimal" | "medium" | "long" | "very_long";
+export type Latencyclass = ("minimal" | "medium" | "long" | "very_long") | null;
 export type Question = string;
 export type Reportartifactid = string | null;
 export type Scope = string;
@@ -111,7 +111,12 @@ export type Startedat1 = string;
 export type Status5 = "active" | "waiting" | "completed" | "cancelled";
 export type Version3 = number;
 export type Parentsnapshotid = string | null;
-export type Proofkind = "synthetic_sample" | "live_model_on_supplied_evidence" | "offline_test";
+export type Proofkind =
+  | "synthetic_sample"
+  | "live_model_on_supplied_evidence"
+  | "offline_test"
+  | "live_mission_pending"
+  | "live_model_with_retrieval";
 export type Sampleversion = string;
 export type Schemaversion1 = "1.0";
 export type Snapshotid = string;
@@ -131,14 +136,19 @@ export type Version4 = number;
 export type Sources1 = SourceView[];
 export type Activeorwaiting = string;
 export type Attemptids = string[];
+export type Displaynumber = number | null;
+export type Firstcontributionat = string | null;
 export type Firstusefulat = string | null;
 export type Id11 = string;
 export type Latencybasis1 = string;
-export type Latencyclass1 = "minimal" | "medium" | "long" | "very_long";
+export type Latencyclass1 = ("minimal" | "medium" | "long" | "very_long") | null;
 export type Parenttaskid = string | null;
-export type Status6 = "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
+export type Status6 = "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "deferred";
 export type Targetartifactid = string | null;
 export type Title2 = string;
+export type Version5 = number | null;
+export type Waitingreason = string | null;
+export type Waitinguntil = string | null;
 export type Tasks = TaskView[];
 
 export interface ResearchSnapshot {
@@ -306,7 +316,7 @@ export interface MessageView {
 export interface MissionView {
   id: Id9;
   latencyBasis: Latencybasis;
-  latencyClass: Latencyclass;
+  latencyClass?: Latencyclass;
   question: Question;
   reportArtifactId?: Reportartifactid;
   scope: Scope;
@@ -334,12 +344,18 @@ export interface PassageView {
 export interface TaskView {
   activeOrWaiting: Activeorwaiting;
   attemptIds: Attemptids;
+  displayNumber?: Displaynumber;
+  firstContributionAt?: Firstcontributionat;
   firstUsefulAt?: Firstusefulat;
   id: Id11;
   latencyBasis: Latencybasis1;
-  latencyClass: Latencyclass1;
+  latencyClass?: Latencyclass1;
   parentTaskId?: Parenttaskid;
   status: Status6;
   targetArtifactId?: Targetartifactid;
   title: Title2;
+  version?: Version5;
+  waitingOperationReference?: SavedRecordRef | null;
+  waitingReason?: Waitingreason;
+  waitingUntil?: Waitinguntil;
 }

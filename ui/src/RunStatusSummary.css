@@ -1,0 +1,5 @@
+/* Keep the shared run context and its primary onward action easy to read. */
+.run-progress-summary .run-communication-button { min-height: 46px; padding: 11px 16px; border: 1px solid #88ad93; border-radius: 8px; background: #fff; color: #255b3c; font-size: 15px; font-weight: 650; line-height: 1.4; text-align: left; cursor: pointer; }
+.run-progress-summary .run-communication-button:hover { background: #edf6e9; border-color: #467858; }
+.run-progress-summary .run-communication-button:focus-visible { outline: 3px solid #377653; outline-offset: 3px; }
+.run-progress-summary .selected-run-duration { font-size: 13px; line-height: 1.5; }

@@ -1,0 +1,53 @@
+/* Lead with assignments and their latest saved outcome; exact history is secondary. */
+.review-task-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(290px, 100%), 1fr)); gap: 16px; }
+.agent-work-status[open] > summary { margin-bottom: 14px; }
+.activity-review-scope { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border: 1px solid #adcbb0; border-left: 4px solid #669f78; border-radius: 8px; padding: 14px 18px; background: #f4f9f1; }
+.activity-review-scope > div { flex: 1 1 280px; }
+.activity-review-scope span { display: block; font-size: 12px; color: #56735e; }
+.activity-review-scope strong { display: block; font-size: 17px; color: #294d37; margin-top: 4px; }
+.activity-review-scope p { font-size: 13px; color: #526b59; line-height: 1.5; margin: 6px 0 0; }
+.run-work-count { font-size: 16px; color: #355942; margin: 0 0 18px; line-height: 1.5; }
+.review-task-card { border: 1px solid #d4e1d3; border-radius: 10px; padding: 18px; background: #fbfdf9; min-width: 0; }
+.review-task-card header, .review-task-card footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.review-task-card header { color: #486653; font-size: 13px; }
+.review-task-card header > strong { font-size: 17px; color: #234433; }
+.review-task-title .agent-badge { font-size: inherit; color: inherit; }
+.review-task-title .agent-badge-initial { width: 30px; height: 30px; font-size: 15px; margin-right: 2px; }
+.review-task-actors { margin: 12px 0; display: flex; flex-wrap: wrap; gap: 10px; }
+.review-task-actors .agent-badge { font-size: 16px; }
+.review-task-card p { font-size: 14px; line-height: 1.55; margin: 8px 0; }
+.review-task-card time { display: block; font-size: 12px; color: #506958; }
+.review-task-card footer { border-top: 1px solid #dce6d8; padding-top: 12px; margin-top: 12px; font-size: 13px; }
+.review-task-card .inline-link { font-size: 13px; }
+.review-task-wait { border-left: 3px solid #b58d44; background: #fff6e6; padding: 8px 10px; }
+.review-work-links { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 18px; }
+.original-research-request { font-size: 17px; line-height: 1.6; margin: 0 0 16px; padding-left: 18px; border-left: 3px solid #8fb395; white-space: pre-wrap; max-width: 100ch; }
+.review-step-browser > summary { font-size: 15px; font-weight: 700; padding: 8px 0; }
+.review-step-browser[open] > summary { margin-bottom: 16px; }
+.activity-metric-scope { color: #486653; font-size: 14px; margin-bottom: -10px; }
+.system-action-label { font-size: 13px; font-weight: 700; color: #586355; }
+.activity-item-head .agent-badge { font-size: 14px; }
+.activity-timestamp { font-size: 12px; line-height: 1.5; }
+.activity-timestamp time { display: block; }
+.activity-timestamp > span { font-size: 12px; }
+.activity-row-scope { font-size: 12px; }
+.activity-order-note { font-size: 13px; color: #506958; margin: -8px 0 0; }
+.task-picker { display: flex; align-items: center; gap: 16px; font-size: 16px; font-weight: 650; }
+.task-picker select { min-width: 250px; padding: 10px 12px; background: #fff; border: 1px solid #b8ccba; border-radius: 8px; color: #294a36; }
+.details-work-history > summary { font-size: 15px; font-weight: 650; cursor: pointer; }
+.details-work-history[open] > summary { margin-bottom: 20px; }
+.selected-work-step .step-result-preview { display: block; overflow: visible; }
+.selected-work-step .step-elapsed { font-size: 13px; color: #526b59; line-height: 1.5; }
+@media (min-height: 800px) and (min-width: 1000px) {
+  .run-progress-summary { position: sticky; top: 0; z-index: 20; box-shadow: 0 3px 9px #1730290c; }
+  html { scroll-padding-top: calc(var(--atlas-run-header-height, 230px) + 16px); }
+}
+
+.review-return { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 14px 32px 0; color: #526b59; font-size: 13px; }
+.review-return .inline-link { font-size: 14px; }
+
+.shared-request-explainer { margin: -8px 0 18px; font-size: 14px; line-height: 1.5; color: #506958; }
+
+.assignment-message-records { align-self: start; }
+.assignment-message-records > summary { cursor: pointer; font-size: 15px; font-weight: 650; }
+.assignment-message-records[open] > summary { margin-bottom: 14px; }

@@ -54,6 +54,8 @@ failure. Run the existing `.venv` checks independently while repairing setup acc
 | `scripts/dev inspect --view sources` | Inspect the same synthetic source records visible in the Mac app. |
 | `scripts/dev inspect --view diagnostics` | Inspect operational sample data separately from findings. |
 | `scripts/dev desktop` | Build the unsigned debug Mac app with embedded frontend assets. |
+| `scripts/dev live serve --runtime mission --allow-model-calls --state-dir .local/research` | Explicitly start the local research host; new and saved unfinished work may call configured providers. |
+| `scripts/dev mission status --state-dir .local/research` | Read that host's saved research state without starting work. |
 | `scripts/dev setup --offline` | Install from populated caches; report an unavailable package precisely. |
 
 `ORA_NODE_BIN` may select an explicit **matching** Node executable. It is not a
@@ -75,6 +77,7 @@ qualification. It does not prevent the shared offline foundation from being used
 
 ## Optional live Atlas connection
 
-See [local live research](live-research.md) for explicit model activation, private
-state, native/browser launch, inspection commands and repeatable test inputs.
+See [Stage 4 local research](stage4-local.md) for explicit model activation,
+private state, native/browser launch, inspection commands and qualification.
+The [earlier supplied-evidence extension](live-research.md) uses its explicit legacy runtime.
 The default setup and checks do not activate this provider.

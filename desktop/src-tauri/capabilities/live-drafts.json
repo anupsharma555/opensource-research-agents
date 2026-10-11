@@ -1,0 +1,8 @@
+{
+  "identifier": "live-drafts",
+  "description": "Only the authenticated local research page may request native draft storage",
+  "local": false,
+  "remote": { "urls": ["http://127.0.0.1:*/live"] },
+  "windows": ["main"],
+  "permissions": ["allow-load-live-draft", "allow-save-live-draft"]
+}

@@ -18,7 +18,7 @@ TYPES = frozenset({"object", "array", "string", "integer", "number", "boolean", 
 KEYWORDS = frozenset({
     "type", "properties", "required", "additionalProperties", "items",
     "minLength", "maxLength", "minItems", "maxItems", "minimum", "maximum",
-    "enum", "const", "anyOf",
+    "enum", "const", "anyOf", "title", "description",
 })
 
 
@@ -86,6 +86,9 @@ def validate_schema(schema: dict[str, Any]) -> None:
             raise JsonShapeError("Tool schema cannot contain a cycle")
         visiting.add(identity)
         try:
+            for annotation in ("title", "description"):
+                if annotation in part and not isinstance(part[annotation], str):
+                    raise JsonShapeError(f"{annotation} must be text")
             choices = _types(part)
             if "anyOf" in part:
                 branches = part["anyOf"]

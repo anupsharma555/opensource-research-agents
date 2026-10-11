@@ -15,6 +15,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from ora.credentials import GROQ_CREDENTIAL_ENV_NAMES, GroqCredentialProfiles
+
 MODEL = "openai/gpt-oss-120b"
 URL = "https://api.groq.com/openai/v1/chat/completions"
 USER_AGENT = "OpenSourceResearchAgents/0.1 live-provider"
@@ -121,13 +123,17 @@ class GroqProvider:
         ):
             raise ValueError("max_completion_tokens must be between 1 and 65536")
         self.root = Path(root)
+        self.credential_profiles = GroqCredentialProfiles(self.root)
         self.max_completion_tokens = max_completion_tokens
 
-    def _key(self) -> str:
+    def _key(self, *, profile: str = "primary") -> str:
         def usable(value: str) -> bool:
             return bool(value) and all(33 <= ord(character) <= 126 for character in value)
 
-        value = os.environ.get("GROQ_API_KEY", "").strip()
+        name = GROQ_CREDENTIAL_ENV_NAMES.get(profile)
+        if name is None:
+            raise CredentialUnavailable("Groq credential profile is unavailable.", status=503)
+        value = os.environ.get(name, "").strip()
         if value:
             if usable(value):
                 return value
@@ -137,8 +143,8 @@ class GroqProvider:
         except (OSError, UnicodeError):
             lines = []
         for line in lines:
-            name, separator, value = line.partition("=")
-            if separator and name.strip() == "GROQ_API_KEY":
+            field_name, separator, value = line.partition("=")
+            if separator and field_name.strip() == name:
                 value = value.strip().strip('"').strip("'")
                 if value:
                     if usable(value):
@@ -225,6 +231,8 @@ class GroqProvider:
         *,
         expected_configuration: dict[str, object] | None = None,
     ) -> dict:
+        if not self.credential_profiles.is_enabled("primary"):
+            raise CredentialUnavailable("Primary credential paused by operator.", status=503)
         body = self._request_body(messages, tools)
         if (
             expected_configuration is not None

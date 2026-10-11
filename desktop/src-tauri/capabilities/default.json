@@ -1,6 +1,14 @@
 {
   "identifier": "default",
-  "description": "Sample review window with no shell or file-system permissions",
+  "description": "Bundled Atlas window with its existing native workspace commands",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "allow-open-live-workspace",
+    "allow-connect-live-workspace",
+    "allow-get-live-workspace-selection",
+    "allow-set-atlas-view-title",
+    "allow-load-live-draft",
+    "allow-save-live-draft"
+  ]
 }

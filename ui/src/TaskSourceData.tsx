@@ -1,22 +1,38 @@
-/* Show the public source packet supplied with the scripted research question.
-   The canonical scenario owns its initial source IDs and complete source text.
-   Unknown snapshots stay explicit about missing input provenance. */
+/* Distinguish sources available at the start from later discoveries.
+   Exact provenance controls supplied/reused labels; sample packets retain their
+   canonical input text. Opening these disclosures does not retrieve new text. */
 import type { ResearchSnapshot } from './generated/contracts';
 import { SourceInspection } from './InspectionDetails';
+import './TaskSourceData.css';
 import scenario from '../../benchmarks/v1/scenarios/syn-abstract-disagreement.json';
 
 const packetSnapshots = new Set(['syn-abstract-disagreement-snapshot-v2', 'syn-abstract-disagreement-baseline-snapshot']);
 
-export function TaskSourceData({ snapshot }: { snapshot: ResearchSnapshot }) {
-  if (snapshot.inspection?.initialSourceIds.length === 0) return <section className="task-source-data" aria-label="Source data supplied with this task"><h4>Source data supplied with this task</h4><p>No source records are identified as supplied input. Evidence acquired during the task is available with its contributions.</p></section>;
-  if (snapshot.inspection) return <section className="task-source-data" aria-label="Source data supplied with this task"><h4>Source data supplied with this task</h4>
-    <p>{snapshot.inspection.initialSourceIds.length} source records identified as input. Sources discovered later are listed with their contributions.</p>
-    <details className="inline-detail"><summary>View supplied source data ({snapshot.inspection.initialSourceIds.length} records)</summary><div className="input-source-list">{snapshot.inspection.initialSourceIds.map(id => {
-      const matches = snapshot.sources.filter(source => source.id === id);
-      const source = matches.length === 1 ? matches[0] : undefined;
-      return <details className="input-source-record" key={id}><summary>{source?.title || id}</summary>{source ? <><p>Saved copy {source.copyId} · v{source.version} · {source.accessState.replaceAll('_', ' ')}</p>{source.passages.map(passage => <div key={passage.spanId}><p>{passage.locator}</p><blockquote>{passage.text}</blockquote></div>)}{!source.passages.length && <p>No passage text retained.</p>}</> : <p>The supplied source is unavailable or ambiguous in this snapshot.</p>}<SourceInspection snapshot={snapshot} sourceId={id} /></details>;
-    })}</div></details>
-  </section>;
+export function TaskSourceData({ snapshot, onOpenSource }: { snapshot: ResearchSnapshot; onOpenSource?: (sourceId: string) => void }) {
+  if (snapshot.inspection) {
+    const initialIds = [...new Set(snapshot.inspection.initialSourceIds)];
+    return <section className="task-source-data" aria-label="Sources available at the start">
+      <h4>Sources available at the start</h4>
+      <p>{initialIds.length ? 'Starting material for this request. The labels show whether it was supplied, reused from earlier work, or retrieved.' : 'No starting material is recorded. Sources found during the run appear in Evidence.'}</p>
+      {initialIds.length > 0 && <details className="inline-detail"><summary>View starting sources ({initialIds.length})</summary><div className="input-source-list">{initialIds.map(id => {
+        const matches = snapshot.sources.filter(source => source.id === id);
+        const source = matches.length === 1 ? matches[0] : undefined;
+        const provenance = snapshot.inspection!.sources.filter(item => item.sourceId === id);
+        const detail = provenance.length === 1 && source && provenance[0].copyReference.kind === 'source_copy' && provenance[0].copyReference.id === source.copyId && provenance[0].copyReference.version === source.version ? provenance[0] : undefined;
+        const origin = detail?.origin === 'reused' ? 'Reused from an earlier run' : detail?.origin === 'supplied' ? 'Supplied with this request' : detail?.origin === 'retrieved' ? 'Retrieved during this run' : 'How this source was added is not recorded';
+        return <article className="starting-source-card" key={id}>
+          <div><strong>{source?.title || id}</strong><p className="starting-source-origin">{origin}</p></div>
+          {source && onOpenSource && <button type="button" className="secondary-button" onClick={() => onOpenSource(source.id)}>Read in Evidence →</button>}
+          <details className="starting-source-reference"><summary>Source details</summary>
+            {source ? <><p>Saved copy {source.copyId} · v{source.version} · {source.accessState.replaceAll('_', ' ')}</p>{detail?.fromSnapshotId && <p>Reused from saved snapshot {detail.fromSnapshotId}</p>}
+              {!onOpenSource && <details><summary>Read retained source text ({source.passages.length} excerpts)</summary>{source.passages.map((passage, index) => <div key={`${passage.spanId}:${index}`}><p>{passage.locator}</p><blockquote>{passage.text}</blockquote></div>)}{!source.passages.length && <p>No passage text retained.</p>}</details>}
+              {detail && <SourceInspection snapshot={snapshot} sourceId={id} />}
+            </> : <p>This starting source is missing, or more than one saved copy matches it.</p>}
+          </details>
+        </article>;
+      })}</div></details>}
+    </section>;
+  }
   if (snapshot.proofKind === 'live_model_on_supplied_evidence') return <section className="task-source-data" aria-label="Source data supplied with this task"><h4>Saved source evidence</h4><p>{snapshot.sources.length} source record{snapshot.sources.length === 1 ? '' : 's'} retained from supplied evidence. Fresh web search is unavailable.</p><details className="inline-detail"><summary><span className="closed-label">View saved source data ({snapshot.sources.length} records)</span><span className="open-label">Hide saved source data</span></summary><div className="input-source-list">{snapshot.sources.map(source => <details className="input-source-record" key={source.id}><summary><span className="source-letter">{source.id}</span><strong>{source.title}</strong></summary><div className="input-source-text">{source.passages.map(passage => <p key={passage.spanId}>{passage.text}</p>)}<small>Saved source copy {source.copyId} · v{source.version}</small></div></details>)}</div></details></section>;
   const knownPacket = packetSnapshots.has(snapshot.snapshotId) && snapshot.sampleVersion === scenario.scenario_version;
   if (!knownPacket) return <div className="task-source-data"><h4>Source data</h4><p>The source material supplied at the start was not recorded for this snapshot.</p></div>;

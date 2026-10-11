@@ -84,6 +84,7 @@ class Capability:
     optional: bool = False
     execution_model: str | None = None
     implementation_ref: str | None = None
+    description: str = ""
 
     def descriptor(self) -> dict[str, Any]:
         return {
@@ -96,6 +97,7 @@ class Capability:
             "optional": self.optional,
             "execution_model": self.execution_model,
             "implementation_ref": self.implementation_ref,
+            **({"description": self.description} if self.description else {}),
         }
 
 
@@ -109,6 +111,7 @@ class CapabilityCatalog:
                 or not item.version
                 or not item.permission
                 or item.tool_id in self.tools
+                or not isinstance(item.description, str)
             ):
                 raise CapabilityError("Each capability needs a unique ID, version and permission")
             try:

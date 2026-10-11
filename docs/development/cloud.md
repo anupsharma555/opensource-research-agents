@@ -1,6 +1,6 @@
 # Codex cloud development
 
-Use the private GitHub checkout for a **coding and testing environment**. It is
+Use the GitHub checkout for a **coding and testing environment**. It is
 separate from an always-on research host, the Mac app, and an E2B experiment job.
 This repository needs no provider credential for setup or offline checks.
 

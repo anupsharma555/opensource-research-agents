@@ -233,7 +233,8 @@
             "completed",
             "failed",
             "cancelled",
-            "uncertain"
+            "uncertain",
+            "superseded"
           ],
           "title": "Status",
           "type": "string"
@@ -415,11 +416,48 @@
     "LiveAgent": {
       "additionalProperties": false,
       "properties": {
+        "availability": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Availability"
+        },
+        "configurationReference": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SavedRecordRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "id": {
           "maxLength": 160,
           "minLength": 1,
           "title": "Id",
           "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
         },
         "name": {
           "minLength": 1,
@@ -431,10 +469,36 @@
           "title": "Role",
           "type": "string"
         },
+        "roleTemplateId": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Roletemplateid"
+        },
         "skillVersion": {
           "minLength": 1,
           "title": "Skillversion",
           "type": "string"
+        },
+        "unavailableReason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unavailablereason"
         }
       },
       "required": [
@@ -458,11 +522,64 @@
           "title": "Agentids",
           "type": "array"
         },
+        "completedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completedat"
+        },
+        "continuingTaskIds": {
+          "anyOf": [
+            {
+              "items": {
+                "maxLength": 160,
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Continuingtaskids"
+        },
+        "createdAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Createdat"
+        },
         "id": {
           "maxLength": 160,
           "minLength": 1,
           "title": "Id",
           "type": "string"
+        },
+        "lastProgressAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lastprogressat"
         },
         "parentRunId": {
           "anyOf": [
@@ -478,15 +595,89 @@
           "default": null,
           "title": "Parentrunid"
         },
+        "participationPolicyVersion": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Participationpolicyversion"
+        },
         "question": {
           "minLength": 1,
           "title": "Question",
           "type": "string"
         },
+        "requestedAgentNames": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Requestedagentnames",
+          "type": "object"
+        },
+        "requiredAgentIds": {
+          "anyOf": [
+            {
+              "items": {
+                "maxLength": 160,
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requiredagentids"
+        },
         "status": {
           "minLength": 1,
           "title": "Status",
           "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "waitingReason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Waitingreason"
+        },
+        "workspaceLabel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workspacelabel"
         }
       },
       "required": [
@@ -557,6 +748,7 @@
             "requested",
             "delivered",
             "acknowledged",
+            "awaiting_review",
             "fulfilled"
           ],
           "title": "Status",
@@ -619,14 +811,22 @@
           "type": "string"
         },
         "latencyClass": {
-          "enum": [
-            "minimal",
-            "medium",
-            "long",
-            "very_long"
+          "anyOf": [
+            {
+              "enum": [
+                "minimal",
+                "medium",
+                "long",
+                "very_long"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "title": "Latencyclass",
-          "type": "string"
+          "default": null,
+          "title": "Latencyclass"
         },
         "question": {
           "minLength": 1,
@@ -675,7 +875,6 @@
         "question",
         "scope",
         "status",
-        "latencyClass",
         "latencyBasis",
         "startedAt"
       ],
@@ -836,7 +1035,9 @@
           "enum": [
             "synthetic_sample",
             "live_model_on_supplied_evidence",
-            "offline_test"
+            "offline_test",
+            "live_mission_pending",
+            "live_model_with_retrieval"
           ],
           "title": "Proofkind",
           "type": "string"
@@ -1307,6 +1508,31 @@
           "title": "Attemptids",
           "type": "array"
         },
+        "displayNumber": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Displaynumber"
+        },
+        "firstContributionAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Firstcontributionat"
+        },
         "firstUsefulAt": {
           "anyOf": [
             {
@@ -1331,14 +1557,22 @@
           "type": "string"
         },
         "latencyClass": {
-          "enum": [
-            "minimal",
-            "medium",
-            "long",
-            "very_long"
+          "anyOf": [
+            {
+              "enum": [
+                "minimal",
+                "medium",
+                "long",
+                "very_long"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "title": "Latencyclass",
-          "type": "string"
+          "default": null,
+          "title": "Latencyclass"
         },
         "parentTaskId": {
           "anyOf": [
@@ -1359,7 +1593,8 @@
             "waiting",
             "completed",
             "failed",
-            "cancelled"
+            "cancelled",
+            "deferred"
           ],
           "title": "Status",
           "type": "string"
@@ -1380,13 +1615,61 @@
           "minLength": 1,
           "title": "Title",
           "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        },
+        "waitingOperationReference": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SavedRecordRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "waitingReason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Waitingreason"
+        },
+        "waitingUntil": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Waitinguntil"
         }
       },
       "required": [
         "id",
         "title",
         "status",
-        "latencyClass",
         "latencyBasis",
         "activeOrWaiting",
         "attemptIds"
@@ -1526,6 +1809,13 @@
       "title": "Model",
       "type": "string"
     },
+    "retrievalRoutes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Retrievalroutes",
+      "type": "array"
+    },
     "runId": {
       "anyOf": [
         {
@@ -1557,6 +1847,45 @@
         }
       ],
       "default": null
+    },
+    "workflowVersion": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Workflowversion"
+    },
+    "workspaceId": {
+      "anyOf": [
+        {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Workspaceid"
+    },
+    "workspaceLabel": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Workspacelabel"
     }
   },
   "required": [

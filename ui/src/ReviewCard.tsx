@@ -19,7 +19,7 @@ type Props = {
 };
 
 export function ReviewCard({ as: Tag = 'section', id, label, controlLabel, className = 'panel', eyebrow, title, summary, actions, expanded, onToggle, children }: Props) {
-  return <Tag id={id} className={`${className} review-card`} aria-label={label}>
+  return <Tag id={id} tabIndex={-1} className={`${className} review-card`} aria-label={label}>
     <div className="review-card-header">
       <button type="button" className="review-card-toggle" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${controlLabel}`} title={`${expanded ? 'Collapse' : 'Expand'} ${controlLabel}`} aria-expanded={expanded} aria-controls={`${id}-body`} onClick={onToggle}><span aria-hidden="true">▸</span></button>
       <div className="review-card-heading"><span className="eyebrow">{eyebrow}</span><h3>{title}</h3>{summary && <div className="review-card-summary">{summary}</div>}</div>

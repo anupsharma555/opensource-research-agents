@@ -2,7 +2,7 @@
 
 This guide describes the default sample mode of the React/Vite interface inside a Tauri v2 macOS shell. That mode opens two **scripted sample snapshots** for review and comparison, and makes no research-host, model, provider, or sandbox request. The yellow `SCRIPTED SAMPLE` marker remains visible while reviewing them. A simulated queue receipt is a preview, not submitted work.
 
-The separately launched [local live mode](../docs/development/live-research.md) connects real Start and Follow-up requests to Groq over supplied evidence, with automatic status refresh and saved run history. Sample-mode restrictions below do not describe that explicit live route.
+The separately launched [local research workspace](../docs/development/stage4-local.md) connects real Start and Follow-up requests to the shared research loop, with automatic status refresh and saved run history. Its [Atlas review map](../docs/development/stage4-atlas.md) owns the connected workflow: compact saved-work bars in Research review open exact chronological steps in Activity. The earlier [supplied-evidence extension](../docs/development/live-research.md) remains available for its saved workspaces. Sample-mode restrictions below do not describe either explicit live route.
 
 ## Run and verify
 

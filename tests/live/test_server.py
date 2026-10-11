@@ -4,6 +4,7 @@ The tests distinguish session setup, accepted commands and later saved state,
 and verify that conflicting requests keep their precise error status.
 """
 
+import argparse
 import json
 import threading
 import urllib.error
@@ -12,6 +13,7 @@ import urllib.request
 import pytest
 
 from ora.contracts.models import LiveReceipt, LiveState
+from ora.live import cli
 from ora.live.engine import LiveError
 from ora.live.server import LocalResearchServer
 
@@ -19,6 +21,8 @@ from ora.live.server import LocalResearchServer
 class StubHost:
     def __init__(self):
         self.started = []
+        self.reasoning_reads = []
+        self.peer_reads = []
 
     def start(self, request):
         if request.request_id == "conflict":
@@ -36,6 +40,26 @@ class StubHost:
 
     def calls(self, run_id, attempt_id=None):
         return [{"runId": run_id, "attemptId": attempt_id, "content": "saved output"}]
+
+    def returned_reasoning(self, run_id, call_id, *, diagnostic_granted=False):
+        assert diagnostic_granted is True
+        self.reasoning_reads.append((run_id, call_id))
+        return {
+            "runId": run_id, "callId": call_id, "agentId": "agent-1",
+            "attemptId": "attempt-1", "status": "available",
+            "text": "SYNTHETIC_RETURNED_REASONING", "origin": "provider_returned",
+            "redacted": False, "reason": "returned",
+        }
+
+    def peer_record(self, run_id, kind, record_id, version):
+        self.peer_reads.append((run_id, kind, record_id, version))
+        return {
+            "runId": run_id, "originRunId": run_id,
+            "reference": {"kind": kind, "id": record_id, "version": version},
+            "status": "available", "content": {"text": "Synthetic saved message"},
+            "contentReference": {"kind": kind, "id": record_id, "version": version},
+            "redacted": False,
+        }
 
 
 @pytest.fixture
@@ -109,3 +133,61 @@ def test_typed_errors_and_private_paths(server):
     assert request(app, "/api/live/calls", headers=auth)[0] == 400
     assert request(app, "/api/live/calls?runId=run-1&attemptId=attempt-1", headers=auth)[2]["records"][0]["attemptId"] == "attempt-1"
     assert request(app, "/%2e%2e/.env")[0] == 404
+
+
+def test_reasoning_route_requires_exact_authenticated_local_read(server):
+    app, host = server
+    path = "/api/live/reasoning?runId=run-1&callId=call-1"
+    assert request(app, path)[0] == 401
+    assert request(app, path, headers={"Authorization": "Bearer incorrect"})[0] == 401
+    auth = {"Authorization": "Bearer " + app.token}
+    assert request(app, path, headers={**auth, "Origin": "https://untrusted.invalid"})[0] == 403
+    assert request(app, path, headers={**auth, "Host": "untrusted.invalid"})[0] == 403
+    assert request(app, "/api/live/reasoning?runId=run-1", headers=auth)[0] == 400
+    assert request(app, path + "&callId=call-2", headers=auth)[0] == 400
+    assert host.reasoning_reads == []
+    status, headers, result = request(app, path, headers=auth)
+    assert status == 200 and headers["Cache-Control"] == "no-store"
+    assert result["text"] == "SYNTHETIC_RETURNED_REASONING"
+    assert host.reasoning_reads == [("run-1", "call-1")]
+    assert "SYNTHETIC_RETURNED_REASONING" not in json.dumps(
+        request(app, "/api/live/calls?runId=run-1", headers=auth)[2]
+    )
+
+
+def test_peer_record_route_requires_authenticated_exact_selection_and_no_store(server):
+    app, host = server
+    path = "/api/live/peer-record?runId=run-1&kind=mail_message&id=message-1&version=2"
+    assert request(app, path)[0] == 401
+    auth = {"Authorization": "Bearer " + app.token}
+    assert request(app, path, headers={**auth, "Origin": "https://untrusted.invalid"})[0] == 403
+    assert request(app, path, headers={**auth, "Host": "untrusted.invalid"})[0] == 403
+    for invalid in (
+        "/api/live/peer-record?runId=run-1&kind=mail_message&id=message-1",
+        path + "&id=message-2", path + "&extra=1",
+        path.replace("version=2", "version=0"),
+        path.replace("version=2", "version=-1"),
+    ):
+        assert request(app, invalid, headers=auth)[0] == 400
+    assert host.peer_reads == []
+    status, headers, result = request(app, path, headers=auth)
+    assert status == 200 and headers["Cache-Control"] == "no-store"
+    assert host.peer_reads == [("run-1", "mail_message", "message-1", 2)]
+    assert result["content"] == {"text": "Synthetic saved message"}
+
+
+def test_headless_start_and_reconnect_use_same_authenticated_host(server, tmp_path, capsys):
+    app, host = server
+    state = tmp_path / ".local" / "state"
+    state.mkdir(parents=True)
+    cli._write_connection(state, {"origin": app.origin, "token": app.token,
+                                  "launchUrl": app.launch_url})
+    command = tmp_path / "request.json"
+    command.write_text(json.dumps({"requestId": "stable-request", "question": "Find the trial abstract",
+                                   "agentIds": ["agent-acquisition"]}))
+    cli.mission_main(argparse.Namespace(mission_action="start", state_dir=state, input=command), tmp_path)
+    assert json.loads(capsys.readouterr().out)["runId"] == "run-1"
+    assert host.started[0].request_id == "stable-request"
+    assert host.started[0].evidence_text == ""
+    assert cli.connect_url(state) == app.launch_url
+    assert len(host.started) == 1  # Reading/reconnecting never submits research.

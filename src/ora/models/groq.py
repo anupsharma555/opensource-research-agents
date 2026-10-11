@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import time
 import urllib.error
 import urllib.request
@@ -16,6 +17,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Literal
 
+from ora.credentials import CredentialProfileError, GroqCredentialProfiles, validate_selection
 from ora.live.provider import (
     MAX_RESPONSE_BYTES,
     MODEL,
@@ -63,6 +65,8 @@ class SourceUse:
     unknown_policy: Literal["reject", "allow_metadata_only"] = "reject"
     text: str | None = None
     route: Literal["direct", "cache", "peer"] = "direct"
+    copy_sha256: str | None = None
+    passage_refs: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -77,6 +81,8 @@ class CallConfiguration:
     include_reasoning: bool = True
     max_completion_tokens: int = 8192
     stream: bool = False
+    credential_profile: str = "primary"
+    quota_domain: str = "groq-selected"
 
 
 @dataclass(frozen=True)
@@ -91,6 +97,8 @@ class PreparedCall:
     evidence_refs: tuple[dict[str, Any], ...]
     body: dict[str, Any] = field(repr=False)
     request_sha256: str
+    credential_profile: str = "primary"
+    quota_domain: str = "groq-selected"
 
     def manifest(self) -> dict[str, Any]:
         return {
@@ -99,6 +107,8 @@ class PreparedCall:
             "phase": self.phase, "provider": "groq", "endpoint": URL, "model_id": MODEL,
             "configuration_id": self.configuration_id,
             "configuration_sha256": self.configuration_sha256,
+            "credential_profile": self.credential_profile,
+            "quota_domain": self.quota_domain,
             "requested_settings": {key: value for key, value in self.body.items()
                                    if key not in {"messages", "tools"}},
             "request_sha256": self.request_sha256,
@@ -128,6 +138,7 @@ class ModelOutcome:
     http_status: int | None = None
     retry_after_seconds: float | None = None
     partial_response: bytes | None = field(default=None, repr=False)
+    provider_error: dict[str, Any] | None = field(default=None, repr=False)
 
     @property
     def executable_tool_calls(self) -> tuple[dict[str, Any], ...]:
@@ -175,6 +186,102 @@ def _function_call(raw: Any) -> dict[str, Any]:
         raise ModelPreflightError("tool call arguments must be a JSON object")
     return {"id": raw["id"], "type": "function",
             "function": {"name": function["name"], "arguments": arguments}}
+
+
+_MISSING_TOOL_NAME = re.compile(
+    r"\battempted to call tool ['\"]([A-Za-z_][A-Za-z0-9_.-]{0,80})['\"] which was not in\b",
+    re.IGNORECASE,
+)
+
+_NULL_SELECTED_ID = re.compile(
+    r"\bselected_id\b.{0,80}\bexpected\b.{0,60}\bgot\b.{0,12}\bnull\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+_MISSING_REQUIRED_TOOL_ARGUMENT = re.compile(
+    r"^Tool call validation failed: tool call validation failed: parameters for tool "
+    r"(?P<tool>[A-Za-z_][A-Za-z0-9_]*) did not match schema: errors: "
+    r"\[missing properties: '(?P<field>[A-Za-z_][A-Za-z0-9_]*)'\]$",
+    re.IGNORECASE,
+)
+
+
+def is_selected_id_null_tool_rejection(error: dict[str, Any] | None) -> bool:
+    """Recognize only the provider's exact known optional-ID validation failure."""
+    if not isinstance(error, dict):
+        return False
+    message = error.get("message")
+    return bool(
+        error.get("code") == "tool_use_failed"
+        and isinstance(message, str)
+        and "search_scholarly" in message
+        and _NULL_SELECTED_ID.search(message)
+    )
+
+
+def classify_tool_failure_from_tools(
+    tools: list[dict[str, Any]], error: dict[str, Any] | None,
+) -> str | None:
+    """Classify a bounded provider rejection against the exact saved tool schema."""
+    if not error or error.get("code") != "tool_use_failed":
+        return None
+    message = error.get("message")
+    matched = _MISSING_TOOL_NAME.search(message) if isinstance(message, str) else None
+    functions = [item.get("function") for item in tools
+                 if isinstance(item, dict)]
+    if not matched:
+        if is_selected_id_null_tool_rejection(error):
+            for function in functions:
+                if not isinstance(function, dict) or function.get("name") != "search_scholarly":
+                    continue
+                schema = (function.get("parameters") or {}).get("properties", {}).get("selected_id", {})
+                types = schema.get("type") if isinstance(schema, dict) else None
+                if isinstance(types, list) and set(types) == {"string", "integer"}:
+                    return "optional_selected_id_null"
+        return None
+    attempted = matched.group(1)
+    if attempted in {item.get("name") for item in functions if isinstance(item, dict)}:
+        return None
+    for function in functions:
+        if not isinstance(function, dict):
+            continue
+        route = (function.get("parameters") or {}).get("properties", {}).get("route", {})
+        if isinstance(route, dict) and isinstance(route.get("enum"), list) and attempted in route["enum"]:
+            return "route_used_as_function_name"
+    return "unregistered_tool_function"
+
+
+def classify_missing_required_tool_argument(
+    tools: list[dict[str, Any]], error: dict[str, Any] | None,
+) -> tuple[str, str] | None:
+    """Match one captured provider rejection to a field required by its pinned tool schema."""
+    if (not isinstance(error, dict) or error.get("type") != "invalid_request_error"
+            or error.get("code") != "tool_use_failed"):
+        return None
+    message = error.get("message")
+    match = _MISSING_REQUIRED_TOOL_ARGUMENT.fullmatch(message) if isinstance(message, str) else None
+    if match is None:
+        return None
+    tool, field = match.group("tool", "field")
+    functions = [
+        item["function"] for item in tools
+        if isinstance(item, dict) and isinstance(item.get("function"), dict)
+        and item["function"].get("name") == tool
+    ]
+    if len(functions) != 1:
+        return None
+    parameters = functions[0].get("parameters")
+    if not isinstance(parameters, dict):
+        return None
+    required, properties = parameters.get("required"), parameters.get("properties")
+    if (not isinstance(required, list) or not isinstance(properties, dict)
+            or field not in required or not isinstance(properties.get(field), dict)):
+        return None
+    return tool, field
+
+
+def _tool_failure_kind(prepared: PreparedCall, error: dict[str, Any] | None) -> str | None:
+    return classify_tool_failure_from_tools(prepared.body.get("tools", []), error)
 
 
 def _messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -277,6 +384,7 @@ class GroqSelectedAdapter:
         self.transport = transport or urllib.request.urlopen
         self.timeout_seconds = timeout_seconds
         self._credential = GroqProvider(self.root)
+        self.credential_profiles = GroqCredentialProfiles(self.root)
 
     def prepare(
         self, configuration: CallConfiguration, *, call_id: str, attempt_id: str,
@@ -285,6 +393,10 @@ class GroqSelectedAdapter:
         schema_name: str | None = None, schema: dict[str, Any] | None = None,
         parent_call_id: str | None = None,
     ) -> PreparedCall:
+        try:
+            validate_selection(configuration.credential_profile, configuration.quota_domain)
+        except CredentialProfileError as exc:
+            raise ModelPreflightError(str(exc)) from exc
         if not all((call_id, attempt_id, task_category, configuration.configuration_id,
                     configuration.configuration_sha256, configuration.instructions)):
             raise ModelPreflightError("call and configuration identity are required")
@@ -328,6 +440,19 @@ class GroqSelectedAdapter:
                          "unknown_policy": source.unknown_policy, "route": source.route})
             line = {"id": source.source_id, "version": source.version,
                     "sha256": source.sha256}
+            if source.passage_refs:
+                if (not isinstance(source.copy_sha256, str) or len(source.copy_sha256) != 64
+                        or any(c not in "0123456789abcdef" for c in source.copy_sha256)):
+                    raise ModelPreflightError("Checked passages need the original source-copy checksum")
+                for pointer in source.passage_refs:
+                    if (not isinstance(pointer, dict) or pointer.get("kind") != "source_passage"
+                            or not isinstance(pointer.get("id"), str)
+                            or type(pointer.get("version")) is not int or pointer["version"] < 1):
+                        raise ModelPreflightError("Checked passages need exact saved references")
+                details = {"text_basis": "checked_passages", "copy_sha256": source.copy_sha256,
+                           "passage_refs": list(source.passage_refs)}
+                line.update(details)
+                refs[-1].update(details)
             if source.text is not None:
                 line["text"] = source.text
             source_lines.append(line)
@@ -384,14 +509,23 @@ class GroqSelectedAdapter:
             raise ModelPreflightError("request must be finite JSON") from exc
         return PreparedCall(call_id, attempt_id, parent_call_id, task_category,
                             phase, configuration.configuration_id,
-                            configuration.configuration_sha256, tuple(refs), body, request_hash)
+                            configuration.configuration_sha256, tuple(refs), body, request_hash,
+                            configuration.credential_profile, configuration.quota_domain)
 
     def invoke(self, prepared: PreparedCall) -> ModelOutcome:
         if _sha(prepared.body) != prepared.request_sha256:
             raise ModelPreflightError("prepared request changed before dispatch")
         encoded = _encoded(prepared.body)
         try:
-            key = self._credential._key()  # Reuse the existing environment/.env route.
+            self.credential_profiles.validate_binding(
+                prepared.credential_profile, prepared.quota_domain
+            )
+        except CredentialProfileError:
+            return self._failed(prepared, "credential_profile_mismatch", None, 503)
+        if not self.credential_profiles.is_enabled(prepared.credential_profile):
+            return self._failed(prepared, "credential_profile_paused", None, 503)
+        try:
+            key = self._credential._key(profile=prepared.credential_profile)
         except CredentialUnavailable:
             return self._failed(prepared, "credential_unavailable", None, 503)
         request = urllib.request.Request(URL, data=encoded, method="POST", headers={
@@ -405,8 +539,22 @@ class GroqSelectedAdapter:
                 raw = response.read(MAX_RESPONSE_BYTES + 1)
                 headers = _safe_headers(response.headers)
         except urllib.error.HTTPError as exc:
-            return self._failed(prepared, "http_error", started, exc.code,
-                                _retry_after(exc.headers), _safe_headers(exc.headers))
+            failed = self._failed(prepared, "http_error", started, exc.code,
+                                  _retry_after(exc.headers), _safe_headers(exc.headers))
+            try:
+                raw_error = exc.read(65_537)
+                error = json.loads(raw_error).get("error") if len(raw_error) <= 65_536 else None
+            except (OSError, ValueError, TypeError, AttributeError):
+                raw_error, error = b"", None
+            detail = None
+            if isinstance(error, dict):
+                from ora.retrieval.redact import redact_text
+
+                detail = {key: redact_text(value)[0][:2048] for key in ("type", "code", "message")
+                          if isinstance(value := error.get(key), str)}
+            return replace(failed, error_kind=_tool_failure_kind(prepared, detail) or failed.error_kind,
+                           provider_error=detail,
+                           response_sha256=hashlib.sha256(raw_error).hexdigest() if raw_error else None)
         except (urllib.error.URLError, TimeoutError, OSError):
             return self._failed(prepared, "transport_error", started)
         if len(raw) > MAX_RESPONSE_BYTES:
@@ -584,15 +732,20 @@ class GroqSelectedAdapter:
                                key: value for key, value in usage.items() if key.endswith("_time")
                            }})
 
-        calls_raw = message.get("tool_calls") or []
-        if not isinstance(calls_raw, list):
-            return failed_response("invalid_tool_calls")
-        try:
-            calls = tuple(_function_call(call) for call in calls_raw)
-        except ModelPreflightError:
-            return failed_response("invalid_tool_calls")
-        if len(calls) > 1 or len({call["id"] for call in calls}) != len(calls):
-            return failed_response("unsupported_parallel_tool_calls")
+        # A length cutoff can interrupt JSON tool arguments. Keep the visible
+        # response for continuation, but never expose a cutoff call to execution.
+        if finish == "length":
+            calls = ()
+        else:
+            calls_raw = message.get("tool_calls") or []
+            if not isinstance(calls_raw, list):
+                return failed_response("invalid_tool_calls")
+            try:
+                calls = tuple(_function_call(call) for call in calls_raw)
+            except ModelPreflightError:
+                return failed_response("invalid_tool_calls")
+            if len(calls) > 1 or len({call["id"] for call in calls}) != len(calls):
+                return failed_response("unsupported_parallel_tool_calls")
         if prepared.phase == "final" and calls:
             return failed_response("unexpected_tool_call")
         if finish == "length":
@@ -640,6 +793,7 @@ def _safe_headers(headers: Any) -> dict[str, str]:
 
 
 def _usage(raw: Any) -> dict[str, Any] | None:
+    """Retain reported totals and valid optional breakdowns without estimating them."""
     if not isinstance(raw, dict):
         return None
     result: dict[str, Any] = {}
@@ -652,6 +806,14 @@ def _usage(raw: Any) -> dict[str, Any] | None:
         value = raw.get(key)
         if type(value) in {int, float} and math.isfinite(value) and value >= 0:
             result[key] = float(value)
+    for section, detail, total in (
+        ("prompt_tokens_details", "cached_tokens", "prompt_tokens"),
+        ("completion_tokens_details", "reasoning_tokens", "completion_tokens"),
+    ):
+        breakdown = raw.get(section)
+        value = breakdown.get(detail) if isinstance(breakdown, dict) else None
+        if type(value) is int and 0 <= value <= result[total]:
+            result[section] = {detail: value}
     return result
 
 

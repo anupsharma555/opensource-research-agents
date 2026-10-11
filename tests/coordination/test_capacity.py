@@ -1,5 +1,7 @@
 """Clock-controlled admission and recovery fixtures; no provider is called."""
 
+import hashlib
+import json
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from multiprocessing import get_context
 
@@ -203,6 +205,71 @@ def test_review_and_quiet_lane_progress_under_noisy_queue(tmp_path):
     assert following["operation_id"] == "quiet"
 
 
+def test_old_large_request_wins_shared_refill_before_newer_lanes(tmp_path):
+    clock = Clock()
+    scheduler = make(tmp_path, clock, model=2)
+    for lane, count in (("older", 63), ("newer", 48)):
+        record = queue(scheduler, f"history-{lane}", lane=lane)
+
+        def finish_history(tx):
+            current = tx.get("capacity_operation", f"history-{lane}")
+            return tx.put("capacity_operation", current["id"], {
+                **current["body"], "phase": "completed",
+                "attempts": [
+                    {"at": clock() - 61, "charged_tokens": 1, "status": "completed"}
+                    for _ in range(count)
+                ],
+            }, expected_version=current["version"])
+
+        scheduler.store.transact(f"seed-history-{lane}", {}, finish_history)
+        assert record["lane"] == lane
+    scheduler.observe_rate_headers(
+        "provider/model/account",
+        {"x-ratelimit-limit-tokens": "8000",
+         "x-ratelimit-remaining-tokens": "0", "x-ratelimit-reset-tokens": "1s"},
+        source_operation_id="prior-receipt", observation_id="shared-refill",
+        observed_at=clock(),
+    )
+    queue(scheduler, "older-work", lane="older", tokens=6527)
+    clock.advance(0.1)
+    queue(scheduler, "newer-work", lane="newer", tokens=6968)
+    clock.advance(0.1)
+    queue(scheduler, "new-lane-work", lane="new-lane", tokens=1000)
+    assert scheduler.admit("one", "model") is None
+    clock.advance(0.8)
+    first = scheduler.admit("one", "model")
+    assert first["operation_id"] == "older-work"
+    scheduler.dispatched("older-work", "one", first["generation"])
+    next_lane = scheduler.admit("two", "model")
+    assert next_lane["operation_id"] == "new-lane-work"
+    scheduler.dispatched("new-lane-work", "two", next_lane["generation"])
+    scheduler.settle("older-work", "one", first["generation"],
+                     used_tokens=6527, outcome="completed")
+    scheduler.settle("new-lane-work", "two", next_lane["generation"],
+                     used_tokens=1000, outcome="completed")
+    assert scheduler.admit("three", "model") is None
+    clock.advance(60)
+    assert make(tmp_path, clock, model=2).admit("three", "model")["operation_id"] == "newer-work"
+
+
+def test_recent_token_use_outweighs_recent_call_count(tmp_path):
+    clock = Clock()
+    scheduler = make(tmp_path, clock)
+    for lane, charges in (("heavy", (5000,)), ("light", (1000, 1000))):
+        for index, charge in enumerate(charges):
+            name = f"past-{lane}-{index}"
+            queue(scheduler, name, lane=lane, tokens=charge)
+            admitted = scheduler.admit("host", "model")
+            assert admitted["operation_id"] == name
+            scheduler.dispatched(name, "host", admitted["generation"])
+            scheduler.settle(name, "host", admitted["generation"],
+                             used_tokens=charge, outcome="completed")
+    queue(scheduler, "older-heavy", lane="heavy")
+    clock.advance(0.1)
+    queue(scheduler, "newer-light", lane="light")
+    assert scheduler.admit("host", "model")["operation_id"] == "newer-light"
+
+
 def test_review_reserve_applies_across_missions_and_blocked_review_does_not_idle(tmp_path):
     clock = Clock()
     store = StateStore(tmp_path, clock=clock)
@@ -335,6 +402,341 @@ def test_bounded_429_retries_and_observed_zero_headroom(tmp_path):
             assert result["diagnostic"] == "transport_retry_limit"
     assert len(s.get("retry")["attempts"]) == 3
     assert s.admit("host", "model") is None
+
+
+def test_observed_low_token_headroom_waits_for_its_reset_then_expires(tmp_path):
+    clock = Clock()
+    s = make(tmp_path, clock)
+    queue(s, "completed", tokens=3000)
+    first = s.admit("host", "model")
+    s.dispatched("completed", "host", first["generation"])
+    s.settle("completed", "host", first["generation"], used_tokens=2852, outcome="completed")
+    s.observe_rate_headers(
+        "provider/model/account",
+        {
+            "x-ratelimit-remaining-requests": "997",
+            "x-ratelimit-reset-requests": "4m19.2s",
+            "x-ratelimit-remaining-tokens": "80",
+            "x-ratelimit-reset-tokens": "59.4s",
+        },
+        source_operation_id="completed",
+        observation_id="receipt-completed-v1",
+        observed_at=clock(),
+    )
+    queue(s, "next", tokens=3000)
+    assert s.admit("host", "model") is None
+    assert s.get("next")["wake_at"] == pytest.approx(clock() + 59.4)
+    s.enqueue("unaffected", task_id="other", lane="search", kind="retrieval")
+    assert s.admit("host", "retrieval")["operation_id"] == "unaffected"
+    restarted = make(tmp_path, clock)
+    assert restarted.admit("host", "model") is None
+    clock.advance(59.4)
+    assert restarted.admit("host", "model")["operation_id"] == "next"
+
+
+def test_observed_request_and_token_clocks_and_retry_after_are_independent(tmp_path):
+    clock = Clock()
+    s = make(tmp_path, clock)
+    queue(s, "blocked", tokens=3)
+    s.observe_rate_headers(
+        "provider/model/account",
+        {
+            "x-ratelimit-remaining-requests": "0",
+            "x-ratelimit-reset-requests": "2m",
+            "x-ratelimit-remaining-tokens": "100",
+            "x-ratelimit-reset-tokens": "5s",
+        },
+        source_operation_id="earlier",
+        observation_id="request-empty",
+        observed_at=clock(),
+    )
+    assert s.admit("host", "model") is None
+    assert s.get("blocked")["wake_at"] == clock() + 120
+    clock.advance(120)
+    admitted = s.admit("host", "model")
+    s.dispatched("blocked", "host", admitted["generation"])
+    s.observe_rate_headers(
+        "provider/model/account",
+        {
+            "x-ratelimit-remaining-requests": "500",
+            "x-ratelimit-reset-requests": "3m",
+            "x-ratelimit-remaining-tokens": "0",
+            "x-ratelimit-reset-tokens": "5s",
+        },
+        source_operation_id="blocked",
+        observation_id="token-empty",
+        observed_at=clock(),
+    )
+    s.rate_limited(
+        "blocked", "host", admitted["generation"],
+        scope="provider/model/account", retry_after=20,
+    )
+    queue(s, "following", tokens=1)
+    assert s.admit("host", "model") is None
+    assert s.get("following")["wake_at"] == clock() + 20
+    clock.advance(5)
+    assert s.admit("host", "model") is None
+    clock.advance(15)
+    assert s.admit("host", "model")["operation_id"] == "blocked"
+
+
+def test_concurrent_reservations_consume_observed_headroom_across_restart(tmp_path):
+    clock = Clock()
+    s = make(tmp_path, clock, model=2)
+    s.observe_headers(
+        "provider/model/account",
+        remaining_requests=10,
+        remaining_tokens=500,
+        reset_after_requests=3600,
+        reset_after_tokens=30,
+        observed_at=clock(),
+        observation_id="headroom",
+    )
+    queue(s, "a", tokens=300)
+    queue(s, "b", tokens=300)
+    first = s.admit("one", "model")
+    assert first["operation_id"] == "a"
+    other = make(tmp_path, clock, model=2)
+    assert other.admit("two", "model") is None
+    assert other.get("b")["wake_at"] == clock() + 30
+    other.dispatched("a", "one", first["generation"])
+    assert other.admit("two", "model") is None
+    clock.advance(30)
+    assert other.admit("two", "model")["operation_id"] == "b"
+
+
+def test_observed_token_limit_still_bounds_shared_admission_after_reset(tmp_path):
+    clock = Clock()
+    scheduler = make(tmp_path, clock, model=2)
+    scheduler.observe_rate_headers(
+        "provider/model/account",
+        {
+            "x-ratelimit-limit-tokens": "8000",
+            "x-ratelimit-remaining-tokens": "3674",
+            "x-ratelimit-reset-tokens": "1s",
+            "x-ratelimit-remaining-requests": "995",
+            "x-ratelimit-reset-requests": "7m",
+        },
+        source_operation_id="earlier-completed-call",
+        observation_id="observed-8000-tpm",
+        observed_at=clock(),
+    )
+    queue(scheduler, "first", tokens=6760)
+    queue(scheduler, "second", tokens=4477)
+    assert scheduler.admit("one", "model") is None
+    clock.advance(1)
+    restarted = make(tmp_path, clock, model=2)
+    first = restarted.admit("one", "model")
+    assert first["operation_id"] == "first"
+    assert restarted.admit("two", "model") is None
+    restarted.dispatched("first", "one", first["generation"])
+    assert restarted.admit("two", "model") is None
+    assert restarted.get("second")["wake_at"] == pytest.approx(clock() + 60)
+    restarted.settle("first", "one", first["generation"],
+                     used_tokens=6760, outcome="completed")
+    clock.advance(60)
+    assert make(tmp_path, clock, model=2).admit("two", "model")["operation_id"] == "second"
+
+
+def test_fresh_observed_token_limit_uses_new_receipt_identity(tmp_path):
+    clock = Clock()
+    scheduler = make(tmp_path, clock)
+    old = scheduler.observe_rate_headers(
+        "provider/model/account",
+        {"x-ratelimit-remaining-tokens": "0", "x-ratelimit-reset-tokens": "1s"},
+        source_operation_id="prior", observation_id="replayed-prior", observed_at=clock(),
+    )
+    enhanced = scheduler.observe_rate_headers(
+        "provider/model/account",
+        {"x-ratelimit-limit-tokens": "8000", "x-ratelimit-remaining-tokens": "0",
+         "x-ratelimit-reset-tokens": "1s"},
+        source_operation_id="prior", observation_id="replayed-prior", observed_at=clock(),
+    )
+    assert old.get("observed_token_limit") is None
+    assert enhanced["observed_token_limit"] == 8000
+    assert scheduler.observe_rate_headers(
+        "provider/model/account",
+        {"x-ratelimit-limit-tokens": "8000", "x-ratelimit-remaining-tokens": "0",
+         "x-ratelimit-reset-tokens": "1s"},
+        source_operation_id="prior", observation_id="replayed-prior", observed_at=clock(),
+    ) == enhanced
+
+
+def test_prior_quota_head_recovers_observed_limit_from_exact_saved_response(tmp_path):
+    clock = Clock()
+    scheduler = make(tmp_path, clock, model=2)
+    scheduler.enqueue(
+        "historical", task_id="earlier", lane="model", kind="model",
+        quota_scopes=("provider/model/account",), estimated_tokens=1,
+        call_id="call-historical",
+    )
+    scheduler.cancel("historical")
+
+    def seed(tx):
+        call = tx.put("agent_call", "call-historical", {"synthetic": True})
+        tx.put("model_response_receipt", "model-response:model-intent:call-historical:1", {
+            "call_ref": {"kind": call["kind"], "id": call["id"], "version": call["version"]},
+            "rate_headers": {"x-ratelimit-limit-tokens": "8000"},
+        })
+        return tx.put("capacity_quota", "provider/model/account", {
+            "blocked_until": 0, "observed_at": clock(),
+            "source_operation_id": "historical",
+            "remaining_requests": 995, "requests_reset_at": clock() + 420,
+            "remaining_tokens": 3674, "tokens_reset_at": clock() + 1,
+        })
+
+    scheduler.store.transact("seed-old-quota-head", {}, seed)
+    queue(scheduler, "first", tokens=6760)
+    queue(scheduler, "second", tokens=4477)
+    clock.advance(1)
+    first = scheduler.admit("one", "model")
+    assert first["operation_id"] == "first"
+    assert scheduler.admit("two", "model") is None
+    updated = scheduler.observe_headers(
+        "provider/model/account", remaining_requests=994, remaining_tokens=5000,
+        reset_after_tokens=30, observed_at=clock(), observation_id="new-head-without-limit",
+    )
+    assert updated["observed_token_limit"] == 8000
+
+
+def test_replayed_or_expired_header_does_not_refresh_provider_wait(tmp_path):
+    clock = Clock()
+    s = make(tmp_path, clock)
+    old = s.observe_rate_headers(
+        "provider/model/account",
+        {"x-ratelimit-remaining-tokens": "0", "x-ratelimit-reset-tokens": "5s"},
+        source_operation_id="old",
+        observation_id="old-receipt",
+        observed_at=clock(),
+    )
+    clock.advance(2)
+    new = s.observe_rate_headers(
+        "provider/model/account",
+        {"x-ratelimit-remaining-tokens": "0", "x-ratelimit-reset-tokens": "10s"},
+        source_operation_id="new",
+        observation_id="new-receipt",
+        observed_at=clock(),
+    )
+    assert new["tokens_reset_at"] == 1012
+    assert s.observe_rate_headers(
+        "provider/model/account",
+        {"x-ratelimit-remaining-tokens": "0", "x-ratelimit-reset-tokens": "5s"},
+        source_operation_id="old",
+        observation_id="old-receipt",
+        observed_at=1000.0,
+    ) == old
+    assert s.store.get("capacity_quota", "provider/model/account")["body"] == new
+    queue(s, "after", tokens=1)
+    assert s.admit("host", "model") is None
+    clock.advance(10)
+    assert s.admit("host", "model")["operation_id"] == "after"
+
+
+def test_long_provider_retry_after_survives_restart_without_blocking_retrieval(tmp_path):
+    clock = Clock()
+    s = make(tmp_path, clock)
+    queue(s, "daily-limited", tokens=10)
+    admitted = s.admit("host", "model")
+    s.dispatched("daily-limited", "host", admitted["generation"])
+    s.rate_limited(
+        "daily-limited", "host", admitted["generation"],
+        scope="provider/model/account", retry_after=1796,
+    )
+    for observation in ("sibling-success-1", "sibling-success-2"):
+        s.observe_rate_headers(
+            "provider/model/account",
+            {
+                "x-ratelimit-remaining-requests": "500",
+                "x-ratelimit-reset-requests": "1m",
+                "x-ratelimit-remaining-tokens": "3000",
+                "x-ratelimit-reset-tokens": "5s",
+            },
+            source_operation_id=observation,
+            observation_id=observation,
+            observed_at=clock(),
+        )
+        assert s.store.get("capacity_quota", "provider/model/account")["body"][
+            "blocked_until"
+        ] == 1000 + 1796
+        clock.advance(1)
+    restarted = make(tmp_path, clock)
+    restarted.enqueue("source-search", task_id="source-search", lane="research", kind="retrieval")
+    assert restarted.admit("host", "retrieval")["operation_id"] == "source-search"
+    assert restarted.admit("host", "model") is None
+    clock.advance(1793)
+    assert restarted.admit("host", "model") is None
+    clock.advance(1)
+    assert restarted.admit("host", "model")["operation_id"] == "daily-limited"
+
+
+def test_restart_reestimates_only_legacy_queued_model_from_exact_saved_intent(tmp_path):
+    clock = Clock()
+    s = make(tmp_path, clock)
+    request = b"x" * 4000
+    blob = s.store.put_blob(request)
+    work_id = "historical-work"
+    capacity_id = "executor-cap:" + hashlib.sha256(
+        json.dumps(["mission", work_id], separators=(",", ":")).encode()
+    ).hexdigest()
+
+    def save_fixture(tx):
+        call = tx.put("agent_call", "historical-call", {"mission_id": "mission"})
+        tx.put("executor_work", "historical-executor-work", {
+            "spec": {
+                "mission_id": "mission", "run_id": "run", "work_id": work_id,
+                "call_id": call["id"], "call_version": call["version"],
+                "attempt_id": "attempt", "proposal_ref": {"id": "task"},
+                "configuration_ref": {"id": "configuration"},
+            }
+        })
+        tx.put(
+            "model_request_intent", "model-intent:historical-call:1",
+            {
+                "call_ref": {"kind": call["kind"], "id": call["id"], "version": call["version"]},
+                "mission_id": "mission", "task_id": "task", "attempt_id": "attempt",
+                "parent_call_ref": None,
+                "request_sha256": hashlib.sha256(request).hexdigest(),
+                "blob": blob,
+            },
+        )
+        return {"saved": True}
+
+    s.store.transact("historical-model-fixture", {}, save_fixture)
+    s.enqueue(
+        capacity_id, task_id="task", lane="agent", kind="model",
+        quota_scopes=("provider/model/account",), estimated_tokens=8192,
+        call_id="historical-call", mission_id="mission", run_id="run",
+        attempt_id="attempt", budget_version="configuration",
+    )
+
+    def mark_historical(tx):
+        record = tx.get("capacity_operation", capacity_id)
+        body = dict(record["body"])
+        body.pop("estimate_basis")
+        tx.put("capacity_operation", capacity_id, body, expected_version=record["version"])
+        return {"historical": True}
+
+    s.store.transact("mark-historical-capacity", {}, mark_historical)
+    queue(s, "active", tokens=8192)
+    active = s.admit("host", "model")
+    assert active["operation_id"] == "active"
+    s.dispatched("active", "host", active["generation"])
+    changes = s.reestimate_legacy_pending_models()
+    assert len(changes) == 1
+    corrected = s.get(capacity_id)
+    assert corrected["estimated_tokens"] == 1250
+    assert corrected["estimated_tokens_original"] == 8192
+    assert corrected["estimate_basis"] == "recovered_from_exact_saved_intent_bytes_v1"
+    assert corrected["attempts"] == []
+    assert s.get("active")["estimated_tokens"] == 8192
+    assert s.store.read_blob(blob["sha256"]) == request
+    assert s.reestimate_legacy_pending_models() == []
+    s.settle("active", "host", active["generation"], used_tokens=0, outcome="completed")
+    s.observe_headers(
+        "provider/model/account", remaining_requests=100,
+        remaining_tokens=2000, reset_after_tokens=60, observed_at=clock(),
+    )
+    assert s.admit("host", "model")["operation_id"] == capacity_id
 
 
 def test_distinct_provider_and_shared_account_scopes(tmp_path):
