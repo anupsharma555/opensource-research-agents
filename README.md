@@ -47,7 +47,7 @@ This supports flexible collaboration while keeping the research history traceabl
 
 | Capability | What it brings to the research workflow |
 | --- | --- |
-| **Scholarly discovery** | Search and publication lookup through PubMed, Europe PMC, Crossref, and optional Exa routes. |
+| **Persistent Research** | Search and publication lookup through PubMed, Europe PMC, Crossref, and optional Exa routes. |
 | **Traceable evidence** | Retained source copies, passage locators, reading coverage, and versioned links between evidence and findings. |
 | **Persistent collaboration** | Named peers, shared proposals, directed requests and replies, and concurrent execution of independent work. |
 | **Model-driven research** | A local research loop connecting selected-model turns, tool use, source inspection, and saved context. |
@@ -118,13 +118,14 @@ peer selection, follow-ups, and browser or native connections.
 
 ```mermaid
 flowchart LR
-  Researcher --> Atlas[Research Atlas]
-  Atlas <--> Host[Local research host]
-  Host <--> Peers[Collaborating agents]
-  Peers <--> Board[Shared evidence and peer requests]
-  Peers --> Tools[Discovery and source tools]
-  Host <--> State[(Versioned records)]
-  Tools --> Evidence[(Retained source files)]
+  Researcher --> Atlas["Research Atlas<br/>(React browser / Mac app)"]
+  Atlas <--> API["Review and<br/>command API"]
+  API <--> Host["Persistent<br/>research host"]
+  Host <--> Board["Shared evidence<br/>and peer requests"]
+  Board <--> Peers["Collaborating<br/>research agents"]
+  Peers --> Tools["Literature discovery<br/>and source-reading tools"]
+  Host --> State[(Versioned records)]
+  Host --> Evidence[(Immutable source<br/>and result files)]
 ```
 
 | Layer | Technology and role |
