@@ -9,7 +9,7 @@ evidence into **Research Atlas**, a visual workspace for following research from
 the initial question to source passages, peer exchanges, and evolving findings.
 The aim is to make complex research easier to pursue, inspect, and extend over time.
 
-**Explore:** [The problem](#the-problem) · [The solution](#the-solution) · [How it works](#how-it-works) · [Capabilities](#current-capabilities) · [Run locally](#run-locally) · [Documentation](#documentation)
+**Explore:** [The problem](#the-problem) · [The solution](#the-solution) · [How it works](#how-it-works) · [Capabilities](#current-capabilities) · [Run locally](#run-locally) · [Architecture](#architecture-at-a-glance) · [Read and extend](#read-and-extend)
 
 ![Research Atlas work overview showing source reading, tool lookups, peer exchanges, and saved activity across two agents](docs/assets/research-atlas-work-overview.png)
 
@@ -114,7 +114,7 @@ the selected provider and launch the host. The current text research adapter
 uses Groq's `openai/gpt-oss-120b`. The guide covers credentials, saved workspaces,
 peer selection, follow-ups, and browser or native connections.
 
-## Architecture
+## Architecture at a glance
 
 ```mermaid
 flowchart LR
@@ -145,7 +145,7 @@ figure understanding, longer research workflows, and a persistent service for
 ongoing use. The central aim remains the same: collaborative research that grows
 more useful over time while keeping its evidence and decisions accessible.
 
-## Documentation
+## Read and extend
 
 | I want to… | Start here |
 | --- | --- |
