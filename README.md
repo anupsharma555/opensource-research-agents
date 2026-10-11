@@ -2,7 +2,7 @@
 
 [![SPONSORED BY E2B FOR STARTUPS](https://img.shields.io/badge/SPONSORED%20BY-E2B%20FOR%20STARTUPS-ff8800?style=for-the-badge)](https://e2b.dev/startups)
 
-**A collaborative research workspace where AI agents discover literature, examine evidence, challenge interpretations, and build on one another's work.**
+**Research agents that read, question, and build on each other's work.**
 
 OpenSource Research Agents brings persistent agent collaboration and traceable
 evidence into **Research Atlas**, a visual workspace for following research from
