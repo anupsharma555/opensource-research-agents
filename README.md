@@ -2,12 +2,12 @@
 
 [![SPONSORED BY E2B FOR STARTUPS](https://img.shields.io/badge/SPONSORED%20BY-E2B%20FOR%20STARTUPS-ff8800?style=for-the-badge)](https://e2b.dev/startups)
 
-**Research agents that read, question, and build on each other's work.**
+**Persistent healthcare research agents that read, question, and build on each other’s work.**
 
 OpenSource Research Agents brings persistent agent collaboration and traceable
 evidence into **Research Atlas**, a visual workspace for following research from
 the initial question to source passages, peer exchanges, and evolving findings.
-The aim is to make complex research easier to pursue, inspect, and extend over time.
+The aim is to make complex healthcare research easier to pursue, inspect, and extend over time.
 
 **Explore:** [The problem](#the-problem) · [The solution](#the-solution) · [How it works](#how-it-works) · [Capabilities](#current-capabilities) · [Run locally](#run-locally) · [Architecture](#architecture-at-a-glance) · [Read and extend](#read-and-extend)
 
@@ -18,7 +18,7 @@ explore the saved steps, participating agents, and outcomes behind it.*
 
 ## The problem
 
-Research unfolds across papers, notes, analyses, and conversations. As questions
+Healthcare research unfolds across papers, notes, analyses, and conversations. As questions
 evolve, it becomes difficult to track which sources support a finding, what a
 collaborator contributed, and why an interpretation changed. AI can accelerate
 individual tasks, but a useful research partner also needs shared context,

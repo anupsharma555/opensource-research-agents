@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "opensource-research-agents"
 version = "0.1.0"
-description = "A shared workspace for research agents to discover literature, compare evidence, and build on each other's work."
+description = "Persistent healthcare research agents for literature discovery, evidence synthesis, and peer review in a shared visual workspace."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = ["pydantic==2.13.5"]
