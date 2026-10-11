@@ -14,6 +14,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState(
 describe('recorded Stage 3 entry', () => {
   it('fetches only its fixed snapshot and distinguishes callbacks from research output', async () => {
     window.history.replaceState(null, '', '/?recorded=stage3&path=https://example.test/untrusted.json');
+    const user = userEvent.setup();
     const fetcher = vi.fn(async () => Response.json(snapshot));
     vi.stubGlobal('fetch', fetcher);
     render(<App />);
@@ -28,9 +29,17 @@ describe('recorded Stage 3 entry', () => {
     expect(snapshot.artifacts).toEqual([]);
     expect(snapshot.inspection?.acceptedOutputReferences).toEqual([]);
     expect(snapshot.attempts.every(attempt => attempt.selectedModel === null)).toBe(true);
+    await user.click(screen.getByRole('button', { name: 'Activity' }));
+    await user.click(screen.getByText('Browse all saved work steps'));
+    expect(screen.getByText('Browse all saved work steps').closest('details')).toHaveAttribute('open');
     const timeline = screen.getByRole('group', { name: 'Recorded agent attempts' });
     expect(within(timeline).getAllByRole('button')).toHaveLength(3);
-    for (const attempt of snapshot.attempts) expect(within(timeline).getByText(attempt.resultSummary!)).toBeVisible();
+    for (const [index, attempt] of [...snapshot.attempts].sort((a, b) => a.startedAt.localeCompare(b.startedAt)).entries()) {
+      const row = within(timeline).getByRole('button', { name: new RegExp(`^Open work step ${index + 1}:`) }).closest('.agent-step')!;
+      expect(row.querySelector('.agent-step-details')).not.toHaveAttribute('open');
+      await user.click(within(row as HTMLElement).getByRole('button', { name: new RegExp(`^Open work step ${index + 1}:`) }));
+      expect(within(row as HTMLElement).getByText(attempt.resultSummary!)).toBeVisible();
+    }
   });
 
   it('opens exact synthetic inputs, callback diagnostics and saved steps while peer work remains unanswered', async () => {
@@ -41,15 +50,25 @@ describe('recorded Stage 3 entry', () => {
     expect(within(input).getByText('Inspect a synthetic evidence packet')).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Communication' }));
     const unanswered = screen.getByRole('article', { name: 'Peer request stage3-question' });
-    expect(within(unanswered).getByText('No answer reference saved')).toBeVisible();
-    expect(within(unanswered).getByText('Recipient acknowledgment').closest('div')).toHaveTextContent('Recorded');
+    expect(within(within(unanswered).getByRole('list', { name: 'Saved request, answer and review' })).getByText('No reply recorded')).toBeVisible();
+    const unansweredHistory = within(unanswered).getByText('Delivery history and exact records').closest('details')!;
+    expect(unansweredHistory).not.toHaveAttribute('open');
+    await user.click(within(unansweredHistory).getByText('Delivery history and exact records'));
+    expect(within(unansweredHistory).getByText('Recipient acknowledgment').closest('div')).toHaveTextContent('Recorded');
+    await user.click(screen.getByRole('button', { name: /Open exchange 2:/ }));
     const partial = screen.getByRole('article', { name: 'Peer request stage3-partial-review' });
-    expect(within(partial).getByText(/Partial answer submitted/)).toBeVisible();
-    expect(within(partial).getByText('Requester review').closest('div')).toHaveTextContent('Not recorded');
-    expect(screen.getByRole('region', { name: 'Retained dissent' })).toHaveTextContent('no study passage to appraise');
+    const partialSteps = within(partial).getByRole('list', { name: 'Saved request, answer and review' });
+    expect(within(partialSteps).getByText('Partial answer submitted')).toBeVisible();
+    expect(within(partialSteps).getByText('No review recorded')).toBeVisible();
+    const partialHistory = within(partial).getByText('Delivery history and exact records').closest('details')!;
+    expect(partialHistory).not.toHaveAttribute('open');
+    await user.click(within(partialHistory).getByText('Delivery history and exact records'));
+    expect(within(partialHistory).getByText('Requester review').closest('div')).toHaveTextContent('No review recorded');
     await user.click(screen.getByRole('button', { name: 'Details' }));
+    expect(screen.getByRole('region', { name: 'Retained dissent' })).toHaveTextContent('no study passage to appraise');
     await user.click(screen.getByText(/^Saved work and waits/));
     expect(screen.getByText(/Saved monotonic callback intervals overlap/)).toBeVisible();
+    await user.click(screen.getByText('Detailed saved work records'));
     await user.click(screen.getByText(`Saved agent steps (${snapshot.inspection!.steps!.length})`));
     const step = snapshot.inspection!.steps!.find(item => item.action === 'Execute peer-selected work')!;
     const stepHeading = screen.getByText(`Step ${step.sequence} · ${step.actorName} · ${step.action} · ${step.outcome}`);
@@ -60,11 +79,33 @@ describe('recorded Stage 3 entry', () => {
     await user.click(within(records).getAllByText('Executor artifact')[0]);
     expect(within(records).getByText('recorded_callback_result')).toBeVisible();
     expect(within(records).getByText('Saved result content is separate from this diagnostic overview')).toBeVisible();
+    await user.click(screen.getByText('All work steps in this run'));
     await user.click(screen.getByText(/Task and request records without an agent attempt/));
     expect(screen.getByText(/Resolve the remaining synthetic evidence gap · no attempt recorded/)).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Attempt records' }));
+    await user.click(screen.getByRole('button', { name: 'Work step records' }));
+    await user.click(screen.getByText('Exact identity, timing, model and skills'));
+    await user.click(screen.getByText('Execution and configuration records'));
     expect(screen.getByRole('region', { name: 'Execution diagnostics' })).toBeVisible();
     expect(screen.queryByText(/private reasoning was not requested/i)).not.toBeInTheDocument();
+  });
+
+  it('opens the referenced task and exact request even when Details already shows that task', async () => {
+    const user = userEvent.setup();
+    render(<ResearchApp snapshot={snapshot} />);
+    await user.click(screen.getByRole('button', { name: 'Communication' }));
+    await user.click(screen.getByRole('button', { name: /Open exchange 2:/ }));
+    const partial = screen.getByRole('article', { name: 'Peer request stage3-partial-review' });
+    await user.click(within(partial).getByRole('button', { name: 'Open related task →' }));
+    const task = document.getElementById('selected-task')!;
+    expect(task).toHaveFocus();
+    expect(task).toHaveTextContent('Resolve the remaining synthetic evidence gap');
+    expect(task).toHaveTextContent('Opened from peer request stage3-partial-review');
+    expect(task).toHaveTextContent('No agent attempt is recorded for this task');
+    expect(task).toHaveTextContent('Opened from exact work version 1');
+    await user.click(screen.getByRole('button', { name: '← Return to Communication' }));
+    await user.click(screen.getByRole('button', { name: /Open exchange 2:/ }));
+    await user.click(within(screen.getByRole('article', { name: 'Peer request stage3-partial-review' })).getByRole('button', { name: 'Open related task →' }));
+    expect(document.getElementById('selected-task')).toHaveFocus();
   });
 
   it('offers an explicit Stage 3 entry without replacing the Stage 2 entry', async () => {

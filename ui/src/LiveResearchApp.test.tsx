@@ -46,7 +46,7 @@ function snapshot(version = 1): ResearchSnapshot {
 }
 
 function liveState(current: ResearchSnapshot | null, comparison: ResearchSnapshot | null = null) {
-  return { enabled: true, model: 'openai/gpt-oss-120b', agents, runs: current ? [{ id: current.mission.version === 1 ? 'run-1' : 'run-2', question: current.mission.question, status: 'running', parentRunId: current.mission.version === 1 ? null : 'run-1' }] : [], snapshot: current, comparisonSnapshot: comparison, runId: current ? current.mission.version === 1 ? 'run-1' : 'run-2' : null, error: null };
+  return { enabled: true, model: 'openai/gpt-oss-120b', agents, runs: current ? [{ id: current.mission.version === 1 ? 'run-1' : 'run-2', question: current.mission.question, status: 'running', parentRunId: current.mission.version === 1 ? null : 'run-1', agentIds: ['agent-synthesis'] }] : [], snapshot: current, comparisonSnapshot: comparison, runId: current ? current.mission.version === 1 ? 'run-1' : 'run-2' : null, error: null };
 }
 
 function mockService(initial: ResearchSnapshot | null) {
@@ -85,8 +85,17 @@ function activityCard(agent: string, action: string): HTMLElement {
   return matches[0];
 }
 
+function timelineStep(startedAt: string): HTMLElement {
+  const timeline = screen.getByRole('group', { name: 'Recorded agent attempts' });
+  const step = [...timeline.querySelectorAll<HTMLElement>('.agent-step')].find(item =>
+    item.querySelector('.agent-step-times time')?.getAttribute('dateTime') === startedAt);
+  expect(step).toBeDefined();
+  return step!;
+}
+
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   window.history.replaceState(null, '', '/');
@@ -98,7 +107,7 @@ describe('live review', () => {
     const service = mockService(snapshot(1));
     render(<LiveResearchApp />);
     const examples = await screen.findByRole('region', { name: 'Recorded coordination examples' });
-    expect(within(examples).getByRole('link', { name: 'Open shared contribution review' })).toHaveAttribute('href', '/?recorded=stage3&review=contributions');
+    expect(within(examples).getByRole('link', { name: 'Open shared contribution review' })).toHaveAttribute('href', '/?recorded=stage3&review=contributions&returnRunId=run-1');
     expect(within(examples).getByText(/separate from your live runs/)).toBeVisible();
     expect(screen.getByRole('button', { name: 'Open saved run' })).toBeVisible();
     expect(service.requests).toHaveLength(0);
@@ -109,6 +118,63 @@ describe('live review', () => {
     const service = mockService(snapshot(1));
     render(<LiveResearchApp />);
     expect(await screen.findByRole('heading', { name: title })).toBeVisible();
+    expect(service.requests).toHaveLength(0);
+  });
+
+  it.each([
+    ['overview', 'Research review'],
+    ['activity', 'Activity'],
+    ['communication', 'Communication'],
+    ['work', 'Details'],
+    ['evidence', 'Evidence'],
+    ['diagnostics', 'Details'],
+    ['compare', 'Compare'],
+  ])('restores the %s review view for the selected run on reload', async (view, navigationLabel) => {
+    window.history.replaceState(null, '', `/live?view=${view}&runId=run-1`);
+    const service = mockService(snapshot(1));
+    const expectSelectedView = async () => {
+      expect(await screen.findByRole('button', { name: navigationLabel })).toHaveAttribute('aria-current', 'page');
+      if (view === 'diagnostics') expect(screen.getByRole('button', { name: 'Work step records' })).toHaveAttribute('aria-pressed', 'true');
+      if (view === 'work') expect(screen.getByRole('button', { name: 'Task records' })).toHaveAttribute('aria-pressed', 'true');
+    };
+    const mounted = render(<LiveResearchApp />);
+    await expectSelectedView();
+    mounted.unmount();
+    render(<LiveResearchApp />);
+    await expectSelectedView();
+    expect(new URLSearchParams(window.location.search).get('runId')).toBe('run-1');
+    expect(service.requests).toHaveLength(0);
+  });
+
+  it('keeps the selected run and screen together across navigation and a saved-state poll', async () => {
+    window.history.replaceState(null, '', '/live?view=history&runId=run-1');
+    const service = mockService(snapshot(1));
+    const user = userEvent.setup();
+    const replace = vi.spyOn(window.history, 'replaceState');
+    const push = vi.spyOn(window.history, 'pushState');
+    render(<LiveResearchApp />);
+    await screen.findByRole('heading', { name: 'Saved runs' });
+    await user.click(screen.getByRole('button', { name: 'Communication' }));
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get('view')).toBe('communication'));
+    expect(new URLSearchParams(window.location.search).get('runId')).toBe('run-1');
+    const replacementsAfterNavigation = replace.mock.calls.length;
+    const updated = snapshot(1);
+    updated.snapshotId = 'snapshot-after-poll';
+    updated.messages = snapshot(2).messages;
+    service.update(updated);
+    expect((await screen.findAllByText('Mira returned a critique of the initial answer.', {}, { timeout: 3000 })).length).toBeGreaterThan(0);
+    expect(replace).toHaveBeenCalledTimes(replacementsAfterNavigation);
+    expect(push).not.toHaveBeenCalled();
+    expect(service.requests).toHaveLength(0);
+  });
+
+  it('falls back from an unsupported view without changing the selected run or submitting work', async () => {
+    window.history.replaceState(null, '', '/live?view=unknown&runId=run-1');
+    const service = mockService(snapshot(1));
+    render(<LiveResearchApp />);
+    expect(await screen.findByRole('button', { name: 'Research review' })).toHaveAttribute('aria-current', 'page');
+    expect(new URLSearchParams(window.location.search).get('view')).toBe('overview');
+    expect(new URLSearchParams(window.location.search).get('runId')).toBe('run-1');
     expect(service.requests).toHaveLength(0);
   });
 
@@ -128,17 +194,20 @@ describe('live review', () => {
     await user.click(screen.getByRole('button', { name: 'Activity' }));
     const failedCard = activityCard('Mira', 'failed attempt');
     expect(within(failedCard).queryByText(/Mira responded to Sage/)).not.toBeInTheDocument();
-    expect(within(failedCard).getByText(/not its uniquely verified match/)).toBeInTheDocument();
+    await user.click(within(failedCard).getByRole('button', { name: 'Expand activity details' }));
+    expect(within(failedCard).queryByRole('heading', { name: 'Delivered peer reply' })).not.toBeInTheDocument();
+    expect(within(failedCard).queryByText(ask.summary)).not.toBeInTheDocument();
     const completedCard = activityCard('Mira', 'saved result');
-    expect(within(completedCard).getByRole('heading', { name: 'Delivered peer reply' })).toBeInTheDocument();
-    expect(within(completedCard).getByText('responded to Sage')).toBeInTheDocument();
-    expect([...completedCard.querySelectorAll('.activity-attribution p')].filter(item => item.textContent?.includes(reply.summary))).toHaveLength(1);
+    await user.click(within(completedCard).getByRole('button', { name: 'Expand activity details' }));
+    expect(within(completedCard).queryByRole('heading', { name: 'Delivered peer reply' })).not.toBeInTheDocument();
+    expect(within(completedCard).queryByText(ask.summary)).not.toBeInTheDocument();
+    expect([...completedCard.querySelectorAll('.step-result-preview p')].filter(item => item.textContent?.includes(reply.summary))).toHaveLength(1);
     await user.click(screen.getByRole('button', { name: 'Messages' }));
     const replyCard = activityCard('Mira', 'responded to Sage');
     expect(within(replyCard).getByText(reply.summary)).toBeInTheDocument();
   });
 
-  it('shows Sage, Mira, then Sage as current attempts with traceable request and reply', async () => {
+  it('shows chronological work with optional agent grouping while preserving exact steps and separate peer messages', async () => {
     const parent = snapshot(1);
     const prior = { ...parent.attempts[0], id: 'attempt-parent', startedAt: '2026-10-08T14:00:00Z', endedAt: '2026-10-08T14:00:10Z' };
     parent.attempts = [prior];
@@ -165,22 +234,33 @@ describe('live review', () => {
     current.messages = [ask, reply];
     const user = userEvent.setup();
     render(<ResearchApp snapshot={current} comparisonSnapshot={parent} live={{ runId: 'run-current', model: 'test-model', runs: [], error: null, form: null, requestedAgentIds: ['agent-synthesis'], onSelectRun: () => {} }} />);
+    await user.click(screen.getByRole('button', { name: 'Activity' }));
+    await user.click(screen.getByText('Browse all saved work steps'));
+    expect(screen.getByText('Browse all saved work steps').closest('details')).toHaveAttribute('open');
     const reviewTimeline = screen.getByRole('group', { name: 'Recorded agent attempts' });
-    expect(within(reviewTimeline).getAllByRole('button').map(button => button.querySelector('.contribution-label .agent-badge span:last-child')?.textContent)).toEqual(['Agent Sage', 'Agent Mira', 'Agent Sage']);
-    expect(within(reviewTimeline).getByText('<1 min')).toBeInTheDocument();
-    expect(within(reviewTimeline).queryByText('+30 min')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Include parent history (1 attempt)' }));
-    expect(within(reviewTimeline).getAllByRole('button')).toHaveLength(4);
-    expect(screen.getByText(/No recorded work in this branch between/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Hide parent history' }));
-    await user.click(within(reviewTimeline).getByRole('button', { name: /Mira; completed/ }));
-    const miraCard = screen.getByRole('article', { name: 'Review of Mira · initial attempt' });
-    expect(within(miraCard).getByText('Please verify the inference.')).toBeInTheDocument();
+    expect(within(reviewTimeline.closest('.recorded-work-timeline') as HTMLElement).getByRole('button', { name: 'Time order' })).toHaveAttribute('aria-pressed', 'true');
+    expect([...reviewTimeline.querySelectorAll('.agent-step')].map(step => step.querySelector('.agent-step-times time')?.getAttribute('dateTime'))).toEqual([sageFirst.startedAt, mira.startedAt, sageResumed.startedAt]);
+    expect([...reviewTimeline.querySelectorAll('.agent-step')].map(step => step.querySelector('.agent-badge span:last-child')?.textContent)).toEqual(['Agent Sage', 'Agent Mira', 'Agent Sage']);
+    expect(reviewTimeline.querySelector('.agent-time-axis')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'By agent' }));
+    expect([...reviewTimeline.querySelectorAll('.agent-lane')].map(lane => lane.querySelector('.agent-badge span:last-child')?.textContent)).toEqual(['Agent Sage', 'Agent Mira']);
+    expect(reviewTimeline.querySelector('.agent-time-axis')).toHaveTextContent('<1 min');
+    expect(reviewTimeline.querySelector('.agent-time-axis')).not.toHaveTextContent('+30 min');
+    expect(timelineStep(sageFirst.startedAt).querySelector('time')).toHaveAttribute('dateTime', sageFirst.startedAt);
+    expect(timelineStep(sageResumed.startedAt).querySelector('time')).toHaveAttribute('dateTime', sageResumed.startedAt);
+    await user.click(screen.getByRole('button', { name: 'Include work from the earlier run (1 step)' }));
+    expect(within(reviewTimeline).getAllByRole('button', { name: /^Open work step/ })).toHaveLength(4);
+    expect(timelineStep(prior.startedAt)).toHaveTextContent('earlier run');
+    await user.click(screen.getByRole('button', { name: 'Hide work from the earlier run' }));
+    await user.click(within(timelineStep(mira.startedAt)).getByRole('button', { name: /^Open work step/ }));
+    const miraCard = timelineStep(mira.startedAt);
     expect(within(miraCard).getAllByText(/The inference exceeds the supplied evidence/).length).toBeGreaterThan(0);
-    await user.click(within(reviewTimeline).getByRole('button', { name: /Sage; completed;.*No tool action saved/ }));
-    expect(screen.getByRole('article', { name: 'Review of Sage · resumed attempt' })).toHaveTextContent('Sage revised the answer after Mira replied.');
+    expect(within(miraCard).queryByText('Please verify the inference.')).not.toBeInTheDocument();
+    await user.click(within(timelineStep(sageResumed.startedAt)).getByRole('button', { name: /^Open work step/ }));
+    expect(timelineStep(sageResumed.startedAt).querySelector('.selected-work-step')).toHaveTextContent('Sage revised the answer after Mira replied.');
     await user.click(screen.getByRole('button', { name: 'Details' }));
-    expect(within(screen.getByRole('group', { name: 'Recorded agent attempts' })).getAllByRole('button')).toHaveLength(3);
+    await user.click(screen.getByText('All work steps in this run'));
+    expect(within(screen.getByRole('group', { name: 'Recorded agent attempts' })).getAllByRole('button', { name: /^Open work step/ })).toHaveLength(3);
     await user.click(screen.getByText('Task and request records without an agent attempt (1)'));
     expect(screen.getByText(/Aggregate request record · no attempt recorded/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Activity' }));
@@ -189,12 +269,13 @@ describe('live review', () => {
     expect(screen.getAllByText('Sage completed work.').length).toBeGreaterThan(0);
     await user.click(screen.getByRole('button', { name: 'Agent work' }));
     const miraActivity = activityCard('Mira', 'saved result');
-    expect([...miraActivity.querySelectorAll('.activity-attribution p')].filter(item => item.textContent?.includes('The inference exceeds the supplied evidence.'))).toHaveLength(1);
-    expect(within(miraActivity).getByRole('heading', { name: 'Peer request' })).toBeInTheDocument();
-    expect(within(miraActivity).getByText('asked Mira')).toBeInTheDocument();
-    expect(screen.getAllByText('Please verify the inference.').length).toBeGreaterThan(0);
-    expect(within(miraActivity).getByRole('heading', { name: 'Delivered peer reply' })).toBeInTheDocument();
-    expect(within(miraActivity).getByText('responded to Sage')).toBeInTheDocument();
+    await user.click(within(miraActivity).getByRole('button', { name: 'Expand activity details' }));
+    expect([...miraActivity.querySelectorAll('.step-result-preview p')].filter(item => item.textContent?.includes('The inference exceeds the supplied evidence.'))).toHaveLength(1);
+    expect(within(miraActivity).queryByRole('heading', { name: 'Peer request' })).not.toBeInTheDocument();
+    expect(within(miraActivity).queryByRole('heading', { name: 'Delivered peer reply' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Messages' }));
+    const replyCard = activityCard('Mira', 'responded to Sage');
+    expect(within(replyCard).getByText(reply.summary)).toBeInTheDocument();
     expect(screen.getAllByText('The inference exceeds the supplied evidence.').length).toBeGreaterThan(0);
     expect(screen.queryByText('Mira · Please verify the inference.')).not.toBeInTheDocument();
   });
@@ -245,7 +326,7 @@ describe('live review', () => {
     await user.click(screen.getByRole('button', { name: 'Start or follow up' }));
     await user.type(screen.getByLabelText('Research question or follow-up'), 'Review new evidence.');
     await user.type(screen.getByLabelText('Pasted source evidence'), 'New supplied note.');
-    await user.click(screen.getByRole('button', { name: 'Start real run' }));
+    await user.click(screen.getByRole('button', { name: 'Start research' }));
     await user.click(screen.getByRole('button', { name: 'Research review' }));
     expect(await screen.findByText('Newly saved answer from the command.')).toBeInTheDocument();
     const checkedAfterCommand = document.querySelectorAll('.live-freshness time')[1]?.getAttribute('datetime');
@@ -306,27 +387,140 @@ describe('live review', () => {
   it('retries the exact frozen follow-up after the visible run advances', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn(async (_request: LiveStartRequest | LiveFollowupRequest) => {});
-    const firstProps = { agents, snapshot: snapshot(1), runId: 'run-1', receipt: null, receiptAgentIds: [], submitting: false, error: null, onSubmit };
+    const firstProps = { agents, snapshot: snapshot(1), runId: 'run-1', parentAgentIds: [agents[0].id], parentRequiredAgentIds: [agents[0].id], receipt: null, receiptAgentIds: [], submitting: false, error: null, onSubmit };
     const { rerender } = render(<LiveRequestForm {...firstProps} />);
-    await user.click(screen.getByRole('button', { name: 'Follow up on exact work' }));
+    await user.click(screen.getByRole('button', { name: 'Follow up on saved work' }));
+    expect(screen.getByRole('checkbox', { name: "Wait for Sage's contribution before completing this request" })).toBeChecked();
     await user.type(screen.getByLabelText('Research question or follow-up'), 'Critique the saved report.');
-    await user.selectOptions(screen.getByLabelText('Exact saved target'), 'report-live-v1:1');
-    await user.click(screen.getByRole('button', { name: 'Submit exact follow-up' }));
+    await user.selectOptions(screen.getByLabelText('Work to continue'), 'report-live-v1:1');
+    await user.click(screen.getByRole('button', { name: 'Submit follow-up' }));
     const firstRequest = onSubmit.mock.calls[0][0];
-    expect(firstRequest).toMatchObject({ parentRunId: 'run-1', parentSnapshotId: 'snapshot-live-v1', targetId: 'report-live-v1', targetVersion: 1 });
+    expect(firstRequest).toMatchObject({ parentRunId: 'run-1', parentSnapshotId: 'snapshot-live-v1', targetId: 'report-live-v1', targetVersion: 1, requiredAgentIds: ['agent-synthesis'] });
 
     rerender(<LiveRequestForm {...firstProps} snapshot={snapshot(2)} runId="run-2" error="Previous response uncertain" />);
-    expect(screen.getByText(/Parent snapshot snapshot-live-v1 · pending retry remains pinned/)).toBeInTheDocument();
-    expect(screen.getByLabelText('Exact saved target')).toHaveValue('report-live-v1:1');
+    expect(screen.getByText(/Retrying keeps the same saved work and version/)).toBeInTheDocument();
+    expect(screen.getByText('Saved view ID: snapshot-live-v1')).toBeInTheDocument();
+    expect(screen.getByLabelText('Work to continue')).toHaveValue('report-live-v1:1');
     await user.click(screen.getByRole('button', { name: 'Retry same request' }));
     expect(onSubmit).toHaveBeenCalledTimes(2);
     expect(onSubmit.mock.calls[1][0]).toEqual(firstRequest);
 
     await user.type(screen.getByLabelText('Research question or follow-up'), ' Recheck.');
-    await user.selectOptions(screen.getByLabelText('Exact saved target'), 'report-live-v2:2');
-    await user.click(screen.getByRole('button', { name: 'Submit exact follow-up' }));
+    expect(screen.getByRole('button', { name: 'Submit follow-up' })).toBeDisabled();
+    expect(screen.getByText(/This draft belongs to another run/)).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Continue from selected run' }));
+    expect(screen.getByLabelText('Work to continue')).toHaveValue('');
+    await user.selectOptions(screen.getByLabelText('Work to continue'), 'report-live-v2:2');
+    await user.click(screen.getByRole('button', { name: 'Submit follow-up' }));
     expect(onSubmit.mock.calls[2][0]).toMatchObject({ parentRunId: 'run-2', parentSnapshotId: 'snapshot-live-v2', targetId: 'report-live-v2', targetVersion: 2 });
     expect(onSubmit.mock.calls[2][0].requestId).not.toBe(firstRequest.requestId);
+  });
+
+  it('labels saved follow-up targets by their recorded titles without changing exact identities', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn(async (_request: LiveStartRequest | LiveFollowupRequest) => {});
+    const parent = snapshot(1);
+    parent.artifacts[0].title = 'Saved contribution title';
+    parent.sources[0].title = 'Saved source title';
+    parent.tasks.push({ ...parent.tasks[0], id: 'task-second', title: parent.tasks[0].title });
+    render(<LiveRequestForm agents={agents} snapshot={parent} runId="run-1" parentAgentIds={[agents[0].id]} receipt={null} receiptAgentIds={[]} submitting={false} error={null} onSubmit={onSubmit} />);
+    await user.click(screen.getByRole('button', { name: 'Follow up on saved work' }));
+
+    const target = screen.getByLabelText('Work to continue');
+    expect(within(target).getByRole('option', { name: 'Report · Saved contribution title · v1 · saved ID report-live-v1' })).toHaveValue('report-live-v1:1');
+    expect(within(target).getByRole('option', { name: `Source · Saved source title · v${parent.sources[0].version} · saved ID source-live` })).toHaveValue(`source-live:${parent.sources[0].version}`);
+    expect(within(target).getByRole('option', { name: /Task · Analyze supplied observation · .*saved ID task-live/ })).toHaveValue('task-live:1');
+    expect(within(target).getByRole('option', { name: /Task · Analyze supplied observation · .*saved ID task-second/ })).toHaveValue('task-second:1');
+
+    await user.type(screen.getByLabelText('Research question or follow-up'), 'Check the saved contribution.');
+    await user.selectOptions(target, 'report-live-v1:1');
+    await user.click(screen.getByRole('button', { name: 'Submit follow-up' }));
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ parentSnapshotId: parent.snapshotId, targetId: 'report-live-v1', targetVersion: 1 });
+  });
+
+  it('describes queued on a receipt as the historical acceptance status', () => {
+    const completed = snapshot(1);
+    completed.mission.status = 'completed';
+    const onSubmit = vi.fn(async (_request: LiveStartRequest | LiveFollowupRequest) => {});
+    render(<LiveRequestForm agents={agents} snapshot={completed} runId="run-1" receipt={{ requestId: 'request-1', runId: 'run-1', taskId: 'task-live', status: 'queued' }} receiptAgentIds={[agents[0].id]} submitting={false} error={null} onSubmit={onSubmit} />);
+    const receipt = screen.getByText('Request accepted for run run-1').closest('.receipt-card');
+    expect(receipt).not.toBeNull();
+    expect(within(receipt as HTMLElement).getByText('Status when request was accepted: queued.')).toBeVisible();
+    expect(within(receipt as HTMLElement).queryByText(/currently queued/i)).not.toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('allows a question-only start only when the selected workflow exposes retrieval', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn(async (_request: LiveStartRequest | LiveFollowupRequest) => {});
+    render(<LiveRequestForm agents={agents} snapshot={null} runId={null} retrievalRoutes={['publication-search']} receipt={null} receiptAgentIds={[]} submitting={false} error={null} onSubmit={onSubmit} />);
+    await user.type(screen.getByLabelText('Research question or follow-up'), 'Find a source for this question.');
+    expect(screen.getByRole('button', { name: 'Start research' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Start research' }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ question: 'Find a source for this question.', agentIds: ['agent-synthesis'] }));
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty('evidenceText');
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty('requiredAgentIds');
+  });
+
+  it('requires only the explicitly selected starting peer before scope completion', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn(async (_request: LiveStartRequest | LiveFollowupRequest) => {});
+    render(<LiveRequestForm agents={agents} snapshot={null} runId={null} retrievalRoutes={['publication-search']} receipt={null} receiptAgentIds={[]} submitting={false} error={null} onSubmit={onSubmit} />);
+    await user.click(screen.getByRole('checkbox', { name: /Mira.*Independent critique/ }));
+    await user.click(screen.getByRole('checkbox', { name: "Wait for Mira's contribution before completing this request" }));
+    await user.type(screen.getByLabelText('Research question or follow-up'), 'Compare independent interpretations.');
+    await user.click(screen.getByRole('button', { name: 'Start research' }));
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      agentIds: ['agent-synthesis', 'agent-critique'], requiredAgentIds: ['agent-critique'],
+    });
+  });
+
+  it('shows roster model and saved configuration without selecting an unavailable peer', async () => {
+    const user = userEvent.setup();
+    const roster = [
+      { ...agents[0], model: 'selected-model', roleTemplateId: 'synthesis-role', configurationReference: { kind: 'agent_configuration', id: 'config-sage', version: 2 }, availability: 'available' },
+      { id: 'later-peer', name: 'Finch', role: 'Methods review', skillVersion: 'methods@2', model: 'selected-model', availability: 'unavailable', unavailableReason: 'No current grant' },
+    ];
+    const onSubmit = vi.fn(async (_request: LiveStartRequest | LiveFollowupRequest) => {});
+    render(<LiveRequestForm agents={roster} snapshot={null} runId={null} retrievalRoutes={['publication-search']} receipt={null} receiptAgentIds={[]} submitting={false} error={null} onSubmit={onSubmit} />);
+    await user.click(screen.getByText("Inspect Sage's model and skills"));
+    expect(screen.getByText('config-sage · v2')).toBeVisible();
+    expect(screen.getByText(/exact agent settings are not included in this saved view/)).toBeVisible();
+    expect(screen.getByRole('checkbox', { name: /Finch/ })).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: /Sage.*Evidence synthesis/ })).toBeChecked();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('lets a follow-up explicitly remove a now unavailable saved parent peer', async () => {
+    const user = userEvent.setup();
+    const roster = [agents[0], { ...agents[1], availability: 'unavailable', unavailableReason: 'No current grant' }];
+    const onSubmit = vi.fn(async (_request: LiveStartRequest | LiveFollowupRequest) => {});
+    render(<LiveRequestForm agents={roster} snapshot={snapshot(1)} runId="run-1" parentAgentIds={[agents[1].id]} parentRequiredAgentIds={[agents[1].id]} receipt={null} receiptAgentIds={[]} submitting={false} error={null} onSubmit={onSubmit} />);
+    await user.click(screen.getByRole('button', { name: 'Follow up on saved work' }));
+    expect(screen.getByRole('checkbox', { name: "Wait for Mira's contribution before completing this request" })).toBeChecked();
+    await user.click(screen.getByRole('button', { name: 'Remove unavailable Mira from this request' }));
+    expect(screen.queryByRole('checkbox', { name: "Wait for Mira's contribution before completing this request" })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Submit follow-up' })).toBeDisabled();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('restores a local browser draft after leaving and returning to a workspace', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn(async (_request: LiveStartRequest | LiveFollowupRequest) => {});
+    const props = { agents, snapshot: snapshot(1), runId: 'run-1', workspaceId: 'test-draft-workspace', parentAgentIds: [agents[0].id], parentRequiredAgentIds: [agents[0].id], receipt: null, receiptAgentIds: [], submitting: false, error: null, onSubmit };
+    window.sessionStorage.removeItem('atlas-live-draft:test-draft-workspace');
+    const view = render(<LiveRequestForm {...props} />);
+    await user.click(screen.getByRole('button', { name: 'Follow up on saved work' }));
+    await user.type(screen.getByLabelText('Research question or follow-up'), 'Check the saved claim.');
+    await user.selectOptions(screen.getByLabelText('Work to continue'), 'report-live-v1:1');
+    view.unmount();
+    render(<LiveRequestForm {...props} />);
+    expect(screen.getByLabelText('Research question or follow-up')).toHaveValue('Check the saved claim.');
+    expect(screen.getByLabelText('Work to continue')).toHaveValue('report-live-v1:1');
+    expect(screen.getByRole('checkbox', { name: "Wait for Sage's contribution before completing this request" })).toBeChecked();
+    expect(screen.getByRole('button', { name: 'Submit follow-up' })).toBeEnabled();
+    expect(onSubmit).not.toHaveBeenCalled();
+    window.sessionStorage.removeItem('atlas-live-draft:test-draft-workspace');
   });
 
   it('exchanges the launch token once before state reads, including in Strict Mode', async () => {
@@ -354,10 +548,10 @@ describe('live review', () => {
     render(<LiveResearchApp />);
     await screen.findByRole('heading', { name: 'Start a research task' });
     await user.type(screen.getByLabelText('Research question or follow-up'), 'What does this observation show?');
-    await user.type(screen.getByLabelText('Scope and constraints'), 'Use the supplied text.');
+    await user.type(screen.getByLabelText('Additional instructions'), 'Use the supplied text.');
     await user.type(screen.getByLabelText('Pasted source evidence'), 'Observed response was 8 of 20.');
     await user.click(screen.getByRole('checkbox', { name: /Mira/ }));
-    await user.click(screen.getByRole('button', { name: 'Start real run' }));
+    await user.click(screen.getByRole('button', { name: 'Start research' }));
     await screen.findByText('Initial answer from supplied observation.');
     expect(service.requests[0].path).toBe('/api/live/start');
     expect(service.requests[0].body).toMatchObject({ question: 'What does this observation show?', scope: 'Use the supplied text.', evidenceText: 'Observed response was 8 of 20.', agentIds: ['agent-synthesis', 'agent-critique'] });
@@ -368,7 +562,7 @@ describe('live review', () => {
     await user.click(screen.getByRole('button', { name: 'Evidence' }));
     expect(screen.getByText('Observed response was 8 of 20.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Details' }));
-    await user.click(screen.getByRole('button', { name: 'Attempt records' }));
+    await user.click(screen.getByRole('button', { name: 'Work step records' }));
     expect(await screen.findByText(/Read supplied evidence/)).toBeInTheDocument();
     expect(service.fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/live/calls?runId=run-1&attemptId=attempt-live'), expect.objectContaining({ credentials: 'same-origin' }));
     const refreshed = snapshot(1);
@@ -384,24 +578,102 @@ describe('live review', () => {
     const user = userEvent.setup();
     render(<LiveResearchApp />);
     await screen.findByText('Initial answer from supplied observation.');
-    await waitFor(() => expect(window.location.search).toBe('?runId=run-1'));
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get('runId')).toBe('run-1'));
     await user.click(screen.getByRole('button', { name: 'Start or follow up' }));
-    await user.click(screen.getByRole('button', { name: 'Follow up on exact work' }));
+    await user.click(screen.getByRole('button', { name: 'Follow up on saved work' }));
     await user.type(screen.getByLabelText('Research question or follow-up'), 'Critique this report.');
-    await user.selectOptions(screen.getByLabelText('Exact saved target'), 'report-live-v1:1');
-    await user.click(screen.getByRole('button', { name: 'Submit exact follow-up' }));
+    await user.selectOptions(screen.getByLabelText('Work to continue'), 'report-live-v1:1');
+    await user.click(screen.getByRole('button', { name: 'Submit follow-up' }));
     await waitFor(() => expect(service.requests).toHaveLength(1));
     expect(service.requests[0]).toMatchObject({ path: '/api/live/followups', body: { parentRunId: 'run-1', parentSnapshotId: 'snapshot-live-v1', targetId: 'report-live-v1', targetVersion: 1, question: 'Critique this report.', agentIds: ['agent-synthesis'] } });
     await user.click(screen.getByRole('button', { name: 'Compare' }));
-    expect(await screen.findByText('Revised answer after independent critique.')).toBeInTheDocument();
-    expect(window.location.search).toBe('?runId=run-2');
+    await screen.findByRole('region', { name: 'This follow-up' });
+    await waitFor(() => expect(within(screen.getByRole('region', { name: 'Earlier run' })).getByRole('button', { name: 'Read answer' })).toBeEnabled());
+    expect(new URLSearchParams(window.location.search).get('runId')).toBe('run-2');
     const comparison = screen.getByRole('heading', { name: 'Compare' }).closest<HTMLElement>('.page-stack')!;
-    expect(within(comparison).getByText('Initial answer from supplied observation.')).toBeInTheDocument();
-    expect(within(comparison).getByText('Immutable parent snapshot')).toBeInTheDocument();
-    expect(within(comparison).getByText('Current follow-up snapshot')).toBeInTheDocument();
+    const earlierRun = within(comparison).getByRole('region', { name: 'Earlier run' });
+    const thisFollowup = within(comparison).getByRole('region', { name: 'This follow-up' });
+    await user.click(within(earlierRun).getByRole('button', { name: 'Read answer' }));
+    await user.click(within(thisFollowup).getByRole('button', { name: 'Read answer' }));
+    expect(within(earlierRun).getByText('Initial answer from supplied observation.')).toBeInTheDocument();
+    expect(within(thisFollowup).getByText('Revised answer after independent critique.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Communication' }));
     expect(screen.getAllByText('Mira returned a critique of the initial answer.').length).toBeGreaterThan(0);
     await user.click(screen.getByRole('button', { name: 'Evidence' }));
     expect(screen.getByText('Revised claim')).toBeInTheDocument();
+  });
+
+  it('keeps an accepted but unconfirmed follow-up on the same request identity', async () => {
+    const parent = snapshot(1);
+    const child = snapshot(2);
+    const requests: LiveFollowupRequest[] = [];
+    const acceptedRequestIds = new Set<string>();
+    let current = parent;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path.startsWith('/api/live/state')) return Response.json(liveState(current, current === child ? parent : null));
+      if (path === '/api/live/followups') {
+        const request = JSON.parse(String(init?.body)) as LiveFollowupRequest;
+        requests.push(request);
+        if (!acceptedRequestIds.has(request.requestId)) {
+          acceptedRequestIds.add(request.requestId);
+          return Response.json({ error: 'Saved view could not be published' }, { status: 500 });
+        }
+        current = child;
+        return Response.json({ requestId: requests[0].requestId, runId: 'run-2', taskId: 'task-peer', status: 'queued', reused: true }, { status: 202 });
+      }
+      throw new Error(`Unexpected request ${path}`);
+    }));
+    const user = userEvent.setup();
+    render(<LiveResearchApp />);
+    await screen.findByText('Initial answer from supplied observation.');
+    await user.click(screen.getByRole('button', { name: 'Start or follow up' }));
+    await user.click(screen.getByRole('button', { name: 'Follow up on saved work' }));
+    await user.type(screen.getByLabelText('Research question or follow-up'), 'Recheck this saved report.');
+    await user.selectOptions(screen.getByLabelText('Work to continue'), 'report-live-v1:1');
+    await user.click(screen.getByRole('button', { name: 'Submit follow-up' }));
+
+    expect(await screen.findByText('Request response unconfirmed')).toBeVisible();
+    expect(screen.getByText(/This request may already have been accepted/)).toBeVisible();
+    expect(screen.getByText(`Saved request ID: ${requests[0].requestId}`)).toBeVisible();
+    expect(screen.queryByText('Request accepted for run run-2')).not.toBeInTheDocument();
+    expect(requests).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Retry same request' })).toBeEnabled();
+
+    await user.click(screen.getByRole('button', { name: 'Retry same request' }));
+    await screen.findByText('Request accepted for run run-2');
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toEqual(requests[0]);
+    expect(acceptedRequestIds.size).toBe(1);
+    expect(screen.queryByText('Request response unconfirmed')).not.toBeInTheDocument();
+  });
+
+  it('keeps the saved receipt distinct from a failed view refresh', async () => {
+    const parent = snapshot(1);
+    const requests: LiveFollowupRequest[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/live/state?runId=run-2') return Response.json({ error: 'Snapshot temporarily unavailable' }, { status: 500 });
+      if (path.startsWith('/api/live/state')) return Response.json(liveState(parent));
+      if (path === '/api/live/followups') {
+        requests.push(JSON.parse(String(init?.body)) as LiveFollowupRequest);
+        return Response.json({ requestId: requests[0].requestId, runId: 'run-2', taskId: 'task-peer', status: 'queued' }, { status: 202 });
+      }
+      throw new Error(`Unexpected request ${path}`);
+    }));
+    const user = userEvent.setup();
+    render(<LiveResearchApp />);
+    await screen.findByText('Initial answer from supplied observation.');
+    await user.click(screen.getByRole('button', { name: 'Start or follow up' }));
+    await user.click(screen.getByRole('button', { name: 'Follow up on saved work' }));
+    await user.type(screen.getByLabelText('Research question or follow-up'), 'Recheck this saved report.');
+    await user.selectOptions(screen.getByLabelText('Work to continue'), 'report-live-v1:1');
+    await user.click(screen.getByRole('button', { name: 'Submit follow-up' }));
+
+    expect(await screen.findByText('Saved view unavailable')).toBeVisible();
+    expect(screen.getByText('Request accepted for run run-2')).toBeVisible();
+    expect(screen.queryByText('Request response unconfirmed')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry same request' })).not.toBeInTheDocument();
+    expect(requests).toHaveLength(1);
   });
 });

@@ -193,3 +193,26 @@ def test_unsupported_schema_rejects_only_its_registration() -> None:
             ),
         ])
     assert "board_read" in valid.tools
+
+
+def test_schema_explanations_do_not_change_argument_validation() -> None:
+    from ora.agents.capabilities import validate_arguments
+
+    schema = {
+        "type": "object", "title": "Saved source selection",
+        "description": "Choose a saved source, not a publication identifier.",
+        "properties": {"source_id": {"type": "string", "minLength": 1,
+                                      "description": "ID returned by source discovery"}},
+        "required": ["source_id"], "additionalProperties": False,
+    }
+    catalog = CapabilityCatalog.with_common([
+        Capability("inspect_source", "1", schema, "specialist:read",
+                   description="Inspect one saved source"),
+    ])
+    validate_arguments(catalog.tools["inspect_source"].schema, {"source_id": "saved-1"})
+    with pytest.raises(CapabilityError):
+        validate_arguments(schema, {"source_id": 4})
+    with pytest.raises(CapabilityError):
+        CapabilityCatalog.with_common([
+            Capability("invalid_annotation", "1", {**schema, "description": 1}, "read"),
+        ])

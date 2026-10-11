@@ -54,7 +54,8 @@
           "enum": [
             "provider_error",
             "quota_wait",
-            "malformed_payload"
+            "malformed_payload",
+            "oversized_response"
           ],
           "title": "Category",
           "type": "string"
@@ -499,6 +500,17 @@
         "requestedWindow": {
           "$ref": "#/$defs/RetrievalWindow"
         },
+        "resumeEsearchRef": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SavedRecordRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "route": {
           "minLength": 1,
           "title": "Route",
@@ -736,6 +748,34 @@
       },
       "title": "RetrievalWindow",
       "type": "object"
+    },
+    "SavedRecordRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "version"
+      ],
+      "title": "SavedRecordRef",
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -786,7 +826,8 @@
         "partial",
         "provider_failure",
         "item_failure",
-        "malformed_payload"
+        "malformed_payload",
+        "oversized_response"
       ],
       "title": "Outcome",
       "type": "string"

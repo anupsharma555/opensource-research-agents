@@ -1,0 +1,4 @@
+interface:
+  display_name: "OS Groq Usage Tracking"
+  short_description: "Track daily Groq tokens by credential profile"
+  default_prompt: "Use $os-groq-usage to summarize today's Groq usage for both credential profiles and distinguish estimated headroom from confirmed remaining capacity."

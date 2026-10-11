@@ -1,8 +1,8 @@
-# Private Git workflow
+# Git workflow
 
-The project starts locally and synchronizes reviewed source with one private
-GitHub repository. Repository identity and access receipts belong in the private
-project tracker; this runbook contains no account or private project URLs.
+The project synchronizes reviewed source with its public GitHub repository.
+Credentials, research state, and access receipts stay in private local storage
+or the private project tracker.
 
 ## Normal work
 
@@ -26,7 +26,7 @@ diverge, preserve the commits and deliberately merge or rebase the feature branc
 do not force-push or reset unrelated work.
 
 The initial publication is an explicitly reviewed foundation on `main`.
-Subsequent changes use focused branches. The private-repository CI runs the same
+Subsequent changes use focused branches. GitHub Actions runs the same
 offline `scripts/dev check` entry point; no provider secret is supplied.
 
 ## Concurrent work and recovery
@@ -44,14 +44,14 @@ visibility to bypass a failure.
 
 ## Publication and fresh-clone checks
 
-- Confirm private visibility through GitHub; a remote URL alone is not proof.
+- Confirm the intended repository and visibility through GitHub before publishing.
 - Run `scripts/check-publication.py` with the project Python after staging and
   review the exact index blobs. This pattern check supplements manual review; it is not a
   comprehensive secret detector and never reads `.env`.
 - Verify ignore rules using synthetic `.env`, local-run and build-output paths.
   Credentials, raw run artifacts, local toolchains and personal editor settings
   stay outside Git. Lockfiles, generated contracts and permitted fixtures remain.
-- Clone the private remote into a new directory, confirm the commit and tree IDs,
+- Clone the remote into a new directory, confirm the commit and tree IDs,
   run `scripts/dev bootstrap`, `scripts/dev setup` and `scripts/dev check`, and
   verify lock hashes remain unchanged.
 - Keep intentional broken-contract tests in an isolated verification branch or

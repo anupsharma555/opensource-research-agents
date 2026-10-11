@@ -116,6 +116,17 @@ def _request(request: Mapping[str, Any]) -> dict[str, Any]:
     index = request.get("index")
     if index is not None and (not isinstance(index, str) or not index):
         raise RetrievalFormatError("Index must be text or explicitly absent")
+    resume_esearch_ref = request.get("resume_esearch_ref")
+    if resume_esearch_ref is not None and (
+        not isinstance(resume_esearch_ref, Mapping)
+        or set(resume_esearch_ref) != {"kind", "id", "version"}
+        or resume_esearch_ref.get("kind") != "discovery_esearch_leg"
+        or not isinstance(resume_esearch_ref.get("id"), str)
+        or not re.fullmatch(r"discovery-esearch-[0-9a-f]{32}", resume_esearch_ref["id"])
+        or type(resume_esearch_ref.get("version")) is not int
+        or resume_esearch_ref["version"] != 1
+    ):
+        raise RetrievalFormatError("Resume needs an exact saved PubMed ESearch reference")
     try:
         canonical_bytes(dict(filters))
     except (TypeError, ValueError) as exc:
@@ -132,6 +143,7 @@ def _request(request: Mapping[str, Any]) -> dict[str, Any]:
         "operation": request["operation"],
         "query": query,
         "query_sha256": hashlib.sha256(query.encode()).hexdigest() if query is not None else None,
+        "resume_esearch_ref": dict(resume_esearch_ref) if resume_esearch_ref is not None else None,
         "filters": dict(filters),
         "requested_at": request["requested_at"],
         "requested_window": {"offset": offset, "cursor": cursor, "limit": limit},
@@ -376,6 +388,7 @@ def normalize_response(
     retrieved_at: str,
     continuation: Mapping[str, str] | None = None,
     documented_usage: list[dict[str, object]] | None = None,
+    oversized_response: bool = False,
 ) -> dict[str, Any]:
     """Normalize two *simulated* response layouts without claiming a live provider API."""
     if adapter not in ADAPTERS or not isinstance(retrieved_at, str) or not retrieved_at:
@@ -401,6 +414,8 @@ def normalize_response(
         status = "malformed"
     if status == "ok" and not isinstance(collection, list):
         status = "malformed"
+    if oversized_response and status != "malformed":
+        raise RetrievalFormatError("Oversized response cannot contain normalized results")
     if status != "ok":
         collection = []
     response_omissions: list[dict[str, str]] = []
@@ -421,7 +436,7 @@ def normalize_response(
             returned_offset = None
             window_errors.append("invalid_returned_offset")
         requested_offset = clean_request["requested_window"]["offset"]  # type: ignore[index]
-        if returned_offset is not None and requested_offset != returned_offset:
+        if returned_offset is not None and (requested_offset or 0) != returned_offset:
             window_errors.append("returned_window_mismatch")
     else:
         returned_offset = None
@@ -490,7 +505,7 @@ def normalize_response(
         outcome = "provider_failure"
         provider_stop = "error"
     elif status == "malformed":
-        outcome = "malformed_payload"
+        outcome = "oversized_response" if oversized_response else "malformed_payload"
         provider_stop = "error"
     else:
         outcome = (
@@ -514,7 +529,8 @@ def normalize_response(
         retry_after = None
     failure = (
         {"category": "quota_wait" if status == "quota_wait" else
-         "provider_error" if status == "error" else "malformed_payload",
+         "provider_error" if status == "error" else
+         "oversized_response" if oversized_response else "malformed_payload",
          "code": error_code, "retry_after_seconds": retry_after}
         if status != "ok" else None
     )

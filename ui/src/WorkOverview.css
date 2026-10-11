@@ -1,0 +1,45 @@
+/* Keep the high-level trace compact while exact records expand in place. */
+.work-overview { border: 1px solid #cedecd; border-radius: 12px; padding: 16px; background: #fff; margin-bottom: 18px; }
+.work-overview-guide { font-size: 14px; line-height: 1.5; color: #496652; margin: 0 0 18px; }
+.work-overview-axis, .work-overview-group { display: grid; grid-template-columns: minmax(250px, 38%) minmax(0, 1fr); gap: 22px; }
+.work-overview-axis { padding: 0 13px 16px 30px; color: #5a7260; font-size: 13px; }
+.work-overview-axis > span:last-child { position: relative; margin-left: 25px; }
+.work-overview-axis small { position: absolute; transform: translateX(-50%); white-space: nowrap; font-size: 12px; }
+.work-overview-axis small:first-child { transform: none; }
+.work-overview-axis small:last-child { transform: translateX(-100%); }
+.work-overview-group { width: 100%; border: 1px solid transparent; border-radius: 8px; margin: 3px 0; background: #fff; text-align: left; }
+.work-overview-group { position: relative; min-height: 78px; align-items: center; padding: 12px 12px 12px 29px; color: #234735; cursor: pointer; list-style: none; }
+.work-overview-group[open] > summary::before { content: '▾'; }
+.work-overview-group:nth-of-type(even) { background: #f6faf3; }
+.work-overview-group:hover { border-color: #93bc99; background: #f1f8ee; }
+.work-overview-group:focus-visible { outline: 3px solid #377653; outline-offset: 2px; border-radius: 6px; }
+.work-overview-label > strong { display: block; font-size: 16px; line-height: 1.35; }
+.work-overview-label > span { display: block; color: #526f5b; font-size: 13px; line-height: 1.45; margin-top: 4px; }
+.work-overview-label .work-overview-agents { display: flex; gap: 7px 12px; flex-wrap: wrap; }
+.work-overview-agents .agent-badge { font-size: 13px; }
+.work-overview-track { position: relative; display: block; overflow: hidden; border-right: 1px solid #dbe6d8; }
+.work-overview-tick { position: absolute; width: 1px; background: #dbe6d8; top: 0; bottom: 0; }
+.work-overview-mark { position: absolute; height: 11px; border-radius: 3px; min-width: 4px; cursor: pointer; }
+.work-overview-mark::before { content: ''; position: absolute; inset: -7px -10px; }
+.mark-recorded { background: #6ea48a; border: 1px solid #3e7e5c; }
+.mark-failed { background: #cd887b; border: 1px solid #a25449; }
+.mark-system { background: repeating-linear-gradient(135deg, #ede3c9, #ede3c9 3px, #fffaf0 3px, #fffaf0 6px); border: 1px solid #a98f5d; }
+.work-overview-mark.mark-point { width: 8px; height: 8px; border-radius: 50%; transform: translateX(-50%); }
+ .work-overview-label > strong > span { color: #4b805a; margin-left: 6px; }
+.work-overview-plot { position: absolute; top: 0; bottom: 0; left: 25px; right: 0; }
+.work-overview-lane { position: absolute; left: 0; width: 20px; height: 20px; }
+.work-overview-lane .agent-badge-initial { width: 18px; height: 18px; font-size: 10px; }
+.work-overview-lane .agent-badge > span:last-child { display: none; }
+.work-overview-legend { display: flex; flex-wrap: wrap; gap: 10px 20px; margin-top: 16px; color: #4d6755; font-size: 12px; }
+.work-overview-legend > span { display: flex; align-items: center; gap: 6px; }
+.work-overview-legend i { display: inline-block; width: 14px; height: 9px; border-radius: 2px; }
+.work-overview-timing { font-size: 12px; color: #58705e; line-height: 1.5; margin: 10px 0 0; }
+.work-overview-tooltip { position: absolute; z-index: 4; right: 8px; top: calc(100% - 1px); width: min(420px, calc(100% - 16px)); display: grid; gap: 6px; padding: 12px 14px; border: 1px solid #86aa8c; border-radius: 8px; background: #fff; box-shadow: 0 6px 18px #24493429; color: #254735; font-size: 14px; line-height: 1.4; pointer-events: auto; }
+.work-overview-api { padding: 6px 0; border-block: 1px solid #dfebdc; }
+.work-overview-tooltip strong { font-size: 14px; }
+.work-overview-tooltip small { color: #526f5b; font-size: 12px; }
+@media (max-width: 700px) {
+  .work-overview { padding: 12px; }
+  .work-overview-axis, .work-overview-group { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .work-overview-axis > span:first-child { display: none; }
+}

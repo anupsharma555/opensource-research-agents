@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from ora.contracts.models import EvidencePacket
+from ora.credentials import CredentialProfileError, validate_selection
 from ora.skills import load_registry
 
 from .capabilities import COMMON_TOOL_IDS, CapabilityCatalog, capability_view, content_hash
@@ -56,6 +57,15 @@ def _check_settings(settings: dict[str, Any]) -> None:
                 inspect(child)
         elif type(value) is dict:
             for key, child in value.items():
+                # This exact enum is a public selection label, never a key value.
+                if key == "credential_profile" and child in ("primary", "backup"):
+                    continue
+                if key == "quota_domain":
+                    try:
+                        validate_selection("primary", child)
+                    except CredentialProfileError as exc:
+                        raise ConfigurationError("Quota domain needs a nonsecret domain label") from exc
+                    continue
                 normalized = "".join(
                     character.casefold()
                     for character in unicodedata.normalize("NFKC", key)
@@ -96,6 +106,67 @@ def _check_refs(refs: list[dict[str, Any]]) -> None:
             or any(c not in "0123456789abcdef" for c in ref["sha256"])
         ):
             raise ConfigurationError("Input references need kind, ID, version and SHA-256")
+
+
+def _call_request(
+    *, call_id: str, configuration_id: str, mission_id: str, task_id: str,
+    attempt_id: str, loaded_skill_ids: list[str], exposed_tool_ids: list[str],
+    require_common_tools: bool,
+) -> dict[str, Any]:
+    if not all((call_id, configuration_id, mission_id, task_id, attempt_id)):
+        raise ConfigurationError("A call needs stable operation, call, task and attempt IDs")
+    if len(loaded_skill_ids) != len(set(loaded_skill_ids)) or len(exposed_tool_ids) != len(
+        set(exposed_tool_ids)
+    ):
+        raise ConfigurationError("Duplicate loaded or exposed capability")
+    request = {
+        "call_id": call_id,
+        "configuration_id": configuration_id,
+        "mission_id": mission_id,
+        "task_id": task_id,
+        "attempt_id": attempt_id,
+        "loaded_skill_ids": loaded_skill_ids,
+        "exposed_tool_ids": exposed_tool_ids,
+    }
+    if not require_common_tools:
+        request["require_common_tools"] = False
+    return request
+
+
+def _call_manifest_body(config: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
+    """Build the exact v1 call body for preview and the durable transaction."""
+    saved = config["body"]
+    loaded_skill_ids = request["loaded_skill_ids"]
+    exposed_tool_ids = request["exposed_tool_ids"]
+    if (
+        set(loaded_skill_ids) - saved["skills"].keys()
+        or set(exposed_tool_ids) - saved["permitted_tools"].keys()
+    ):
+        raise ConfigurationError("Call cannot load or expose an unselected capability")
+    if not COMMON_TOOL_IDS.issubset(saved["permitted_tools"]):
+        raise ConfigurationError("Common capabilities were removed")
+    if request.get("require_common_tools", True) and not COMMON_TOOL_IDS.issubset(
+        exposed_tool_ids
+    ):
+        raise ConfigurationError("Every call must expose the common collaboration tools")
+    return {
+        **request,
+        "instance_id": saved["instance_id"],
+        "configuration_sha256": saved["configuration_sha256"],
+        "provider": saved["provider"],
+        "endpoint": saved["endpoint"],
+        "model_id": saved["model_id"],
+        "task_scope": saved["task_scope"],
+        "settings": saved["settings"],
+        "reasoning_settings": saved["reasoning_settings"],
+        "instructions_sha256": saved["instructions_sha256"],
+        "skills": {name: saved["skills"][name] for name in loaded_skill_ids},
+        "exposed_skill_ids": sorted(loaded_skill_ids),
+        "permitted_tools": saved["permitted_tools"],
+        "grants": saved["grants"],
+        "exposed_tools": sorted(exposed_tool_ids),
+        "input_refs": saved["input_refs"],
+    }
 
 
 class ConfigurationRegistry:
@@ -366,62 +437,63 @@ class ConfigurationRegistry:
         exposed_tool_ids: list[str],
         require_common_tools: bool = True,
     ) -> dict[str, Any]:
-        if not all((operation_id, call_id, configuration_id, mission_id, task_id, attempt_id)):
+        if not operation_id:
             raise ConfigurationError("A call needs stable operation, call, task and attempt IDs")
-        if len(loaded_skill_ids) != len(set(loaded_skill_ids)) or len(exposed_tool_ids) != len(
-            set(exposed_tool_ids)
-        ):
-            raise ConfigurationError("Duplicate loaded or exposed capability")
-        request = {
-            "call_id": call_id,
-            "configuration_id": configuration_id,
-            "mission_id": mission_id,
-            "task_id": task_id,
-            "attempt_id": attempt_id,
-            "loaded_skill_ids": loaded_skill_ids,
-            "exposed_tool_ids": exposed_tool_ids,
-        }
-        if not require_common_tools:
-            request["require_common_tools"] = False
+        request = _call_request(
+            call_id=call_id, configuration_id=configuration_id, mission_id=mission_id,
+            task_id=task_id, attempt_id=attempt_id, loaded_skill_ids=loaded_skill_ids,
+            exposed_tool_ids=exposed_tool_ids, require_common_tools=require_common_tools,
+        )
 
         def start(tx: Any) -> dict[str, Any]:
             config = tx.get("agent_configuration", configuration_id, version=1)
             if config is None or config["body"]["mission_id"] != mission_id:
                 raise ConfigurationError("Saved configuration is unavailable")
-            saved = config["body"]
-            if (
-                set(loaded_skill_ids) - saved["skills"].keys()
-                or set(exposed_tool_ids) - saved["permitted_tools"].keys()
-            ):
-                raise ConfigurationError("Call cannot load or expose an unselected capability")
-            if not COMMON_TOOL_IDS.issubset(saved["permitted_tools"]):
-                raise ConfigurationError("Common capabilities were removed")
-            if require_common_tools and not COMMON_TOOL_IDS.issubset(exposed_tool_ids):
-                raise ConfigurationError("Every call must expose the common collaboration tools")
-            body = {
-                **request,
-                "instance_id": saved["instance_id"],
-                "configuration_sha256": saved["configuration_sha256"],
-                "provider": saved["provider"],
-                "endpoint": saved["endpoint"],
-                "model_id": saved["model_id"],
-                "task_scope": saved["task_scope"],
-                "settings": saved["settings"],
-                "reasoning_settings": saved["reasoning_settings"],
-                "instructions_sha256": saved["instructions_sha256"],
-                "skills": {name: saved["skills"][name] for name in loaded_skill_ids},
-                "exposed_skill_ids": sorted(loaded_skill_ids),
-                "permitted_tools": saved["permitted_tools"],
-                "grants": saved["grants"],
-                "exposed_tools": sorted(exposed_tool_ids),
-                "input_refs": saved["input_refs"],
-            }
+            body = _call_manifest_body(config, request)
             call = tx.put("agent_call", call_id, body, expected_version=0)
             tx.link(call, config, "uses_configuration")
             tx.emit(mission_id, "agent_call_prepared", {"call_id": call_id, "manifest_version": 1})
             return call
 
         return self.store.transact(operation_id, request, start, mission_id=mission_id)
+
+    def preview_call(
+        self,
+        *,
+        call_id: str,
+        configuration_id: str,
+        mission_id: str,
+        task_id: str,
+        attempt_id: str,
+        loaded_skill_ids: list[str],
+        exposed_tool_ids: list[str],
+        require_common_tools: bool = True,
+    ) -> dict[str, Any]:
+        """Validate and build a v1 call without allocating state or an attempt."""
+        request = _call_request(
+            call_id=call_id, configuration_id=configuration_id, mission_id=mission_id,
+            task_id=task_id, attempt_id=attempt_id, loaded_skill_ids=loaded_skill_ids,
+            exposed_tool_ids=exposed_tool_ids, require_common_tools=require_common_tools,
+        )
+        config = self.store.get("agent_configuration", configuration_id, version=1)
+        if config is None or config["body"].get("mission_id") != mission_id:
+            raise ConfigurationError("Saved configuration is unavailable")
+        saved = config["body"]
+        if content_hash({key: value for key, value in saved.items()
+                         if key != "configuration_sha256"}) != saved.get("configuration_sha256"):
+            raise ConfigurationError("Saved configuration integrity failed")
+        actor = self.store.get("agent_instance", saved["instance_id"], version=1)
+        if actor is None or actor["body"].get("mission_id") != mission_id:
+            raise ConfigurationError("Named instance is unavailable in this mission")
+        task = self.store.get("board_proposal", task_id)
+        if task is None or task["body"].get("mission_id") != mission_id:
+            raise ConfigurationError("Saved task is unavailable in this mission")
+        if self.store.get("agent_call", call_id) is not None:
+            raise ConfigurationError("Call ID is already allocated")
+        return {
+            "kind": "agent_call", "id": call_id, "version": 1,
+            "body": _call_manifest_body(config, request),
+        }
 
     def expose_tool(
         self, operation_id: str, *, call_id: str, mission_id: str, tool_id: str

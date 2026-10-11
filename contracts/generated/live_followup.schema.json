@@ -12,6 +12,22 @@
       "title": "Agentids",
       "type": "array"
     },
+    "credentialProfile": {
+      "anyOf": [
+        {
+          "enum": [
+            "primary",
+            "backup"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Credentialprofile"
+    },
     "parentRunId": {
       "maxLength": 160,
       "minLength": 1,
@@ -34,6 +50,15 @@
       "minLength": 1,
       "title": "Requestid",
       "type": "string"
+    },
+    "requiredAgentIds": {
+      "items": {
+        "maxLength": 160,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Requiredagentids",
+      "type": "array"
     },
     "scope": {
       "default": "",

@@ -272,15 +272,22 @@ class ProposalBoard:
     def claim(
         self, operation_id: str, *, mission_id: str, proposal_id: str,
         actor_id: str, ttl: float, expected_generation: int | None = None,
-        invitation_id: str | None = None,
+        invitation_id: str | None = None, expected_version: int | None = None,
     ) -> dict:
         request = {key: value for key, value in locals().items() if key != "self"}
+        if expected_version is None:
+            request.pop("expected_version")  # Preserve older exact replay hashes.
 
         def action(tx: Transaction) -> dict:
             actor = require_actor(tx, mission_id, actor_id)
             proposal = tx.get(self.KIND, proposal_id)
             if proposal is None or proposal["body"]["mission_id"] != mission_id:
                 raise BoardError("Proposal is unavailable")
+            if expected_version is not None:
+                if type(expected_version) is not int or expected_version < 1:
+                    raise BoardError("Expected proposal version must be positive")
+                if proposal["version"] != expected_version:
+                    raise StateConflict("Proposal version changed before claim")
             if proposal["body"]["status"] != "open":
                 raise BoardError("Only open work can be claimed")
             for pointer in proposal["body"].get("depends_on", []):
@@ -342,6 +349,7 @@ class ProposalBoard:
         result_refs: list[dict] | None = None,
         save_related: Callable[[Transaction], list[dict]] | None = None,
         related_request: dict | None = None,
+        complete_task: bool = True,
     ) -> dict:
         """Save related artifacts/messages in this transaction, then accept outcome.
 
@@ -365,7 +373,8 @@ class ProposalBoard:
         request = {"mission_id": mission_id, "proposal_id": proposal_id,
                    "actor_id": actor_id, "fence": fence, "outcome_id": outcome_id,
                    "result_refs": result_refs, "related_request": related_request,
-                   "has_save_related": save_related is not None}
+                   "has_save_related": save_related is not None,
+                   "complete_task": complete_task}
 
         def action(tx: Transaction) -> dict:
             actor = require_actor(tx, mission_id, actor_id)
@@ -387,16 +396,21 @@ class ProposalBoard:
             outcome = tx.put("board_outcome", outcome_id, {
                 "mission_id": mission_id, "proposal_ref": ref(proposal),
                 "actor_ref": ref(actor), "claim_generation": fence["generation"],
-                "result_refs": [ref(p) for p in targets]})
+                "result_refs": [ref(p) for p in targets],
+                "completes_task": complete_task})
             for target in targets:
                 tx.link(outcome, target, "depends_on")
             tx.link(outcome, proposal, "about_task")
-            updated = tx.put(self.KIND, proposal_id,
-                             {**proposal["body"], "status": "completed",
-                              "outcome_ref": ref(outcome)},
-                             expected_version=proposal["version"])
-            tx.link(updated, proposal, "derived_from")
-            tx.emit(mission_id, "proposal_result_accepted", {"outcome_ref": ref(outcome),
+            if complete_task:
+                updated = tx.put(self.KIND, proposal_id,
+                                 {**proposal["body"], "status": "completed",
+                                  "outcome_ref": ref(outcome)},
+                                 expected_version=proposal["version"])
+                tx.link(updated, proposal, "derived_from")
+            else:
+                updated = proposal
+            tx.emit(mission_id, "proposal_result_accepted" if complete_task
+                    else "proposal_turn_accepted", {"outcome_ref": ref(outcome),
                     "proposal_ref": ref(updated),
                     "subjects": [{"kind": "task", "id": proposal_id},
                                  {"kind": "artifact", "id": outcome_id}]})

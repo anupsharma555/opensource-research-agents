@@ -1,0 +1,7 @@
+.starting-source-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 16px; border: 1px solid #dce6da; border-radius: 8px; padding: 13px; background: #fff; }
+.starting-source-card strong { font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.starting-source-card .starting-source-origin { color: #466b53; font-size: 12px; margin: 5px 0 0; }
+.starting-source-card > button { align-self: start; }
+.starting-source-reference { grid-column: 1 / -1; font-size: 12px; overflow-wrap: anywhere; }
+.starting-source-reference > summary { color: #426a51; cursor: pointer; }
+@media (max-width: 640px) { .starting-source-card { grid-template-columns: minmax(0, 1fr); } .starting-source-card > button { justify-self: start; } }

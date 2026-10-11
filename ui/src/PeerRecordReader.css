@@ -1,0 +1,37 @@
+.peer-record-reader { margin-top: 12px; border-top: 1px solid #e0e9de; padding-top: 10px; color: #3e604a; font-size: 12px; }
+.peer-record-reader > p { margin: 8px 0; }
+.peer-record-reader [role="alert"] { color: #855043; }
+.peer-record-content { margin-top: 9px; padding: 12px; border: 1px solid #dbe8d8; border-radius: 8px; background: #f9fcf8; overflow-wrap: anywhere; }
+.peer-record-content p { margin: 0 0 9px; }
+.peer-record-direction { color: #315f44; }
+.peer-record-redaction { color: #795d33; background: #fff7e7; padding: 8px 10px; border-left: 3px solid #c29447; }
+.peer-record-body { font-size: 13px; line-height: 1.55; }
+.peer-record-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.peer-record-fields { display: grid; gap: 7px; margin: 0; }
+.peer-record-fields > div { display: grid; grid-template-columns: minmax(90px, 140px) minmax(0, 1fr); gap: 8px; }
+.peer-record-fields dt { color: #67816d; text-transform: capitalize; }
+.peer-record-fields dd { margin: 0; min-width: 0; }
+.peer-record-fields ol, .peer-record-report ol { margin: 5px 0; padding-left: 19px; }
+.peer-record-report h4, .peer-record-report h5 { margin: 10px 0 5px; }
+.peer-record-report details { margin-top: 12px; }
+.peer-record-content summary { min-height: 40px; padding: 9px 10px; border-radius: 6px; cursor: pointer; color: #2d674b; font-size: 14px; font-weight: 700; line-height: 1.4; }
+.peer-record-content pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow-y: auto; }
+@media (max-width: 700px) { .peer-record-fields > div { grid-template-columns: 1fr; gap: 2px; } }
+.peer-record-reader > .peer-record-read-button { display: inline-flex; align-items: center; min-height: 42px; padding: 10px 14px; border: 1px solid #adc6b4; border-radius: 7px; background: #fff; color: #285940; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; text-align: left; }
+.peer-record-reader > .peer-record-read-button:hover:not(:disabled) { background: #edf5ea; border-color: #648d72; }
+.peer-record-reader > .peer-record-read-button:focus-visible { outline: 2px solid #315f44; outline-offset: 3px; }
+.peer-record-reader > .peer-record-read-button:disabled { cursor: wait; opacity: .65; }
+
+/* The saved request and exact message share one reading location. */
+.peer-record-inline-message { margin-top: 0; border-top: 0; padding-top: 0; }
+.peer-message-label { margin: 0 0 6px; color: #486750; font-size: 12px; font-weight: 730; }
+.peer-message-quote { margin: 0; padding: 13px 16px; border-left: 3px solid #78a889; border-radius: 0 7px 7px 0; background: #f4f8f1; color: #243e32; font-size: 15px; font-weight: 500; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.peer-message-quote::before { content: '“'; }
+.peer-message-quote::after { content: '”'; }
+.peer-message-note { color: #5a705f; font-size: 12px; line-height: 1.5; margin: 7px 0; }
+.peer-record-inline-message > .peer-record-content { margin-top: 9px; padding: 0; border: 0; background: transparent; }
+.peer-record-inline-message .peer-record-direction { margin-bottom: 8px; }
+.peer-record-inline-message .peer-record-content > details { margin-top: 10px; }
+.peer-message-other-fields { margin-top: 10px; }
+.peer-request-reply .peer-message-label { margin-top: 10px; }
+.peer-request-reply .peer-message-quote { margin-top: 6px; }

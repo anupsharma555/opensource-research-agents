@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Research Atlas · Sample Prototype",
+        "title": "Research Atlas",
         "width": 1320,
         "height": 850,
         "minWidth": 900,

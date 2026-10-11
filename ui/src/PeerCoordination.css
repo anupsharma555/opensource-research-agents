@@ -1,0 +1,56 @@
+.peer-request-heading { align-items: start; gap: 16px; }
+.peer-exchange-browser { display: grid; grid-template-columns: minmax(230px, 0.7fr) minmax(0, 2fr); gap: 20px; align-items: start; }
+.peer-exchange-index-label, .peer-exchange-selected-label { margin: 0 0 10px; color: #526b58; font-size: 13px; font-weight: 700; }
+.peer-exchange-index ol { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.peer-exchange-select { display: grid; width: 100%; gap: 7px; padding: 14px; text-align: left; background: #fff; border: 1px solid #dce6dc; border-radius: 10px; color: #294838; font: inherit; cursor: pointer; }
+.peer-exchange-select:hover { border-color: #83ab8c; background: #f5faf3; }
+.peer-exchange-select[aria-pressed="true"] { border-color: #4c8a64; background: #eef6eb; box-shadow: inset 3px 0 #4c8a64; }
+.peer-exchange-select:focus-visible { outline: 3px solid #347b55; outline-offset: 3px; }
+.peer-exchange-number { font-size: 14px; color: #597361; font-weight: 700; }
+.peer-exchange-time { color: #536e5b; font-size: 13px; }
+.peer-exchange-direction .agent-badge { font-size: 14px; }
+.peer-exchange-direction { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 13px; }
+.peer-exchange-preview { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.peer-exchange-status { font-size: 13px; font-weight: 730; }
+.peer-exchange-delivery { color: #526b58; font-size: 12px; }
+.peer-exchange-selected { min-width: 0; }
+.peer-exchange-selected .peer-request { margin: 0; }
+@media (max-width: 950px) {
+  .peer-exchange-browser { grid-template-columns: minmax(0, 1fr); }
+  .peer-exchange-index ol { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+}
+.peer-request-heading > div { min-width: 0; }
+.peer-request-direction, .peer-request-answer-direction { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.peer-request-direction { margin: 7px 0 4px; color: #315f44; font-size: 18px; font-weight: 740; line-height: 1.4; }
+.peer-request-direction .agent-badge { font-size: inherit; }
+.peer-request-direction .agent-badge-initial { width: 28px; height: 28px; font-size: 13px; }
+.peer-request-direction-label { color: #5e735f; font-size: 14px; font-weight: 500; }
+.peer-request-date { margin: 4px 0 0; color: #5e735f; font-size: 13px; }
+.peer-request-state { flex-shrink: 0; max-width: 180px; padding: 5px 8px; border-radius: 6px; background: #eef4eb; color: #42624b; font-size: 12px; font-weight: 700; }
+.peer-request-message { margin-top: 14px; }
+.peer-request-purpose { margin: 12px 0 11px; color: #496852; font-size: 14px; }
+.peer-request-steps { list-style: none; display: grid; gap: 0; margin: 16px 0; padding: 0; border: 1px solid #dce8d9; border-radius: 8px; }
+.peer-request-steps > li { display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: start; gap: 10px; padding: 13px 14px; color: #3f5e49; font-size: 14px; line-height: 1.55; }
+.peer-request-steps > li + li { border-top: 1px solid #e5ece3; }
+.peer-request-step-icon { color: #447757; font-size: 18px; line-height: 1.2; }
+.peer-request-steps strong { font-weight: 740; }
+.peer-request-steps p { margin: 5px 0 0; }
+.peer-request-steps time { color: #587260; font-size: 13px; }
+.peer-request-answer-direction { margin: 7px 0; font-size: 13px; }
+.peer-request-reply + .peer-request-reply { margin-top: 16px; border-top: 1px solid #dce8d9; padding-top: 12px; }
+.peer-request-review-preview { overflow-wrap: anywhere; white-space: pre-wrap; }
+.peer-request-records { margin-top: 8px; }
+.peer-request-records > summary { cursor: pointer; font-size: 13px; color: #2d674b; font-weight: 700; }
+.peer-request-records .inline-detail-body { padding-top: 9px; }
+@media (max-width: 700px) {
+  .peer-request-heading { flex-direction: column; gap: 8px; }
+  .peer-request-state { max-width: 100%; }
+}
+.peer-empty { border-style: dashed; }
+.peer-empty h4 { margin-top: 0; }
+.agent-reasoning-overview > summary { cursor: pointer; color: #315f44; font-size: 14px; font-weight: 730; }
+.agent-reasoning-overview > summary:focus-visible, .peer-request-records > summary:focus-visible { outline: 2px solid #40936f; outline-offset: 3px; }
+.agent-reasoning-overview-body { margin-top: 10px; }
+.agent-reasoning-filter { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-weight: 700; }
+.agent-reasoning-filter select { max-width: min(100%, 340px); }
+.agent-reasoning-attempt > summary { overflow-wrap: anywhere; }

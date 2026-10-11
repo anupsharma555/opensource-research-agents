@@ -8,6 +8,14 @@ type Snapshot = { snapshot: ResearchSnapshot };
 export const referenceKey = (ref: SavedRecordRef) => `${ref.kind}:${ref.id}:${ref.version}`;
 export const referenceLabel = (ref: SavedRecordRef) => `${ref.kind} · ${ref.id} · v${ref.version}`;
 
+function discoveryQuery(data?: Record<string, unknown>) {
+  if (typeof data?.query === 'string' && data.query.trim()) return data.query;
+  if ((data?.query === '' || data?.query === null) && ['pubmed.pmid', 'pubmed.abstract', 'crossref.doi'].includes(String(data.route))) {
+    return `Exact identifier lookup (${data.route}); no text query supplied`;
+  }
+  return 'Not recorded';
+}
+
 function fieldLabel(key: string) {
   const words = key.replace(/([a-z])([A-Z])/g, '$1 $2').replaceAll('_', ' ');
   return words.charAt(0).toUpperCase() + words.slice(1);
@@ -43,15 +51,15 @@ export function RecordGroup({ snapshot, title, references }: Snapshot & { title:
   return <section className="inspection-group" aria-label={title}><h4>{title}</h4>{unique.length ? unique.map(ref => <SavedRecord key={referenceKey(ref)} snapshot={snapshot} reference={ref} />) : <p>No {title.toLowerCase()} recorded.</p>}</section>;
 }
 
-export function AttemptInspection({ snapshot, attemptId }: Snapshot & { attemptId: string }) {
+export function AttemptInspection({ snapshot, attemptId, summaryLabel = 'Saved agent, configuration and recovery details', configurationOnly = false }: Snapshot & { attemptId: string; summaryLabel?: string; configurationOnly?: boolean }) {
   const detail = snapshot.inspection?.attempts.find(item => item.attemptId === attemptId);
-  if (!detail) return <details className="inline-detail inspection-detail"><summary>Saved agent, configuration and recovery details</summary><p className="inspection-missing">Saved identity and configuration inspection is unavailable for this attempt.</p></details>;
-  return <details className="inline-detail inspection-detail"><summary>Saved agent, configuration and recovery details</summary><p>{detail.explanation}</p>
+  if (!detail) return <details className="inline-detail inspection-detail"><summary>{summaryLabel}</summary><p className="inspection-missing">Saved identity and configuration inspection is unavailable for this attempt.</p></details>;
+  return <details className="inline-detail inspection-detail"><summary>{summaryLabel}</summary><p>{detail.explanation}</p>
     <RecordGroup snapshot={snapshot} title="Agent instance" references={[detail.instanceReference]} />
     <RecordGroup snapshot={snapshot} title="Configuration used" references={detail.configurationReference ? [detail.configurationReference] : []} />
-    <RecordGroup snapshot={snapshot} title="Recorded calls" references={detail.callReferences ?? []} />
+    {!configurationOnly && <><RecordGroup snapshot={snapshot} title="Recorded calls" references={detail.callReferences ?? []} />
     <RecordGroup snapshot={snapshot} title="Saved inputs" references={detail.inputReferences ?? []} />
-    <RecordGroup snapshot={snapshot} title="Accepted outputs" references={detail.acceptedOutputReferences ?? []} />
+    <RecordGroup snapshot={snapshot} title="Accepted outputs" references={detail.acceptedOutputReferences ?? []} /></>}
   </details>;
 }
 
@@ -64,7 +72,7 @@ export function SourceInspection({ snapshot, sourceId }: Snapshot & { sourceId: 
         const encounter = snapshot.inspection?.records.find(item => referenceKey(item.reference) === referenceKey(ref));
         const hitRef = asReference(encounter?.data.retrieval_hit);
         const hit = hitRef && snapshot.inspection?.records.find(item => referenceKey(item.reference) === referenceKey(hitRef));
-        return hitRef ? <div className="discovery-summary" key={referenceKey(ref)}><dl className="inspection-fields"><div><dt>Query</dt><dd>{typeof hit?.data.query === 'string' ? hit.data.query : 'Not recorded'}</dd></div><div><dt>Provider</dt><dd>{typeof hit?.data.provider === 'string' ? hit.data.provider : 'Not recorded'}</dd></div></dl><SavedRecord snapshot={snapshot} reference={hitRef} /></div> : null;
+        return hitRef ? <div className="discovery-summary" key={referenceKey(ref)}><dl className="inspection-fields"><div><dt>Search or lookup</dt><dd>{discoveryQuery(hit?.data)}</dd></div><div><dt>Provider</dt><dd>{typeof hit?.data.provider === 'string' ? hit.data.provider : 'Not recorded'}</dd></div></dl><SavedRecord snapshot={snapshot} reference={hitRef} /></div> : null;
       })}
       <SavedRecord snapshot={snapshot} reference={detail.copyReference} />
       <RecordGroup snapshot={snapshot} title="Discovery encounters" references={detail.encounterReferences} />
@@ -72,11 +80,57 @@ export function SourceInspection({ snapshot, sourceId }: Snapshot & { sourceId: 
   </div>;
 }
 
+export function SearchDiscoveries({ snapshot, onOpenSource }: Snapshot & { onOpenSource: (sourceId: string) => void }) {
+  const inspection = snapshot.inspection;
+  const hits = inspection?.records.filter(record => record.reference.kind === 'retrieval_hit') ?? [];
+  if (!inspection || hits.length === 0) return null;
+  const recordsByKey = new Map(inspection.records.map(record => [referenceKey(record.reference), record]));
+  const copiesByHit = new Map<string, Set<string>>();
+  for (const source of inspection.sources) {
+    const copies = snapshot.sources.filter(copy => copy.id === source.sourceId);
+    if (source.copyReference.kind !== 'source_copy' || copies.length !== 1
+      || copies[0].copyId !== source.copyReference.id || copies[0].version !== source.copyReference.version) continue;
+    for (const encounterRef of source.encounterReferences) {
+      const hitRef = asReference(recordsByKey.get(referenceKey(encounterRef))?.data.retrieval_hit);
+      if (hitRef) {
+        const key = referenceKey(hitRef);
+        copiesByHit.set(key, (copiesByHit.get(key) ?? new Set<string>()).add(source.sourceId));
+      }
+    }
+  }
+  const savedText = (value: unknown) => typeof value === 'string' && value.trim() ? value : 'Not recorded';
+  const safeLink = (value: unknown) => {
+    if (typeof value !== 'string' || !/^https?:\/\//i.test(value)) return null;
+    try {
+      const url = new URL(value);
+      return ['http:', 'https:'].includes(url.protocol) && url.hostname && !url.username && !url.password ? value : null;
+    } catch { return null; }
+  };
+  return <section className="panel discovery-results" aria-label="Search discoveries">
+    <h3>Search discoveries ({hits.length} saved hits)</h3>
+    <p>These are search leads, including hits that were never retained as source copies. They are not a count of independently checked studies or evidence for a claim.</p>
+    <div className="discovery-list">{hits.map(hit => {
+      const source = hit.data.source && typeof hit.data.source === 'object' && !Array.isArray(hit.data.source) ? hit.data.source as Record<string, unknown> : {};
+      const linkedCopies = copiesByHit.get(referenceKey(hit.reference));
+      const copyId = linkedCopies?.size === 1 ? [...linkedCopies][0] : undefined;
+      const url = safeLink(source.original_url);
+      return <article key={referenceKey(hit.reference)} className="discovery-hit">
+        <h4>{savedText(source.title)}</h4>
+        <p><strong>URL:</strong> {url ? <a href={url} target="_blank" rel="noopener noreferrer">{url}</a> : savedText(source.original_url)}</p>
+        <p><strong>Provider:</strong> {savedText(hit.data.provider)} · <strong>Search or lookup:</strong> {discoveryQuery(hit.data)}</p>
+        <p><strong>Saved hit status:</strong> {savedText(source.access_surface)} access · {savedText(source.rights_status)} rights · {copyId ? 'exact source copy linked in this snapshot' : 'no source copy linked in this snapshot'}</p>
+        <p className="tiny-note">Hit {hit.reference.id} · v{hit.reference.version}</p>
+        {copyId && <button className="inline-link" type="button" onClick={() => onOpenSource(copyId)}>Open exact saved source copy →</button>}
+      </article>;
+    })}</div>
+  </section>;
+}
+
 export function CitationDetails({ snapshot, sourceId, spanId }: Snapshot & { sourceId: string; spanId: string }) {
   const sources = snapshot.sources.filter(item => item.id === sourceId);
   const source = sources.length === 1 ? sources[0] : undefined;
   const passage = source?.passages.find(item => item.spanId === spanId);
-  return <details className="inline-detail citation-detail"><summary>{sourceId} · {spanId} · expand cited passage</summary><p className="tiny-note">Snapshot {snapshot.snapshotId}{source && ` · copy ${source.copyId} · v${source.version}`}</p>
+  return <details className="inline-detail citation-detail"><summary>{sourceId} · {spanId} · expand cited passage</summary><p className="tiny-note">Snapshot {snapshot.snapshotId}{source && ` · copy ${source.copyId} · v${source.version}`}{spanId.startsWith('window-') ? ' · checked source window excerpt' : ''}</p>
     {passage ? <><p>{source?.title} · {passage.locator}</p><blockquote>{passage.text}</blockquote></> : <p>The exact cited passage is unavailable or ambiguous in this snapshot.</p>}
     <SourceInspection snapshot={snapshot} sourceId={sourceId} />
   </details>;
@@ -84,7 +138,7 @@ export function CitationDetails({ snapshot, sourceId, spanId }: Snapshot & { sou
 
 export function acceptedReport(snapshot: ResearchSnapshot) {
   if (snapshot.proofKind === 'offline_test' && !snapshot.inspection) return undefined;
-  return snapshot.artifacts.find(artifact => artifact.id === snapshot.mission.reportArtifactId && (!snapshot.inspection || snapshot.inspection.acceptedOutputReferences.some(ref => ref.id === artifact.id && ref.version === artifact.version && (ref.kind === artifact.kind || ref.kind === 'artifact'))));
+  return snapshot.artifacts.find(artifact => artifact.id === snapshot.mission.reportArtifactId && (!snapshot.inspection || snapshot.inspection.acceptedOutputReferences.some(ref => ref.id === artifact.id && ref.version === artifact.version && ref.kind === 'report')));
 }
 
 export function SnapshotDetails({ snapshot, parentSnapshot }: Snapshot & { parentSnapshot?: ResearchSnapshot }) {

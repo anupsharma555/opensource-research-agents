@@ -12,8 +12,24 @@
       "title": "Agentids",
       "type": "array"
     },
+    "credentialProfile": {
+      "anyOf": [
+        {
+          "enum": [
+            "primary",
+            "backup"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Credentialprofile"
+    },
     "evidenceText": {
-      "minLength": 1,
+      "default": "",
       "title": "Evidencetext",
       "type": "string"
     },
@@ -28,6 +44,15 @@
       "title": "Requestid",
       "type": "string"
     },
+    "requiredAgentIds": {
+      "items": {
+        "maxLength": 160,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Requiredagentids",
+      "type": "array"
+    },
     "scope": {
       "default": "",
       "title": "Scope",
@@ -37,7 +62,6 @@
   "required": [
     "requestId",
     "question",
-    "evidenceText",
     "agentIds"
   ],
   "title": "LiveStartRequest",

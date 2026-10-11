@@ -74,6 +74,29 @@ def test_codex_reader_uses_same_sources_without_writes_or_calls(tmp_path):
         StateStore(tmp_path, read_only=True).put_blob(b"not permitted")
 
 
+def test_review_view_events_remain_saved_without_becoming_agent_steps(tmp_path):
+    snapshots = build_recorded_workflow(ROOT, tmp_path)
+    store = StateStore(tmp_path, read_only=True)
+    child_id = snapshots["child"]["snapshotId"]
+    child = load_snapshot(store, child_id)
+    cursor = store.get("research_snapshot", child_id, 1)["body"]["event_cursor"]
+    events = store.events(child["mission"]["id"], limit=1000)
+    assert len(events) < 1000
+    earlier = [event for event in events if event["sequence"] <= cursor]
+    assert any(event["type"] == "snapshot_accepted" for event in earlier)
+    assert {step["id"] for step in child["inspection"]["steps"]} == {
+        event["id"] for event in earlier if event["type"] != "snapshot_accepted"
+    }
+    visible_refs = {tuple(ref[key] for key in ("kind", "id", "version"))
+                    for item in child["inspection"]["records"]
+                    for ref in [item["reference"]]}
+    assert all(
+        tuple(ref[key] for key in ("kind", "id", "version")) in visible_refs
+        for step in child["inspection"]["steps"]
+        for ref in [*step["inputReferences"], *step["outputReferences"]]
+    )
+
+
 def save_child_variant(store, snapshots, child):
     inspection = child["inspection"]
     return save_snapshot(store, child["snapshotId"], child,
@@ -86,8 +109,10 @@ def save_child_variant(store, snapshots, child):
 
 @pytest.mark.parametrize("defect, message", [
     ("missing_source", "Every displayed source"),
+    ("wrong_reused_copy", "exact retained copy"),
     ("wrong_encounter", "encounter that supplied"),
     ("extra_wrong_encounter", "different publication"),
+    ("wrong_reused_parent", "exact parent snapshot"),
     ("missing_attempt", "Every displayed attempt"),
     ("duplicate_attempt", "Every displayed attempt"),
     ("wrong_inputs", "Displayed attempt inputs"),
@@ -101,10 +126,14 @@ def test_rejects_misleading_lineage_without_changing_accepted_snapshots(tmp_path
     inspection = child["inspection"]
     if defect == "missing_source":
         inspection["sources"].pop()
+    elif defect == "wrong_reused_copy":
+        inspection["sources"][0]["copyReference"] = inspection["sources"][1]["copyReference"]
     elif defect == "wrong_encounter":
         inspection["sources"][0]["encounterReferences"] = inspection["sources"][1]["encounterReferences"]
     elif defect == "extra_wrong_encounter":
         inspection["sources"][0]["encounterReferences"] += inspection["sources"][1]["encounterReferences"]
+    elif defect == "wrong_reused_parent":
+        inspection["sources"][0]["fromSnapshotId"] = "unrelated-snapshot"
     elif defect == "missing_attempt":
         inspection["attempts"].pop()
     elif defect == "duplicate_attempt":

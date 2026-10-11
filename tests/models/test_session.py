@@ -84,7 +84,8 @@ def source_copy(store: StateStore) -> dict:
 
 
 def setup(tmp_path: Path, *, raw: bytes | None = None,
-          source_ref: dict | None = None, unknown_policy: str = "reject"):
+          source_ref: dict | None = None, unknown_policy: str = "reject",
+          tool_description: str = "", credential_settings: dict | None = None):
     store = StateStore(tmp_path)
     copy_ref = source_ref or source_copy(store)
     copy_record = store.get(**copy_ref)
@@ -93,11 +94,16 @@ def setup(tmp_path: Path, *, raw: bytes | None = None,
         display_name="Synthetic worker",
     )
     catalog = CapabilityCatalog.with_common()
+    if tool_description:
+        catalog.tools["evidence_lookup"] = replace(
+            catalog.tools["evidence_lookup"], description=tool_description,
+        )
     registry = ConfigurationRegistry(store, ROOT, catalog)
     config = registry.save_configuration(
         "config", instance_id=actor["id"], mission_id="mission",
         task_scope="source-comparison", provider="groq", endpoint=URL, model_id=MODEL,
         settings={"max_completion_tokens": 8192, "stream": False,
+                  **(credential_settings or {}),
                   "unknown_source_policy": unknown_policy,
                   "response_format": {"type": "json_schema", "json_schema": {
                       "name": "answer", "strict": True, "schema": SCHEMA,
@@ -130,10 +136,146 @@ def select(copy_ref: dict, route: str = "direct") -> tuple[SourceSelection, ...]
     return (SourceSelection(copy_ref, "permitted", True, route),)
 
 
+def _preview_task(store: StateStore) -> None:
+    store.transact(
+        "preview-task", {"task_id": "task"},
+        lambda tx: tx.put("board_proposal", "task", {"mission_id": "mission", "status": "open"}),
+        mission_id="mission",
+    )
+
+
+def _preview_call(registry: ConfigurationRegistry, config: dict) -> dict:
+    return registry.preview_call(
+        call_id="call-preview", configuration_id=config["id"], mission_id="mission",
+        task_id="task", attempt_id="attempt-preview", loaded_skill_ids=[],
+        exposed_tool_ids=["evidence_lookup"], require_common_tools=False,
+    )
+
+
+def test_provisional_call_and_request_match_durable_preparation_without_writes(
+    tmp_path: Path,
+) -> None:
+    store, registry, bridge, _call, config, copy_ref, captured = setup(tmp_path)
+    _preview_task(store)
+    before_events = len(store.events("mission"))
+    before_calls = len(store.records("agent_call"))
+    before_objects = {p.relative_to(tmp_path) for p in (tmp_path / "objects").rglob("*")
+                      if p.is_file()}
+    provisional = _preview_call(registry, config)
+    messages = [{"role": "user", "content": "Inspect the saved abstract"}]
+    preview = bridge.preview_request(
+        call=provisional, phase="collect", messages=messages, sources=select(copy_ref),
+    )
+    assert len(store.events("mission")) == before_events
+    assert len(store.records("agent_call")) == before_calls
+    assert store.records("model_request_intent") == []
+    assert {p.relative_to(tmp_path) for p in (tmp_path / "objects").rglob("*")
+            if p.is_file()} == before_objects
+    assert captured == []
+
+    saved = registry.start_call(
+        "preview-call-op", call_id="call-preview", configuration_id=config["id"],
+        mission_id="mission", task_id="task", attempt_id="attempt-preview",
+        loaded_skill_ids=[], exposed_tool_ids=["evidence_lookup"],
+        require_common_tools=False,
+    )
+    assert provisional["body"] == saved["body"]
+    after_start_events = len(store.events("mission"))
+    replay = registry.start_call(
+        "preview-call-op", call_id="call-preview", configuration_id=config["id"],
+        mission_id="mission", task_id="task", attempt_id="attempt-preview",
+        loaded_skill_ids=[], exposed_tool_ids=["evidence_lookup"],
+        require_common_tools=False,
+    )
+    assert replay == saved and len(store.events("mission")) == after_start_events
+    after_start_objects = {p.relative_to(tmp_path) for p in (tmp_path / "objects").rglob("*")
+                           if p.is_file()}
+    saved_preview = bridge.preview_request(
+        call=saved, phase="collect", messages=messages, sources=select(copy_ref),
+    )
+    assert saved_preview.body == preview.body
+    assert saved_preview.request_sha256 == preview.request_sha256
+    assert len(store.events("mission")) == after_start_events
+    assert store.records("model_request_intent") == []
+    assert {p.relative_to(tmp_path) for p in (tmp_path / "objects").rglob("*")
+            if p.is_file()} == after_start_objects
+    actual = bridge.prepare(
+        call_id=saved["id"], call_version=1, phase="collect", messages=messages,
+        sources=select(copy_ref),
+    )
+    assert preview.body == actual.request.body
+    assert preview.request_sha256 == actual.request.request_sha256
+
+
+def test_provisional_request_rechecks_manifest_task_and_current_source_use(
+    tmp_path: Path,
+) -> None:
+    store, registry, bridge, _call, config, copy_ref, _captured = setup(tmp_path)
+    with pytest.raises(ValueError, match="Saved task"):
+        _preview_call(registry, config)
+    _preview_task(store)
+    provisional = _preview_call(registry, config)
+    with pytest.raises(ValueError, match="Saved configuration"):
+        registry.preview_call(
+            call_id="call-other", configuration_id=config["id"], mission_id="other-mission",
+            task_id="task", attempt_id="attempt-other", loaded_skill_ids=[],
+            exposed_tool_ids=["evidence_lookup"], require_common_tools=False,
+        )
+    with pytest.raises(ValueError, match="unselected capability"):
+        registry.preview_call(
+            call_id="call-other", configuration_id=config["id"], mission_id="mission",
+            task_id="task", attempt_id="attempt-other", loaded_skill_ids=[],
+            exposed_tool_ids=["not-granted"], require_common_tools=False,
+        )
+    altered = json.loads(json.dumps(provisional))
+    altered["body"]["exposed_tools"] = []
+    with pytest.raises(SessionError, match="canonical configuration"):
+        bridge.preview_request(call=altered, phase="collect", messages=[],
+                               sources=select(copy_ref))
+    altered_hash = json.loads(json.dumps(provisional))
+    altered_hash["body"]["configuration_sha256"] = "0" * 64
+    with pytest.raises(SessionError, match="integrity failed"):
+        bridge.preview_request(call=altered_hash, phase="collect", messages=[],
+                               sources=select(copy_ref))
+    restricted = dict(store.get(**copy_ref)["body"], rights_status="restricted")
+    store.transact("revoke-preview-copy", {}, lambda tx: tx.put(
+        "source_copy", copy_ref["id"], restricted, expected_version=copy_ref["version"],
+    ))
+    with pytest.raises(SessionError, match="revoked model input"):
+        bridge.preview_request(call=provisional, phase="collect", messages=[],
+                               sources=select(copy_ref))
+
+
+def test_saved_tool_help_reaches_model_and_cannot_change_after_selection(tmp_path: Path) -> None:
+    explanation = "Read a saved source by its returned ID; a publication PMID is not that ID."
+    store, _registry, bridge, call, _config, copy_ref, _captured = setup(
+        tmp_path, tool_description=explanation,
+    )
+    prepared = bridge.prepare(
+        call_id=call["id"], call_version=1, phase="collect",
+        messages=[{"role": "user", "content": "Inspect the saved abstract"}],
+        sources=select(copy_ref),
+    )
+    assert prepared.request.body["tools"][0]["function"]["description"] == explanation
+    body = json.loads(json.dumps(call["body"]))
+    body["permitted_tools"]["evidence_lookup"]["description"] = "Changed instructions"
+    store.transact("changed-description", {}, lambda tx: tx.put(
+        "agent_call", call["id"], body, expected_version=1,
+    ))
+    with pytest.raises(SessionError, match="descriptor changed"):
+        bridge.prepare(call_id=call["id"], call_version=2, phase="collect",
+                       messages=[], sources=select(copy_ref))
+
+
 def test_saved_selection_abstract_request_and_private_capture(tmp_path: Path,
                                                               monkeypatch) -> None:
     monkeypatch.setenv("GROQ_API_KEY", "synthetic-token")
-    store, _registry, bridge, call, config, copy_ref, captured = setup(tmp_path)
+    raw = json.loads(response())
+    raw["usage"].update({"prompt_tokens_details": {"cached_tokens": 4},
+                         "completion_tokens_details": {"reasoning_tokens": 12}})
+    store, _registry, bridge, call, config, copy_ref, captured = setup(
+        tmp_path, raw=json.dumps(raw).encode(),
+    )
     prepared = bridge.prepare(
         call_id=call["id"], call_version=call["version"], phase="collect",
         messages=[{"role": "user", "content": "Review abstract"}], sources=select(copy_ref),
@@ -154,6 +296,8 @@ def test_saved_selection_abstract_request_and_private_capture(tmp_path: Path,
     assert receipt["body"]["request_sha256"] == prepared.request.request_sha256
     assert receipt["body"]["provider_request_id"] == "provider-request-fixture"
     assert receipt["body"]["usage"]["total_tokens"] == 30
+    assert receipt["body"]["usage"]["prompt_tokens_details"] == {"cached_tokens": 4}
+    assert receipt["body"]["usage"]["completion_tokens_details"] == {"reasoning_tokens": 12}
     assert captured[0][1] == 120 and len(captured) == 1
     assert "PRIVATE_REASONING_SENTINEL" not in json.dumps(receipt)
     payload = store.read_blob(receipt["body"]["blob"]["sha256"]).decode()
@@ -178,6 +322,88 @@ def test_saved_selection_abstract_request_and_private_capture(tmp_path: Path,
     assert marker["body"]["receipt_ref"] == receipt_ref
     resumed = ModelSession(StateStore(tmp_path), ROOT, adapter=bridge.adapter)
     assert resumed.load(prepared.intent_ref).request.body == prepared.request.body
+    assert resumed.store.get(**receipt_ref)["body"]["usage"] == receipt["body"]["usage"]
+
+
+@pytest.mark.parametrize("route", ["direct", "cache", "peer"])
+def test_separate_source_policy_revoked_before_marker_cannot_reach_provider(tmp_path, monkeypatch, route):
+    store, _registry, bridge, call, _config, copy_ref, captured = setup(tmp_path)
+    policy_body = {"copy_ref": copy_ref, "rights_status": "permitted", "allowed_uses": ["model_input"]}
+
+    def grant(tx):
+        policy = tx.put("source_use", "policy", policy_body)
+        tx.bind("source_use.copy", f"{copy_ref['id']}:{copy_ref['version']}", "source_use", policy["id"])
+        return policy
+
+    store.transact("grant-use", {}, grant)
+    prepared = bridge.prepare(call_id=call["id"], call_version=1, phase="collect",
+                              messages=[{"role": "user", "content": "Read the abstract"}],
+                              sources=select(copy_ref, route))
+    original = store.transact
+
+    def revoke_before_marker(operation_id, request, action, **kwargs):
+        if operation_id.startswith("model-dispatch-mark:"):
+            original("revoke-policy", {}, lambda tx: tx.put(
+                "source_use", "policy", {**policy_body, "allowed_uses": ["discovery"]},
+                expected_version=1))
+        return original(operation_id, request, action, **kwargs)
+
+    monkeypatch.setattr(store, "transact", revoke_before_marker)
+    with pytest.raises(SessionError, match="source-use policy revoked"):
+        bridge.invoke_capture(prepared.intent_ref)
+    assert captured == []
+    assert store.records("model_dispatch_attempt") == []
+    assert bridge.load(prepared.intent_ref).request.request_sha256 == prepared.request.request_sha256
+
+
+def test_checked_xml_passage_is_model_input_with_original_copy_lineage(tmp_path, monkeypatch):
+    from ora.evidence.intake import IntakeService
+
+    store = StateStore(tmp_path)
+    library = EvidenceLibrary(store)
+    publication = library.register_publication(
+        "xml-publication", identifiers={"doi": "10.1234/synthetic.xml"},
+        title="A fixture article", verification="Project-owned source identifier",
+    )["publication_ref"]
+    content = (b'<article><article-id pub-id-type="doi">10.1234/synthetic.xml</article-id>'
+               b'<abstract><p>Forty participants were assigned to each group.</p></abstract></article>')
+    inspected = IntakeService(library).inspect_response(
+        "xml-intake", publication, content=content, content_type="application/xml",
+        source_url="https://example.org/fixture.xml", retrieved_at="2026-01-02T00:00:00Z",
+        source_version="fixture-v1", rights_status="permitted", rights_basis="Project-owned fixture",
+        declared_surface="abstract", expected_doi="10.1234/synthetic.xml",
+        selected_texts=["Forty participants were assigned to each group."],
+    )
+    store, registry, bridge, call, config, copy_ref, captured = setup(
+        tmp_path, source_ref=inspected["copy_ref"],
+    )
+    monkeypatch.setenv("GROQ_API_KEY", "synthetic-token")
+    _preview_task(store)
+    selection = (SourceSelection(copy_ref, "permitted", True,
+                                 passage_refs=tuple(inspected["passage_refs"])),)
+    preview = bridge.preview_request(
+        call=_preview_call(registry, config), phase="collect",
+        messages=[{"role": "user", "content": "Explain the reported group sizes."}],
+        sources=selection,
+    )
+    prepared = bridge.prepare(
+        call_id=call["id"], call_version=1, phase="collect",
+        messages=[{"role": "user", "content": "Explain the reported group sizes."}],
+        sources=selection,
+    )
+    assert preview.body == prepared.request.body
+    assert preview.request_sha256 == prepared.request.request_sha256
+    packet = json.loads(prepared.request.body["messages"][1]["content"])["source_packets"][0]
+    assert packet["id"] == copy_ref["id"] and packet["version"] == copy_ref["version"]
+    assert packet["copy_sha256"] == hashlib.sha256(content).hexdigest()
+    assert packet["passage_refs"] == inspected["passage_refs"]
+    assert packet["sha256"] == hashlib.sha256(packet["text"].encode()).hexdigest()
+    assert "Forty participants" in packet["text"] and "<article>" not in packet["text"]
+    receipt = bridge.invoke_capture(prepared.intent_ref)
+    assert len(captured) == 1
+    assert store.get(**receipt)["body"]["intent_ref"] == prepared.intent_ref
+    marker = store.records("model_dispatch_attempt")[0]
+    assert marker["body"]["source_use_refs"] == [inspected["source_use_ref"]]
 
 
 def test_direct_and_peer_route_use_same_saved_request_boundary(tmp_path: Path,
@@ -538,3 +764,36 @@ def test_backup_restore_retains_request_content_and_restricted_reasoning(
     reasoning = TraceJournal(restored).read_reasoning(
         receipt["reasoning_ref"], mission_id="mission", diagnostic_granted=True)
     assert reasoning["text"] == "PRIVATE_REASONING_SENTINEL"
+
+
+def test_credential_binding_survives_reopen_and_dispatch(tmp_path, monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY_BACKUP", "fixture-backup")
+    selected = {"credential_profile": "backup", "quota_domain": "groq-selected"}
+    store, _registry, bridge, call, _config, copy_ref, captured = setup(
+        tmp_path, credential_settings=selected,
+    )
+    prepared = bridge.prepare(call_id=call["id"], call_version=1, phase="collect",
+                              messages=[{"role": "user", "content": "Inspect fixture"}],
+                              sources=select(copy_ref))
+    intent = store.get(**prepared.intent_ref)
+    assert all(intent["body"][key] == value for key, value in selected.items())
+    reopened = ModelSession(StateStore(tmp_path), ROOT, adapter=bridge.adapter)
+    restored = reopened.load(prepared.intent_ref)
+    assert restored.request.credential_profile == "backup"
+    receipt = reopened.invoke_capture(prepared.intent_ref)
+    assert len(captured) == 1
+    for record in (reopened.store.get(**receipt), reopened.store.get(
+        "model_dispatch_attempt", f"model-dispatch:{prepared.intent_ref['id']}"
+    )):
+        assert all(record["body"][key] == value for key, value in selected.items())
+    assert reopened.invoke_capture(prepared.intent_ref) == receipt
+    assert len(captured) == 1
+
+
+@pytest.mark.parametrize("domain", ["fixture-sensitive-value", "key=fixture", {}, None, 3])
+def test_configuration_rejects_invalid_quota_domain_before_save(tmp_path, domain):
+    from ora.agents.configuration import ConfigurationError
+
+    with pytest.raises(ConfigurationError, match="nonsecret"):
+        setup(tmp_path, credential_settings={"credential_profile": "backup",
+                                             "quota_domain": domain})

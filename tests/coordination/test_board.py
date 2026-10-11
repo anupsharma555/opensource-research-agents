@@ -1,5 +1,6 @@
 """Offline board fixtures: peer authority, ownership, plurality and repair."""
 
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from ora.agents import AgentRegistry
 from ora.coordination.board import ProposalBoard, ref
 from ora.coordination.mailbox import PeerMailbox
 from ora.state import StateStore
+from ora.state.store import canonical
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -74,6 +76,67 @@ def test_concurrent_claim_and_expired_owner_cannot_commit(tmp_path):
     assert not board.open_work("mission")
     assert len([e for e in StateStore(tmp_path, clock=lambda: clock[0]).events("mission")
                 if e["type"] == "proposal_result_accepted"]) == 1
+
+
+def test_claim_exact_proposal_version_is_atomic_and_old_replay_hash_is_stable(tmp_path):
+    store = StateStore(tmp_path)
+    actor, *_ = actors(store)
+    board = ProposalBoard(store)
+    assert proposal(board, actor)["status"] == "accepted"
+    changed = board.revise(
+        "revised-task", mission_id="mission", proposal_id="question",
+        actor_id=actor, expected_version=1,
+        reason="The requested scope changed", next_action="Inspect new material",
+    )
+    assert changed["status"] == "accepted"
+    obsolete = board.claim(
+        "old-version-claim", mission_id="mission", proposal_id="question",
+        actor_id=actor, ttl=10, expected_version=1,
+    )
+    assert obsolete["status"] == "rejected" and obsolete["code"] == "conflict"
+    assert board.open_work("mission")[0]["current_claim"] is None
+    assert board.claim(
+        "invalid-version-claim", mission_id="mission", proposal_id="question",
+        actor_id=actor, ttl=10, expected_version=True,
+    )["status"] == "rejected"
+    fresh = board.claim(
+        "fresh-version-claim", mission_id="mission", proposal_id="question",
+        actor_id=actor, ttl=10, expected_version=2,
+    )
+    assert fresh["status"] == "accepted"
+    assert store.get(**fresh["claim_ref"])["body"]["proposal_ref"] == changed["proposal_ref"]
+
+    assert proposal(board, actor, proposal_id="legacy-question")["status"] == "accepted"
+    legacy_request = {
+        "operation_id": "legacy-claim", "mission_id": "mission",
+        "proposal_id": "legacy-question", "actor_id": actor, "ttl": 10,
+        "expected_generation": None, "invitation_id": None,
+    }
+    legacy = board.claim(
+        "legacy-claim", mission_id="mission", proposal_id="legacy-question",
+        actor_id=actor, ttl=10,
+    )
+    assert legacy["status"] == "accepted"
+    restarted = ProposalBoard(StateStore(tmp_path))
+    replay = restarted.claim(
+        "legacy-claim", mission_id="mission", proposal_id="legacy-question",
+        actor_id=actor, ttl=10,
+    )
+    assert replay == legacy
+    db = store._connect()
+    try:
+        stored = db.execute(
+            "SELECT request_hash FROM operations WHERE id='legacy-claim'"
+        ).fetchone()["request_hash"]
+    finally:
+        db.close()
+    assert stored == hashlib.sha256(canonical({
+        "request": legacy_request, "mission_id": "mission", "fence": None,
+    }).encode()).hexdigest()
+    assert restarted.claim(
+        "legacy-claim", mission_id="mission", proposal_id="legacy-question",
+        actor_id=actor, ttl=10,
+    ) == legacy
 
 
 def test_invitation_decisions_and_unclaimed_work(tmp_path):

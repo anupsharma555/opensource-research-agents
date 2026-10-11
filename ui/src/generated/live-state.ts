@@ -1,10 +1,17 @@
 /* Generated from contracts/generated/live_state.schema.json. Do not edit by hand. */
+export type Availability = string | null;
 export type Id = string;
+export type Kind = string;
+export type Version = number;
+export type Id1 = string;
+export type Model = string | null;
 export type Name = string;
 export type Role = string;
+export type Roletemplateid = string | null;
 export type Skillversion = string;
+export type Unavailablereason = string | null;
 export type Agents = LiveAgent[];
-export type Id1 = string;
+export type Id2 = string;
 export type Name1 = string;
 export type Role1 = string;
 export type Status = string;
@@ -13,23 +20,23 @@ export type Body = string;
 export type Sourceid = string;
 export type Spanid = string;
 export type Citations = Citation[];
-export type Id2 = string;
-export type Kind = string;
+export type Id3 = string;
+export type Kind1 = string;
 export type Limitations = string[];
 export type Producerattemptid = string | null;
 export type Title = string;
-export type Version = number;
+export type Version1 = number;
 export type Artifacts = ArtifactView[];
 export type Agentid = string;
 export type Endedat = string | null;
-export type Id3 = string;
+export type Id4 = string;
 export type Resultsummary = string | null;
-export type Availability = "returned" | "absent" | "restricted" | "truncated";
+export type Availability1 = "returned" | "absent" | "restricted" | "truncated";
 export type Text = string | null;
 export type Selectedmodel = string | null;
 export type Skillversions = string[];
 export type Startedat = string;
-export type Status1 = "running" | "waiting" | "completed" | "failed" | "cancelled" | "uncertain";
+export type Status1 = "running" | "waiting" | "completed" | "failed" | "cancelled" | "uncertain" | "superseded";
 export type Taskid = string;
 export type Name2 = string;
 export type Provider = string | null;
@@ -38,32 +45,29 @@ export type Toolcalls = ToolCallView[];
 export type Attempts = AttemptView[];
 export type Capturedat = string;
 export type Disposition = string;
-export type Id4 = string;
+export type Id5 = string;
 export type Supersedesversion = number | null;
 export type Supports = Citation[];
 export type Taskid1 = string;
 export type Text1 = string;
-export type Version1 = number;
+export type Version2 = number;
 export type Claims = ClaimView[];
 export type Attemptid = string | null;
-export type Id5 = string;
-export type Kind1 = string;
+export type Id6 = string;
+export type Kind2 = string;
 export type Message = string;
 export type Occurredat = string;
 export type Status3 = string;
 export type Taskid2 = string | null;
 export type Diagnostics = DiagnosticView[];
 export type Agentid1 = string | null;
-export type Id6 = string;
-export type Kind2 = string;
+export type Id7 = string;
+export type Kind3 = string;
 export type Summary = string;
 export type Taskid3 = string | null;
 export type Time = string;
 export type Events = TimelineView[];
 export type Inputquestion = string | null;
-export type Id7 = string;
-export type Kind3 = string;
-export type Version2 = number;
 export type Acceptedoutputreferences = SavedRecordRef[];
 export type Acceptedoutputreferences1 = SavedRecordRef[];
 export type Attemptid1 = string;
@@ -100,7 +104,7 @@ export type Fromagentid = string;
 export type Id9 = string;
 export type Requestid = string | null;
 export type Sourceid2 = string | null;
-export type Status4 = "requested" | "delivered" | "acknowledged" | "fulfilled";
+export type Status4 = "requested" | "delivered" | "acknowledged" | "awaiting_review" | "fulfilled";
 export type Summary2 = string;
 export type Taskid4 = string;
 export type Toagentid = string;
@@ -108,7 +112,7 @@ export type Updatedat = string | null;
 export type Messages = MessageView[];
 export type Id10 = string;
 export type Latencybasis = string;
-export type Latencyclass = "minimal" | "medium" | "long" | "very_long";
+export type Latencyclass = ("minimal" | "medium" | "long" | "very_long") | null;
 export type Question = string;
 export type Reportartifactid = string | null;
 export type Scope = string;
@@ -116,7 +120,12 @@ export type Startedat1 = string;
 export type Status5 = "active" | "waiting" | "completed" | "cancelled";
 export type Version3 = number;
 export type Parentsnapshotid = string | null;
-export type Proofkind = "synthetic_sample" | "live_model_on_supplied_evidence" | "offline_test";
+export type Proofkind =
+  | "synthetic_sample"
+  | "live_model_on_supplied_evidence"
+  | "offline_test"
+  | "live_mission_pending"
+  | "live_model_with_retrieval";
 export type Sampleversion = string;
 export type Schemaversion1 = "1.0";
 export type Snapshotid = string;
@@ -136,41 +145,73 @@ export type Version4 = number;
 export type Sources1 = SourceView[];
 export type Activeorwaiting = string;
 export type Attemptids = string[];
+export type Displaynumber = number | null;
+export type Firstcontributionat = string | null;
 export type Firstusefulat = string | null;
 export type Id12 = string;
 export type Latencybasis1 = string;
-export type Latencyclass1 = "minimal" | "medium" | "long" | "very_long";
+export type Latencyclass1 = ("minimal" | "medium" | "long" | "very_long") | null;
 export type Parenttaskid = string | null;
-export type Status6 = "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
+export type Status6 = "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "deferred";
 export type Targetartifactid = string | null;
 export type Title2 = string;
+export type Version5 = number | null;
+export type Waitingreason = string | null;
+export type Waitinguntil = string | null;
 export type Tasks = TaskView[];
 export type Enabled = boolean;
 export type Error = string | null;
-export type Model = string;
+export type Model1 = string;
+export type Retrievalroutes = string[];
 export type Runid = string | null;
 export type Agentids = string[];
+export type Completedat = string | null;
+export type Continuingtaskids = string[] | null;
+export type Createdat1 = string | null;
 export type Id13 = string;
+export type Lastprogressat = string | null;
 export type Parentrunid = string | null;
+export type Participationpolicyversion = number | null;
 export type Question1 = string;
+export type Requiredagentids = string[] | null;
 export type Status7 = string;
+export type Title3 = string | null;
+export type Waitingreason1 = string | null;
+export type Workspacelabel = string | null;
 export type Runs = LiveRunSummary[];
+export type Workflowversion = string | null;
+export type Workspaceid = string | null;
+export type Workspacelabel1 = string | null;
 
 export interface LiveState {
   agents: Agents;
   comparisonSnapshot?: ResearchSnapshot | null;
   enabled: Enabled;
   error?: Error;
-  model: Model;
+  model: Model1;
+  retrievalRoutes?: Retrievalroutes;
   runId?: Runid;
   runs: Runs;
   snapshot?: ResearchSnapshot | null;
+  workflowVersion?: Workflowversion;
+  workspaceId?: Workspaceid;
+  workspaceLabel?: Workspacelabel1;
 }
 export interface LiveAgent {
-  id: Id;
+  availability?: Availability;
+  configurationReference?: SavedRecordRef | null;
+  id: Id1;
+  model?: Model;
   name: Name;
   role: Role;
+  roleTemplateId?: Roletemplateid;
   skillVersion: Skillversion;
+  unavailableReason?: Unavailablereason;
+}
+export interface SavedRecordRef {
+  id: Id;
+  kind: Kind;
+  version: Version;
 }
 export interface ResearchSnapshot {
   agents: Agents1;
@@ -193,7 +234,7 @@ export interface ResearchSnapshot {
   tasks: Tasks;
 }
 export interface AgentView {
-  id: Id1;
+  id: Id2;
   name: Name1;
   role: Role1;
   status: Status;
@@ -201,12 +242,12 @@ export interface AgentView {
 export interface ArtifactView {
   body: Body;
   citations: Citations;
-  id: Id2;
-  kind: Kind;
+  id: Id3;
+  kind: Kind1;
   limitations: Limitations;
   producerAttemptId?: Producerattemptid;
   title: Title;
-  version: Version;
+  version: Version1;
 }
 export interface Citation {
   sourceId: Sourceid;
@@ -215,7 +256,7 @@ export interface Citation {
 export interface AttemptView {
   agentId: Agentid;
   endedAt?: Endedat;
-  id: Id3;
+  id: Id4;
   resultSummary?: Resultsummary;
   returnedReasoning: ReturnedReasoning;
   selectedModel?: Selectedmodel;
@@ -226,7 +267,7 @@ export interface AttemptView {
   toolCalls: Toolcalls;
 }
 export interface ReturnedReasoning {
-  availability: Availability;
+  availability: Availability1;
   text?: Text;
 }
 export interface ToolCallView {
@@ -236,17 +277,17 @@ export interface ToolCallView {
 }
 export interface ClaimView {
   disposition: Disposition;
-  id: Id4;
+  id: Id5;
   supersedesVersion?: Supersedesversion;
   supports: Supports;
   taskId: Taskid1;
   text: Text1;
-  version: Version1;
+  version: Version2;
 }
 export interface DiagnosticView {
   attemptId?: Attemptid;
-  id: Id5;
-  kind: Kind1;
+  id: Id6;
+  kind: Kind2;
   message: Message;
   occurredAt: Occurredat;
   status: Status3;
@@ -254,8 +295,8 @@ export interface DiagnosticView {
 }
 export interface TimelineView {
   agentId?: Agentid1;
-  id: Id6;
-  kind: Kind2;
+  id: Id7;
+  kind: Kind3;
   summary: Summary;
   taskId?: Taskid3;
   time: Time;
@@ -274,11 +315,6 @@ export interface SnapshotInspection {
   sources: Sources;
   steps?: Steps;
   timingBasis: Timingbasis;
-}
-export interface SavedRecordRef {
-  id: Id7;
-  kind: Kind3;
-  version: Version2;
 }
 export interface AttemptProvenanceView {
   acceptedOutputReferences?: Acceptedoutputreferences1;
@@ -337,7 +373,7 @@ export interface MessageView {
 export interface MissionView {
   id: Id10;
   latencyBasis: Latencybasis;
-  latencyClass: Latencyclass;
+  latencyClass?: Latencyclass;
   question: Question;
   reportArtifactId?: Reportartifactid;
   scope: Scope;
@@ -365,19 +401,38 @@ export interface PassageView {
 export interface TaskView {
   activeOrWaiting: Activeorwaiting;
   attemptIds: Attemptids;
+  displayNumber?: Displaynumber;
+  firstContributionAt?: Firstcontributionat;
   firstUsefulAt?: Firstusefulat;
   id: Id12;
   latencyBasis: Latencybasis1;
-  latencyClass: Latencyclass1;
+  latencyClass?: Latencyclass1;
   parentTaskId?: Parenttaskid;
   status: Status6;
   targetArtifactId?: Targetartifactid;
   title: Title2;
+  version?: Version5;
+  waitingOperationReference?: SavedRecordRef | null;
+  waitingReason?: Waitingreason;
+  waitingUntil?: Waitinguntil;
 }
 export interface LiveRunSummary {
   agentIds?: Agentids;
+  completedAt?: Completedat;
+  continuingTaskIds?: Continuingtaskids;
+  createdAt?: Createdat1;
   id: Id13;
+  lastProgressAt?: Lastprogressat;
   parentRunId?: Parentrunid;
+  participationPolicyVersion?: Participationpolicyversion;
   question: Question1;
+  requestedAgentNames?: Requestedagentnames;
+  requiredAgentIds?: Requiredagentids;
   status: Status7;
+  title?: Title3;
+  waitingReason?: Waitingreason1;
+  workspaceLabel?: Workspacelabel;
+}
+export interface Requestedagentnames {
+  [k: string]: string;
 }

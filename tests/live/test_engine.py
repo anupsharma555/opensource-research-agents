@@ -298,6 +298,29 @@ def wait_status(host, run_id, wanted):
     pytest.fail(f"run did not reach {wanted}")
 
 
+def test_saved_run_dates_and_roster_do_not_change_when_viewer_refreshes(tmp_path):
+    host = ResearchHost(ROOT, tmp_path, TwoPeersProvider())
+    try:
+        receipt = host.start(LiveStartRequest(
+            request_id="history-metadata", question="Read the saved counts.",
+            evidence_text="The report records two groups of forty participants.",
+            agent_ids=["agent-synthesis"],
+        ))
+        state, _ = wait_done(host, receipt.run_id)
+        row = next(run for run in state.runs if run.id == receipt.run_id)
+        assert row.created_at and row.last_progress_at and row.completed_at
+        assert row.title == "Read the saved counts."
+        assert state.agents[0].model == host.provider.model
+        assert state.agents[0].role_template_id
+        before = host.calls(receipt.run_id)
+        refreshed = host.state(receipt.run_id)
+        assert refreshed.runs == state.runs
+        assert refreshed.workspace_id == state.workspace_id
+        assert host.calls(receipt.run_id) == before
+    finally:
+        host.close()
+
+
 def test_start_peer_followup_and_restart(tmp_path):
     provider = FakeProvider()
     host = ResearchHost(ROOT, tmp_path, provider)
@@ -918,3 +941,27 @@ def test_followup_peer_receives_exact_target_and_fulfilled_delegation_context(tm
     assert len(peer_requests) == 1
     assert len(host.calls(followed.run_id)) == 4
     host.close()
+
+
+@pytest.mark.parametrize("followup", [False, True])
+def test_legacy_host_rejects_backup_before_saving_or_calling(tmp_path, followup):
+    provider = FakeProvider()
+    host = ResearchHost(ROOT, tmp_path, provider)
+    common = {"request_id": "backup-fixture", "question": "Inspect the fixture",
+              "agent_ids": ["agent-synthesis"], "credential_profile": "backup"}
+    try:
+        if followup:
+            request = LiveFollowupRequest(**common, parent_run_id="absent-parent",
+                                          parent_snapshot_id="absent-snapshot",
+                                          target_id="absent-target", target_version=1)
+            operation = host.followup
+        else:
+            request = LiveStartRequest(**common, evidence_text="Fixture text")
+            operation = host.start
+        with pytest.raises(LiveError, match="Backup credential selection"):
+            operation(request)
+        with host._connect() as db:
+            assert db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
+        assert provider.sage_calls == provider.mira_calls == 0
+    finally:
+        host.close()

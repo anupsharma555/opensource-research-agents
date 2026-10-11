@@ -96,6 +96,22 @@ def test_delivery_ack_and_answer_are_distinct_with_nested_payload(tmp_path):
     assert len(store.get("mail_request", "request")["body"]["answer_refs"]) == 1
 
 
+def test_request_accepts_multiline_question_and_expected_artifact(tmp_path):
+    store, peers, cause = setup(tmp_path)
+    question = "Which comparison is supported?\nCheck both reported arms."
+    expected_artifact = "A methods note\nwith evidence-linked limits"
+    result = ask(
+        PeerMailbox(store), peers, cause,
+        question=question, expected_artifact=expected_artifact,
+    )
+    assert result["status"] == "accepted"
+    saved = store.get("mail_request", "request")["body"]
+    assert (saved["question"], saved["expected_artifact"]) == (
+        question, expected_artifact,
+    )
+    assert len(store.records("mail_message")) == len(store.records("mail_outbox")) == 1
+
+
 def test_sender_replays_delivery_and_ack_without_task_subscription(tmp_path):
     store, peers, cause = setup(tmp_path)
     mail = PeerMailbox(store)

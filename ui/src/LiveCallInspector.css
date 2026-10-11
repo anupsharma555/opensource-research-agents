@@ -1,0 +1,74 @@
+.live-call-tool {
+  display: grid;
+  gap: 5px;
+}
+
+.live-call-tool .live-call-payload {
+  margin-top: 3px;
+}
+
+.live-call-tool .live-call-payload > strong {
+  display: block;
+  color: #355b42;
+  font-size: 12px;
+}
+
+.live-call-tool .live-call-payload pre {
+  margin: 4px 0 7px;
+  max-height: 320px;
+}
+
+.live-call-readable-result {
+  border-left: 3px solid var(--accent, #477755);
+  padding: 2px 0 2px 12px;
+}
+
+.live-call-readable-result p {
+  margin: 4px 0;
+}
+
+.live-call-readable-result .live-call-excerpt-relation {
+  color: #385544;
+  font-size: 13px;
+}
+
+.live-call-readable-result blockquote {
+  margin: 7px 0 12px;
+  padding: 8px 12px;
+  border-left: 2px solid #9ab6a1;
+  background: #f4f8f3;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.live-call-readable-result pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.live-call-source-request dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px 16px;
+  margin: 5px 0;
+}
+
+.live-call-source-request dl > div {
+  display: grid;
+  gap: 2px;
+}
+
+.live-call-source-request dt {
+  color: #355b42;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.live-call-source-request dd {
+  margin: 0;
+}
+
+.live-call-source-request p {
+  margin: 4px 0;
+  font-size: 12px;
+}

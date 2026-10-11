@@ -1,0 +1,6 @@
+/* Keep the selected step's outcome above one direct exact-record inspection. */
+.selected-work-step .step-inspector > summary { min-height: 44px; padding: 10px 12px; font-size: 14px; line-height: 1.4; font-weight: 700; color: #285940; }
+.selected-work-step .step-inspector[open] > summary { border-bottom: 1px solid #dbe5d9; margin-bottom: 12px; }
+.selected-work-step .step-saved-records { display: grid; gap: 12px; }
+.selected-work-step .step-saved-records .inspection-group { margin: 0; }
+.selected-work-step .step-inspector .live-call-inspector { margin-top: 0; }

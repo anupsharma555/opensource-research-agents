@@ -18,7 +18,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
-SKILL_VERSION = "0.1.0"
+SKILL_VERSION = "0.3.1"
+SNAPSHOT_COMPONENT_FORMAT = "ora.snapshot.components.v1"
 KINDS = (
     "agent_attempt", "agent_call", "board_outcome", "board_proposal",
     "capacity_operation", "context_inclusion",
@@ -91,23 +92,125 @@ def _storage(db_path: Path) -> dict:
 def _snapshot_storage(db: sqlite3.Connection, mission_id: str, run_id: str) -> dict:
     prefix = f"snapshot-{run_id}-"
     rows = db.execute(
-        "SELECT json_extract(r.body,'$.blob.sha256') AS sha256, "
-        "json_extract(r.body,'$.blob.size') AS size FROM records r "
+        "SELECT r.id,r.version,r.body FROM records r "
         "JOIN heads h USING(kind,id,version) WHERE r.kind='research_snapshot' "
         "AND json_extract(r.body,'$.mission_id')=? AND substr(r.id,1,?)=?",
         (mission_id, len(prefix), prefix),
     ).fetchall()
-    unique = {}
-    missing = 0
+    categories = {
+        name: {"reference_count": 0, "known_logical_reference_bytes": 0,
+               "missing_blob_metadata_count": 0, "hash_sizes": {}}
+        for name in ("legacy_full", "manifest", "component", "unclassified")
+    }
+    hash_sizes: dict[str, set[int]] = {}
+    issues = Counter()
+    known_logical_bytes = 0
+    complete = True
+    legacy_count = component_format_count = unknown_format_count = 0
+
+    def add_blob(category: str, blob: object, seen_in_snapshot: dict[str, int]) -> None:
+        nonlocal complete, known_logical_bytes
+        stats = categories[category]
+        stats["reference_count"] += 1
+        digest = blob.get("sha256") if isinstance(blob, dict) else None
+        size = blob.get("size") if isinstance(blob, dict) else None
+        if (not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)
+                or type(size) is not int or size < 0):
+            stats["missing_blob_metadata_count"] += 1
+            issues["missing_or_invalid_blob_metadata"] += 1
+            complete = False
+            return
+        hash_sizes.setdefault(digest, set()).add(size)
+        stats["hash_sizes"].setdefault(digest, set()).add(size)
+        if digest in seen_in_snapshot:
+            issues["duplicate_hash_within_snapshot"] += 1
+            if seen_in_snapshot[digest] != size:
+                complete = False
+            return
+        seen_in_snapshot[digest] = size
+        stats["known_logical_reference_bytes"] += size
+        known_logical_bytes += size
+
     for row in rows:
-        if isinstance(row["sha256"], str) and type(row["size"]) is int and row["size"] >= 0:
-            unique[row["sha256"]] = row["size"]
+        body = json.loads(row["body"])
+        storage_format = body.get("storage_format")
+        if storage_format is None:
+            category = "legacy_full"
+            legacy_count += 1
+        elif storage_format == SNAPSHOT_COMPONENT_FORMAT:
+            category = "manifest"
+            component_format_count += 1
         else:
-            missing += 1
+            category = "unclassified"
+            unknown_format_count += 1
+            issues["unknown_storage_format"] += 1
+            complete = False
+        seen_in_snapshot: dict[str, int] = {}
+        add_blob(category, body.get("blob"), seen_in_snapshot)
+        links = db.execute(
+            "SELECT target_kind,target_id,target_version FROM links "
+            "WHERE source_kind='research_snapshot' AND source_id=? "
+            "AND source_version=? AND relation='snapshot_part'",
+            (row["id"], row["version"]),
+        ).fetchall()
+        if links and storage_format is None:
+            issues["legacy_snapshot_with_component_links"] += 1
+            complete = False
+        for link in links:
+            target = {"kind": link["target_kind"], "id": link["target_id"],
+                      "version": link["target_version"]}
+            if _pointer(target, "snapshot_component") is None:
+                issues["invalid_component_link"] += 1
+                complete = False
+                continue
+            component = _exact(db, target)
+            if component is None:
+                issues["missing_component_record"] += 1
+                complete = False
+                continue
+            blob = component["body"].get("blob")
+            digest = blob.get("sha256") if isinstance(blob, dict) else None
+            if target["id"] != f"snapshot-component-{digest}" or target["version"] != 1:
+                issues["component_identity_mismatch"] += 1
+                complete = False
+            add_blob("component" if storage_format == SNAPSHOT_COMPONENT_FORMAT
+                     else "unclassified", blob, seen_in_snapshot)
+
+    conflicting = {digest for digest, sizes in hash_sizes.items() if len(sizes) > 1}
+    if conflicting:
+        issues["conflicting_size_for_hash"] = len(conflicting)
+        complete = False
+    known_unique_bytes = sum(next(iter(sizes)) for digest, sizes in hash_sizes.items()
+                             if digest not in conflicting)
+    contributions = {}
+    for name, stats in categories.items():
+        sizes = stats.pop("hash_sizes")
+        local_conflicts = any(len(group) > 1 for group in sizes.values())
+        contributions[name] = {
+            **stats,
+            "unique_hashes_with_metadata": len(sizes),
+            "distinct_sha256": sorted(sizes),
+            "unique_object_bytes_from_metadata": (
+                sum(next(iter(group)) for group in sizes.values())
+                if not local_conflicts and stats["missing_blob_metadata_count"] == 0 else None
+            ),
+        }
     return {"scope": "saved_research_snapshot_records_with_selected_run_id_prefix",
-            "count": len(rows), "unique_blob_hashes": len(unique),
-            "unique_blob_logical_bytes": sum(unique.values()),
-            "missing_blob_size_count": missing, "physical_bytes_verified": False}
+            "count": len(rows), "legacy_full_snapshot_count": legacy_count,
+            "component_format_snapshot_count": component_format_count,
+            "unknown_format_snapshot_count": unknown_format_count,
+            "contributions": contributions,
+            "known_logical_reference_bytes": known_logical_bytes,
+            "logical_reference_bytes": known_logical_bytes if complete else None,
+            "unique_blob_hashes": len(hash_sizes),
+            "distinct_referenced_object_sha256": sorted(hash_sizes),
+            "known_unique_object_bytes_from_metadata": known_unique_bytes,
+            "unique_blob_logical_bytes": known_unique_bytes if complete else None,
+            "missing_blob_size_count": issues["missing_or_invalid_blob_metadata"],
+            "issues": dict(sorted(issues.items())),
+            "recorded_link_coverage_only": component_format_count > 0,
+            "manifest_contents_or_link_completeness_verified": False,
+            "physical_bytes_verified": False}
 
 
 def _control_revisions(db: sqlite3.Connection, run_id: str) -> dict:
@@ -399,7 +502,7 @@ def build_receipt(db: sqlite3.Connection, db_path: Path, run_ids: list[str]) -> 
             "saved_snapshot_storage": _snapshot_storage(db, mission_id, run_id),
             "control_revision_growth": _control_revisions(db, run_id),
         })
-    return {"schema": "ora.codex.run_metadata_receipt.v1",
+    return {"schema": "ora.codex.run_metadata_receipt.v2",
             "generator": {"skill": "os-qualify-run", "skill_version": SKILL_VERSION,
                           "helper_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()},
             "observed_at": datetime.now(timezone.utc).isoformat(),

@@ -62,3 +62,47 @@ export function followUpLiveRun(body: LiveFollowupRequest): Promise<LiveReceipt>
 export function getLiveCalls(runId: string, attemptId: string): Promise<{ records: unknown[] }> {
   return request<{ records: unknown[] }>(`/api/live/calls?runId=${encodeURIComponent(runId)}&attemptId=${encodeURIComponent(attemptId)}`);
 }
+
+export interface LiveReasoning {
+  runId: string;
+  callId: string;
+  agentId: string;
+  attemptId: string;
+  status: 'available' | 'unavailable';
+  text?: string | null;
+  origin?: 'provider_returned';
+  redacted?: boolean;
+  reason?: string;
+}
+
+export function getLiveReasoning(runId: string, callId: string): Promise<LiveReasoning> {
+  return request<LiveReasoning>(`/api/live/reasoning?runId=${encodeURIComponent(runId)}&callId=${encodeURIComponent(callId)}`, { cache: 'no-store' });
+}
+
+export type PeerRecordReference = { kind: 'mail_message' | 'mail_answer'; id: string; version: number };
+
+export interface LivePeerRecord {
+  runId: string;
+  originRunId?: string;
+  reference: PeerRecordReference;
+  senderId?: string | null;
+  recipientId?: string | null;
+  requestId?: string | null;
+  createdAt?: string | null;
+  deliveredAt?: string | null;
+  acknowledgedAt?: string | null;
+  partial?: boolean | null;
+  status: 'available' | 'unavailable';
+  content?: unknown;
+  contentReference?: { kind: string; id: string; version: number } | null;
+  redacted?: boolean;
+  reason?: string | null;
+}
+
+export async function getLivePeerRecord(runId: string, ref: PeerRecordReference): Promise<LivePeerRecord> {
+  const query = new URLSearchParams({ runId, kind: ref.kind, id: ref.id, version: String(ref.version) });
+  await bootstrapLiveSession();
+  const response = await fetch(`/api/live/peer-record?${query}`, { credentials: 'same-origin', cache: 'no-store' });
+  if (!response.ok) throw new Error(`Exact peer content request failed (${response.status}).`);
+  return response.json() as Promise<LivePeerRecord>;
+}

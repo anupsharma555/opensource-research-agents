@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from ora.retrieval.normalize import normalize_response
+import pytest
+
+from ora.retrieval.normalize import RetrievalFormatError, normalize_response
 
 
 def request(**changes):
@@ -139,6 +141,23 @@ def test_fetch_uses_same_envelope_without_inventing_search_query_or_total():
     assert result["outcome"] == "success"
 
 
+@pytest.mark.parametrize("returned_offset, expected_outcome, expected_errors", [
+    (0, "success", []),
+    (2, "partial", ["returned_window_mismatch"]),
+])
+def test_omitted_count_offset_means_zero_but_wrong_returned_offset_is_flagged(
+    returned_offset, expected_outcome, expected_errors,
+):
+    result = normalize_response(
+        request(requested_window={"limit": 2}),
+        {"status": "ok", "count": 1, "offset": returned_offset, "items": [hit(1)]},
+        adapter="count_offset", retrieved_at="2026-10-08T10:01:00Z",
+    )
+    assert result["outcome"] == expected_outcome
+    assert result["window"]["window_errors"] == expected_errors
+    assert result["request"]["requested_window"]["offset"] is None
+
+
 def test_empty_item_failure_provider_failure_and_malformed_are_distinct():
     base = request(requested_window={"offset": 0, "limit": 2})
     cases = [
@@ -158,6 +177,25 @@ def test_empty_item_failure_provider_failure_and_malformed_are_distinct():
         assert result["items"] == []
         if outcome == "provider_failure":
             assert result["failure"]["category"] in {"provider_error", "quota_wait"}
+
+
+def test_oversized_transport_outcome_is_not_malformed_or_empty():
+    base = request(requested_window={"offset": 0, "limit": 2})
+    oversized = normalize_response(
+        base, {"status": "malformed", "error_code": "upstream_error"},
+        adapter="count_offset", retrieved_at="2026-10-08T10:01:00Z",
+        oversized_response=True,
+    )
+    assert oversized["outcome"] == "oversized_response"
+    assert oversized["failure"]["category"] == "oversized_response"
+    assert oversized["items"] == []
+    assert oversized["window"]["more_available"] == "unknown"
+    with pytest.raises(RetrievalFormatError, match="Oversized response"):
+        normalize_response(
+            base, {"status": "ok", "count": 0, "offset": 0, "items": []},
+            adapter="count_offset", retrieved_at="2026-10-08T10:01:00Z",
+            oversized_response=True,
+        )
 
 
 def test_provider_exposure_limit_and_unknown_total_are_not_silent_exhaustion():

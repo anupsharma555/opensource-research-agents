@@ -1,8 +1,8 @@
-"""Let a developer inspect sample research data and run offline foundation checks.
+"""Inspect research records, run offline checks, or submit to a selected local host.
 
-The terminal commands call the shared contract, benchmark, and skill modules and
-print their results. Commands for a production mission state that they are
-unavailable instead of starting a research host.
+Mission commands use the same authenticated service as Atlas and return saved
+receipts; closing the submitting terminal does not own the research lifetime.
+Provider execution starts only through an explicitly launched live host.
 """
 
 import argparse
@@ -49,8 +49,10 @@ def main():
     sub.add_parser("benchmarks", help="Verify frozen synthetic benchmark packets")
     sub.add_parser("skills", help="Validate role, skill, helper and provenance references")
     from .live.cli import configure as configure_live
+    from .live.cli import configure_mission
 
-    configure_live(sub.add_parser("live", help="Explicit local Groq research over supplied evidence"))
+    configure_live(sub.add_parser("live", help="Launch or connect to the persistent local research service"))
+    configure_mission(sub.add_parser("mission", help="Submit or inspect work on the selected persistent host"))
     sample = sub.add_parser(
         "inspect-sample", help="Inspect the same sample sources as the desktop app"
     )
@@ -58,7 +60,7 @@ def main():
     sample.add_argument(
         "--view", choices=["findings", "sources", "diagnostics"], default="findings"
     )
-    for name in ["mission", "source-replay", "store", "export-run"]:
+    for name in ["source-replay", "store", "export-run"]:
         sub.add_parser(name, help="Planned production capability; unavailable in this foundation")
     args = parser.parse_args()
     root = Path.cwd()
@@ -87,6 +89,10 @@ def main():
             from .live.cli import main as live_main
 
             live_main(args, root)
+        elif args.command == "mission":
+            from .live.cli import mission_main
+
+            mission_main(args, root)
         else:
             parser.exit(
                 2,

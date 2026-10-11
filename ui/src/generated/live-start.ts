@@ -3,15 +3,19 @@
  * @minItems 1
  */
 export type Agentids = [string, ...string[]];
+export type Credentialprofile = ("primary" | "backup") | null;
 export type Evidencetext = string;
 export type Question = string;
 export type Requestid = string;
+export type Requiredagentids = string[];
 export type Scope = string;
 
 export interface LiveStartRequest {
   agentIds: Agentids;
-  evidenceText: Evidencetext;
+  credentialProfile?: Credentialprofile;
+  evidenceText?: Evidencetext;
   question: Question;
   requestId: Requestid;
+  requiredAgentIds?: Requiredagentids;
   scope?: Scope;
 }

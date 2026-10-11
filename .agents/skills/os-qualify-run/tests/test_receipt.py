@@ -21,6 +21,8 @@ def test_receipt_keeps_unknown_usage_and_continuing_work_distinct(tmp_path: Path
     writer.execute("PRAGMA journal_mode=WAL")
     writer.execute("CREATE TABLE records(kind TEXT,id TEXT,version INTEGER,body TEXT,PRIMARY KEY(kind,id,version))")
     writer.execute("CREATE TABLE heads(kind TEXT,id TEXT,version INTEGER,PRIMARY KEY(kind,id))")
+    writer.execute("CREATE TABLE links(source_kind TEXT,source_id TEXT,source_version INTEGER,"
+                   "target_kind TEXT,target_id TEXT,target_version INTEGER,relation TEXT)")
 
     def put(kind: str, record_id: str, body: dict) -> None:
         writer.execute("INSERT INTO records VALUES (?,?,?,?)",
@@ -125,9 +127,10 @@ def test_receipt_keeps_unknown_usage_and_continuing_work_distinct(tmp_path: Path
 
     result = receipt["runs"][0]
     assert receipt["generator"] == {
-        "skill": "os-qualify-run", "skill_version": "0.1.0",
+        "skill": "os-qualify-run", "skill_version": "0.3.1",
         "helper_sha256": hashlib.sha256(SCRIPT.read_bytes()).hexdigest(),
     }
+    assert receipt["schema"] == "ora.codex.run_metadata_receipt.v2"
     assert len(result["prepared_call_ids"]) == 3
     assert len(result["predispatch_marked_call_ids"]) == 2
     assert len(result["captured_call_ids"]) == 2
@@ -169,6 +172,8 @@ def test_explicitly_reported_zero_usage_stays_zero(tmp_path: Path) -> None:
     db.row_factory = sqlite3.Row
     db.execute("CREATE TABLE records(kind TEXT,id TEXT,version INTEGER,body TEXT,PRIMARY KEY(kind,id,version))")
     db.execute("CREATE TABLE heads(kind TEXT,id TEXT,version INTEGER,PRIMARY KEY(kind,id))")
+    db.execute("CREATE TABLE links(source_kind TEXT,source_id TEXT,source_version INTEGER,"
+               "target_kind TEXT,target_id TEXT,target_version INTEGER,relation TEXT)")
 
     def put(kind: str, record_id: str, body: dict) -> None:
         db.execute("INSERT INTO records VALUES (?,?,1,?)", (kind, record_id, json.dumps(body)))
@@ -195,3 +200,100 @@ def test_explicitly_reported_zero_usage_stays_zero(tmp_path: Path) -> None:
     assert result["usage"]["optional_subset_known_counts"] == {
         "cached_tokens": 1, "reasoning_tokens": 1,
     }
+    assert result["saved_snapshot_storage"]["logical_reference_bytes"] == 0
+    assert result["saved_snapshot_storage"]["unique_blob_logical_bytes"] == 0
+
+
+def test_snapshot_storage_counts_legacy_and_shared_components_without_blob_reads(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.sqlite3"
+    writer = sqlite3.connect(db_path)
+    writer.execute("PRAGMA journal_mode=WAL")
+    writer.execute("CREATE TABLE records(kind TEXT,id TEXT,version INTEGER,body TEXT,PRIMARY KEY(kind,id,version))")
+    writer.execute("CREATE TABLE heads(kind TEXT,id TEXT,version INTEGER,PRIMARY KEY(kind,id))")
+    writer.execute("CREATE TABLE links(source_kind TEXT,source_id TEXT,source_version INTEGER,"
+                   "target_kind TEXT,target_id TEXT,target_version INTEGER,relation TEXT)")
+
+    def put(kind: str, record_id: str, body: dict) -> None:
+        writer.execute("INSERT INTO records VALUES (?,?,1,?)", (kind, record_id, json.dumps(body)))
+        writer.execute("INSERT INTO heads VALUES (?,?,1)", (kind, record_id))
+
+    def link(snapshot_id: str, component_id: str) -> None:
+        writer.execute("INSERT INTO links VALUES ('research_snapshot',?,1,'snapshot_component',?,1,'snapshot_part')",
+                       (snapshot_id, component_id))
+
+    run_id = "mixed-run"
+    mission_id = "mixed-mission"
+    put("mission_run", run_id, {"mission_id": mission_id, "status": "completed"})
+    legacy_id = f"snapshot-{run_id}-legacy"
+    first_id = f"snapshot-{run_id}-first"
+    second_id = f"snapshot-{run_id}-second"
+    put("research_snapshot", legacy_id, {"mission_id": mission_id,
+                                         "blob": {"sha256": "a" * 64, "size": 100}})
+    for snapshot_id, digest, size in ((first_id, "b" * 64, 20), (second_id, "c" * 64, 22)):
+        put("research_snapshot", snapshot_id, {"mission_id": mission_id,
+                                               "storage_format": "ora.snapshot.components.v1",
+                                               "blob": {"sha256": digest, "size": size}})
+    shared = f"snapshot-component-{'d' * 64}"
+    other = f"snapshot-component-{'e' * 64}"
+    put("snapshot_component", shared, {"blob": {"sha256": "d" * 64, "size": 50}})
+    put("snapshot_component", other, {"blob": {"sha256": "e" * 64, "size": 30}})
+    link(first_id, shared)
+    link(first_id, other)
+    link(second_id, shared)
+    writer.commit()
+
+    def inspect() -> dict:
+        reader = sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True, isolation_level=None)
+        reader.row_factory = sqlite3.Row
+        try:
+            reader.execute("PRAGMA query_only=ON")
+            reader.execute("BEGIN")
+            packet = receipt_module.build_receipt(reader, db_path, [run_id])
+            json.dumps(packet)  # The CLI must be able to save every diagnostic field.
+            result = packet["runs"][0]
+            reader.execute("ROLLBACK")
+            return result["saved_snapshot_storage"]
+        finally:
+            reader.close()
+
+    first = inspect()
+    assert first["count"] == 3
+    assert first["legacy_full_snapshot_count"] == 1
+    assert first["component_format_snapshot_count"] == 2
+    assert first["contributions"]["legacy_full"]["known_logical_reference_bytes"] == 100
+    assert first["contributions"]["manifest"]["known_logical_reference_bytes"] == 42
+    assert first["contributions"]["component"]["known_logical_reference_bytes"] == 130
+    assert first["contributions"]["component"]["unique_object_bytes_from_metadata"] == 80
+    assert first["contributions"]["component"]["distinct_sha256"] == ["d" * 64, "e" * 64]
+    assert first["logical_reference_bytes"] == 272
+    assert first["unique_blob_hashes"] == 5
+    assert first["distinct_referenced_object_sha256"] == [value * 64 for value in "abcde"]
+    assert first["unique_blob_logical_bytes"] == 222
+    assert first["physical_bytes_verified"] is False
+
+    link(second_id, f"snapshot-component-{'f' * 64}")  # Exact link, absent target record.
+    conflict = f"snapshot-component-{'g' * 64}"
+    put("snapshot_component", conflict, {"blob": {"sha256": "d" * 64, "size": 51}})
+    link(second_id, conflict)  # Same content hash with conflicting size and identity.
+    writer.commit()
+    unresolved = inspect()
+    future_id = f"snapshot-{run_id}-future"
+    put("research_snapshot", future_id, {"mission_id": mission_id,
+                                         "storage_format": "ora.snapshot.future.v2",
+                                         "blob": {"sha256": "9" * 64, "size": 0}})
+    bad = f"snapshot-component-{'8' * 64}"
+    put("snapshot_component", bad, {"blob": {"sha256": "8" * 64, "size": "unknown"}})
+    link(first_id, bad)
+    writer.commit()
+    malformed = inspect()
+    writer.close()
+    assert unresolved["logical_reference_bytes"] is None
+    assert unresolved["unique_blob_logical_bytes"] is None
+    assert unresolved["known_logical_reference_bytes"] == 272
+    assert unresolved["issues"]["missing_component_record"] == 1
+    assert unresolved["issues"]["component_identity_mismatch"] == 1
+    assert unresolved["issues"]["conflicting_size_for_hash"] == 1
+    assert malformed["unknown_format_snapshot_count"] == 1
+    assert malformed["missing_blob_size_count"] == 1
+    assert malformed["contributions"]["unclassified"]["known_logical_reference_bytes"] == 0
+    assert malformed["logical_reference_bytes"] is None

@@ -8,12 +8,15 @@ are reported explicitly. This reader never starts a model or provider operation.
 from __future__ import annotations
 
 import json
+from contextlib import closing
 
 from ora.contracts.models import ResearchSnapshot, SnapshotInspection
 
 from .blobs import IntegrityFault
+from .snapshot_storage import FORMAT as SNAPSHOT_STORAGE_FORMAT
+from .snapshot_storage import accept_components, prepare_snapshot, read_snapshot
 from .steps import explain_event
-from .store import StateError, StateStore, canonical
+from .store import StateError, StateStore, Transaction, canonical, reference
 from .view_policy import project_record, visible_in_mission
 
 
@@ -31,12 +34,13 @@ def save_snapshot(store: StateStore, operation_id: str, snapshot: dict, *, sourc
         "records": [], "acceptedOutputReferences": accepted_outputs,
         "followupTarget": followup_target, "timingBasis": timing_basis,
     }).model_dump(mode="json", by_alias=True)
-    blob = store.put_blob(canonical(base).encode())
-    request = {"mission_id": validated.mission.id, "blob": blob, "inspection": inspection, "detail_refs": detail_refs, "parent": parent_ref}
+    blob, components = prepare_snapshot(store, base)
+    request = {"mission_id": validated.mission.id, "blob": blob, "storage_format": SNAPSHOT_STORAGE_FORMAT, "inspection": inspection, "detail_refs": detail_refs, "parent": parent_ref}
 
     def save(tx):
         if bool(parent_ref) != bool(validated.parent_snapshot_id):
             raise StateError("Snapshot parent identity and exact parent reference must agree")
+        parent = None
         if parent_ref:
             parent = tx.get(**parent_ref)
             if not parent or validated.parent_snapshot_id != parent["id"]:
@@ -62,20 +66,42 @@ def save_snapshot(store: StateStore, operation_id: str, snapshot: dict, *, sourc
             copy_body = copy_record["body"]
             if copy_body["encounter"] not in item["encounterReferences"]:
                 raise StateError("Source provenance must include the encounter that supplied this copy")
+            inherited_source = None
+            if item["origin"] == "reused":
+                if parent is None or item.get("fromSnapshotId") != parent["id"]:
+                    raise StateError("Reused source does not name the exact parent snapshot")
+                inherited_source = next(
+                    (previous for previous in parent["body"]["inspection"]["sources"]
+                     if previous["copyReference"] == item["copyReference"]),
+                    None,
+                )
+                if (
+                    inherited_source is None
+                    or inherited_source["sourceId"] != item["sourceId"]
+                ):
+                    raise StateError("Reused source differs from its declared saved origin")
             for pointer in item["encounterReferences"]:
                 encounter = tx.get(**pointer)
                 publication = encounter["body"].get("publication") if encounter else None
                 if not encounter or encounter["kind"] != "source_encounter" or not publication or publication["kind"] != "publication" or publication["id"] != copy_body["publication"]["id"]:
                     raise StateError("Source encounter belongs to a different publication")
                 hit_ref = encounter["body"].get("retrieval_hit")
-                if hit_ref and (not (hit := tx.get(**hit_ref)) or hit["kind"] != "retrieval_hit" or not visible_in_mission(hit, validated.mission.id)):
+                if hit_ref and (
+                    not (hit := tx.get(**hit_ref))
+                    or hit["kind"] != "retrieval_hit"
+                    or not (
+                        visible_in_mission(hit, validated.mission.id)
+                        or (inherited_source and pointer in inherited_source["encounterReferences"])
+                    )
+                ):
                     raise StateError("Source encounter does not resolve to an accessible retrieval hit")
+            if (
+                inherited_source is not None
+                and inherited_source["encounterReferences"] != item["encounterReferences"]
+            ):
+                raise StateError("Reused source differs from its declared saved origin")
             if copy_body.get("blob"):
                 store.read_blob(copy_body["blob"]["sha256"])
-            if item["origin"] == "reused":
-                origin = tx.get("research_snapshot", item.get("fromSnapshotId"), 1)
-                if not origin or not any(previous["copyReference"] == item["copyReference"] for previous in origin["body"]["inspection"]["sources"]):
-                    raise StateError("Reused source does not resolve to its declared saved origin")
             for passage in source.passages:
                 saved_passage = tx.get("source_passage", f"{copy_record['id']}:{passage.span_id}", version=1)
                 if not saved_passage or saved_passage["body"]["text"] != passage.text or saved_passage["body"]["locator"] != passage.locator:
@@ -131,10 +157,13 @@ def save_snapshot(store: StateStore, operation_id: str, snapshot: dict, *, sourc
                 raise StateError("Inspection reference does not resolve to a saved version")
             if not visible_in_mission(target, validated.mission.id):
                 raise StateError("Inspection reference belongs to another mission")
+        saved_components = accept_components(tx, components)
         event_id = tx.emit(validated.mission.id, "snapshot_accepted", {"snapshot": snapshot_ref, "outputs": accepted_outputs})
         cursor = tx.db.execute("SELECT sequence FROM events WHERE id=?", (event_id,)).fetchone()[0]
         resolved_refs = list({(item["kind"], item["id"], item["version"]): item for item in all_refs}.values())
         saved = tx.put("research_snapshot", validated.snapshot_id, {**request, "detail_refs": resolved_refs, "event_cursor": cursor})
+        for component in saved_components:
+            tx.link(saved, component, "snapshot_part")
         for pointer in accepted_outputs:
             tx.link(saved, pointer, "depends_on")
         if parent_ref:
@@ -144,31 +173,72 @@ def save_snapshot(store: StateStore, operation_id: str, snapshot: dict, *, sourc
     return store.transact(operation_id, request, save, mission_id=validated.mission.id)
 
 
+class _InspectionReader:
+    """Reuse exact records inside one view's database read, never across views."""
+
+    def __init__(self, store: StateStore, db):
+        self.db = db
+        self.records = Transaction(store, db)
+        self.resolved: dict[tuple, dict | None] = {}
+
+    def get(self, kind: str, id: str, version: int | None = None) -> dict | None:
+        key = kind, id, version
+        if key not in self.resolved:
+            self.resolved[key] = self.records.get(kind, id, version)
+        return self.resolved[key]
+
+    def events(self, mission_id: str, *, after: int, limit: int) -> list[dict]:
+        return [StateStore._event(row) for row in self.db.execute(
+            "SELECT * FROM events WHERE mission_id=? AND sequence>? ORDER BY sequence LIMIT ?",
+            (mission_id, after, limit),
+        )]
+
+    def review_status(self, record: dict) -> list[dict]:
+        return [dict(row) for row in self.db.execute(
+            "SELECT reason,upstream_kind,upstream_id,upstream_version "
+            "FROM review_requirements WHERE kind=? AND id=? AND version=?",
+            reference(record),
+        )]
+
+
 def load_snapshot(store: StateStore, snapshot_id: str, version: int = 1) -> dict:
-    record = store.get("research_snapshot", snapshot_id, version)
+    # A fresh, query-only transaction gives one internally consistent inspection
+    # without opening a connection for every repeated event/detail reference.
+    # Blob integrity is still checked on each view; nothing survives this call.
+    with closing(store._connect()) as db:
+        db.execute("PRAGMA query_only=ON")
+        db.execute("BEGIN")
+        return _load_snapshot(store, _InspectionReader(store, db), snapshot_id, version)
+
+
+def _load_snapshot(store: StateStore, reader: _InspectionReader, snapshot_id: str, version: int) -> dict:
+    record = reader.get("research_snapshot", snapshot_id, version)
     if record is None:
         raise StateError("Saved research snapshot is unavailable")
-    snapshot = json.loads(store.read_blob(record["body"]["blob"]["sha256"]))
+    snapshot = read_snapshot(store, record)
     inspection = json.loads(canonical(record["body"]["inspection"]))
     cursor, ceiling = 0, record["body"]["event_cursor"]
     while cursor < ceiling:
-        page = store.events(snapshot["mission"]["id"], after=cursor, limit=250)
+        page = reader.events(snapshot["mission"]["id"], after=cursor, limit=250)
         if not page:
             break
         for event in page:
-            if event["sequence"] <= ceiling:
-                inspection["steps"].append(explain_event(store, event))
+            # Publishing a review view is not an agent work step. Keep the
+            # immutable event in the store without replaying every prior view
+            # (and its snapshot reference) into a later view's inspection.
+            if event["sequence"] <= ceiling and event["type"] != "snapshot_accepted":
+                inspection["steps"].append(explain_event(reader, event))
         cursor = page[-1]["sequence"]
     step_refs = [pointer for step in inspection["steps"] for pointer in [*step["inputReferences"], *step["outputReferences"]]]
     detail_refs = list({(item["kind"], item["id"], item["version"]): item for item in [*record["body"]["detail_refs"], *step_refs]}.values())
     for pointer in detail_refs:
-        detail = store.get(**pointer)
+        detail = reader.get(**pointer)
         if detail is None or not visible_in_mission(detail, snapshot["mission"]["id"]):
             data = {"availability": "missing", "explanation": "Exact saved version does not resolve"}
         else:
             data = project_record(detail)
             data["recordedAt"] = detail["created_at"]
-            data["reviewRequired"] = store.review_status(detail)
+            data["reviewRequired"] = reader.review_status(detail)
             blob = data.get("blob")
             if blob:
                 try:

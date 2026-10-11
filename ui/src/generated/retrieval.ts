@@ -1,5 +1,5 @@
 /* Generated from contracts/generated/retrieval.schema.json. Do not edit by hand. */
-export type Category = "provider_error" | "quota_wait" | "malformed_payload";
+export type Category = "provider_error" | "quota_wait" | "malformed_payload" | "oversized_response";
 export type Code =
   "route_unavailable" | "rate_limited" | "unauthorized" | "not_found" | "timeout" | "upstream_error" | "unspecified";
 export type Retryafterseconds = number | null;
@@ -31,7 +31,8 @@ export type Urlredacted = boolean;
 export type Items = RetrievalItem[];
 export type Mappingversion = string;
 export type Omittedfields1 = RetrievalOmittedField[];
-export type Outcome = "empty" | "success" | "partial" | "provider_failure" | "item_failure" | "malformed_payload";
+export type Outcome =
+  "empty" | "success" | "partial" | "provider_failure" | "item_failure" | "malformed_payload" | "oversized_response";
 export type Sha256 = string;
 export type Size = number;
 export type Originalretained = false;
@@ -54,6 +55,9 @@ export type Requestedat = string;
 export type Cursor = string | null;
 export type Limit = number | null;
 export type Offset = number | null;
+export type Id = string;
+export type Kind = string;
+export type Version = number;
 export type Route = string;
 export type Taskid = string;
 export type Retrievedat = string;
@@ -161,6 +165,7 @@ export interface RetrievalRequest {
   requestId: Requestid;
   requestedAt: Requestedat;
   requestedWindow: RetrievalWindow;
+  resumeEsearchRef?: SavedRecordRef | null;
   route: Route;
   taskId: Taskid;
 }
@@ -171,6 +176,11 @@ export interface RetrievalWindow {
   cursor?: Cursor;
   limit?: Limit;
   offset?: Offset;
+}
+export interface SavedRecordRef {
+  id: Id;
+  kind: Kind;
+  version: Version;
 }
 export interface RetrievalResultWindow {
   acceptedCount: Acceptedcount;

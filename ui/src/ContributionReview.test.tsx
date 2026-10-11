@@ -17,6 +17,9 @@ describe('shared contribution review', () => {
     const user = userEvent.setup();
     render(<ResearchApp snapshot={snapshot} />);
     await user.click(screen.getByRole('button', { name: 'Communication' }));
+    const sharedFeedback = screen.getByText('Shared feedback and its recorded effects').closest('details')!;
+    expect(sharedFeedback).not.toHaveAttribute('open');
+    await user.click(within(sharedFeedback).getByText('Shared feedback and its recorded effects'));
     const contribution = screen.getByRole('region', { name: 'Shared contribution review' });
     expect(within(contribution).getByText(/Follow-up review peer.*Earlier discussion/)).toBeVisible();
     expect(within(contribution).getByText(/challenged/)).toBeVisible();

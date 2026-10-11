@@ -8,6 +8,7 @@ chooses scientific tasks nor puts the Groq credential in the browser.
 import hmac
 import json
 import mimetypes
+import re
 import secrets
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -120,6 +121,28 @@ class ResearchHandler(BaseHTTPRequestHandler):
                         run_id, query.get("attemptId", [None])[0]
                     )
                     return self._json(200, {"records": records})
+                if parsed.path == "/api/live/reasoning":
+                    if (
+                        len(query.get("runId", [])) != 1
+                        or len(query.get("callId", [])) != 1
+                        or not run_id
+                        or not query["callId"][0]
+                    ):
+                        raise ValueError("One runId and callId are required to inspect reasoning.")
+                    return self._json(200, self.server.research_host.returned_reasoning(
+                        run_id, query["callId"][0], diagnostic_granted=True,
+                    ))
+                if parsed.path == "/api/live/peer-record":
+                    if (
+                        set(query) != {"runId", "kind", "id", "version"}
+                        or any(len(query[key]) != 1 or not query[key][0] for key in query)
+                        or not re.fullmatch(r"[1-9][0-9]*", query["version"][0])
+                    ):
+                        raise ValueError("One exact runId, kind, id and positive version are required.")
+                    return self._json(200, self.server.research_host.peer_record(
+                        query["runId"][0], query["kind"][0], query["id"][0],
+                        int(query["version"][0]),
+                    ))
                 return self._json(404, {"error": "Unknown live API route."})
             except Exception as error:
                 return self._error(error)

@@ -1,5 +1,16 @@
 # Runtime roles and skills
 
+Codex development workflows live separately in `.agents/skills/`: use
+[`os-check-foundation`](../../.agents/skills/os-check-foundation/SKILL.md) for
+offline checks, [`os-qualify-run`](../../.agents/skills/os-qualify-run/SKILL.md)
+for research-run diagnostics across stages (with runtime-specific inspection
+guidance),
+[`os-groq-usage`](../../.agents/skills/os-groq-usage/SKILL.md) for daily Groq token
+accounting by credential profile and dated quota observations, and
+[`os-review-atlas`](../../.agents/skills/os-review-atlas/SKILL.md) for visual
+review against exact saved records. These are not instructions loaded into
+research agents.
+
 This package supplies a small, runnable role-to-skill skeleton. It is separate from Codex development skills and does not implement nine independent runtimes. The nine names in `roles/roles.json` match Section 7 of the current Linear research plan, read on 2026-10-08. Role manifests keep stable IDs, names, plan sections and skill references; they do not copy shared collaboration rules. The central `ora.contracts.models.EvidencePacket` is the input schema authority. The [module map](modules.md) identifies the callers and ownership of the runtime, model adapter, app and shared development commands.
 
 ## Implemented boundary

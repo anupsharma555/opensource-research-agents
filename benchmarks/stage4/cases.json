@@ -1,0 +1,81 @@
+{
+  "schema": "ora.stage4.live_cases.v1",
+  "version": "1.0.0",
+  "purpose": "Real-publication mission-loop qualification; cases do not prescribe a tool sequence or scientific conclusion.",
+  "topic": "Digital mental-health and psychotherapy trials",
+  "review_rule": "A completed run is not a passed case. Review the saved answer against actual retrieved copies and assess correctness, trace fidelity, collaboration value and readability separately.",
+  "cases": [
+    {
+      "id": "S4-VS-01", "difficulty": "very_simple", "variant": "normal",
+      "roles": ["literature_acquisition"],
+      "question": "Find the published REEACT trial abstract (PMID 26559241). What population and treatment comparison does it explicitly report? Give a short source-linked answer.",
+      "scope": "One focused fact question. Use the published abstract as valid evidence for what it says. Additional searches are useful only if the initial record is insufficient.",
+      "review_checks": ["Correct trial identity", "Population and comparators match retrieved abstract", "No unnecessary peer loop", "Exact source and model-call records are inspectable"]
+    },
+    {
+      "id": "S4-VS-02", "difficulty": "very_simple", "variant": "missing_detail",
+      "roles": ["literature_acquisition"],
+      "question": "Find the published REEACT trial abstract (PMID 26559241). Does this abstract report the exact random-number seed used for allocation? Explain briefly and distinguish an unreported detail from evidence of flawed randomization.",
+      "scope": "The question is about what the abstract reports. Do not invent an allocation seed or treat missing reporting as demonstrated bias.",
+      "review_checks": ["Exact abstract inspected", "No invented seed", "Missing reporting distinguished from demonstrated bias", "Answer remains useful and concise"]
+    },
+    {
+      "id": "S4-S-01", "difficulty": "simple", "variant": "normal",
+      "roles": ["literature_acquisition"],
+      "question": "What did the REEACT-2 randomized trial compare, and what does its published abstract say about telephone support for computerized cognitive behavioural therapy for depression? Find a relevant scholarly record and explain the comparison clearly.",
+      "scope": "Do not conflate REEACT-2 with REEACT. Cite the source actually inspected. Missing full text can prompt complementary searches but does not invalidate a published abstract.",
+      "review_checks": ["Independent scholarly discovery", "Correct REEACT-2 identity", "Intervention, comparator and timing distinguished", "Claims stay within retrieved evidence"]
+    },
+    {
+      "id": "S4-S-02", "difficulty": "simple", "variant": "alternate_wording",
+      "roles": ["literature_acquisition"],
+      "question": "Find a randomized study in primary care that compared telephone-facilitated computerized therapy with less-supported computerized therapy for adult depression. What treatment contrast was tested? Use a source-linked explanation.",
+      "scope": "The trial acronym is not supplied. Revise the search if needed; do not substitute a psychotherapy study with a different treatment contrast without explaining that difference.",
+      "review_checks": ["Query expresses the actual concept", "Adaptation responds to encountered evidence", "Verified treatment contrast", "No unsupported claim of comprehensive coverage"]
+    },
+    {
+      "id": "S4-I-01", "difficulty": "intermediate", "variant": "normal",
+      "roles": ["evidence_preparation_synthesis", "independent_methods_reviewer_critic"],
+      "question": "Compare the REEACT and REEACT-2 trial evidence on computerized therapy and human support for adult depression. Obtain an independent peer check of whether the two trials tested the same comparison, then integrate the useful feedback into a readable answer.",
+      "scope": "Use real retrieved publications. Distinguish study identity, treatment comparison and follow-up. Preserve disagreement and explain whether peer feedback changed the answer.",
+      "review_checks": ["Two actual trial families distinguished", "Independent peer contribution and exact reply present", "Requester sees the reply in a later call", "Revision or retained interpretation has source support"]
+    },
+    {
+      "id": "S4-I-02", "difficulty": "intermediate", "variant": "duplicate_reports",
+      "roles": ["evidence_preparation_synthesis", "independent_methods_reviewer_critic"],
+      "question": "A journal report and an HTA report may describe the same REEACT-2 trial. Find their relationship, ask a peer to check whether they are independent randomized samples, and summarize what can be concluded without double-counting participants.",
+      "scope": "Relevant identifiers include DOI 10.1192/bjp.bp.116.192435 and DOI 10.3310/hta20890. Treat these as leads to verify, not as proof of study identity.",
+      "review_checks": ["Identifiers verified", "Report-level and study-level units distinguished", "No double-counting", "Peer challenge is visible separately from delivery acknowledgment"]
+    },
+    {
+      "id": "S4-A-01", "difficulty": "advanced", "variant": "normal",
+      "roles": ["literature_acquisition", "evidence_preparation_synthesis", "independent_methods_reviewer_critic"],
+      "question": "Explain why the REEACT and REEACT-2 findings should not be read as a simple contradiction about digital therapy. Search trial reports, relevant corrections and participant-experience evidence; collaborate to distinguish observed results from possible explanations.",
+      "scope": "An accessible abstract is useful evidence. Seek complementary information when methods or engagement detail is missing. Do not assume a correction changes outcomes before inspecting it, or infer an individual causal mechanism from group results.",
+      "review_checks": ["Complementary routes used where useful", "Correction content checked before interpretation", "Qualitative evidence attributed correctly", "Parallel work and dependent integration both observable", "Report separates findings from proposed explanations"]
+    },
+    {
+      "id": "S4-A-02", "difficulty": "advanced", "variant": "access_and_scope",
+      "roles": ["evidence_preparation_synthesis", "independent_methods_reviewer_critic"],
+      "question": "Use the REEACT-2 abstract plus any useful accessible companion report to explain whether additional support improved the reported outcome. Ask an independent peer to check the population, comparison and follow-up behind the conclusion. Give a useful answer even if a full-text route is unavailable.",
+      "scope": "Try a complementary scholarly or publisher route when a detail is missing. Keep an inaccessible article distinct from a negative scientific result; preserve usable retrieved evidence and identify any remaining detail briefly downstream.",
+      "review_checks": ["Abstract claims are usable", "Missing detail leads to an alternative inquiry", "No global stop on optional unavailable full text", "Peer evidence consumed rather than merely delivered"]
+    },
+    {
+      "id": "S4-C-01", "difficulty": "complex", "variant": "normal",
+      "roles": ["literature_acquisition", "evidence_preparation_synthesis", "independent_methods_reviewer_critic"],
+      "question": "Prepare a research brief on computerized cognitive behavioural therapy for adult depression in primary care using REEACT, REEACT-2 and relevant participant-experience evidence. Compare what was actually tested, develop two distinguishable explanations for engagement or outcome differences, and propose a focused next research question. Have peers check key evidence and revise the brief where warranted.",
+      "scope": "Breadth should serve the question. Separate observed trial findings, methodological uncertainty, hypotheses and proposed next work. Use concise clear prose, explain technical terms and keep run metadata outside the research brief.",
+      "followup": "Narrow the next research question to the contribution of human support. Preserve the previous report and source counts, and revise only the affected interpretation and proposed study comparison.",
+      "review_checks": ["Compound scope addressed", "Model-led complementary search and collaboration", "Exact-output follow-up preserves immutable parent", "Hypotheses are labeled and distinguishable", "Report is understandable without trace metadata"]
+    },
+    {
+      "id": "S4-C-02", "difficulty": "complex", "variant": "recovery_review",
+      "roles": ["literature_acquisition", "evidence_preparation_synthesis", "independent_methods_reviewer_critic"],
+      "question": "Investigate whether differences in support or engagement could help explain the REEACT and REEACT-2 findings. Find and compare relevant real publications, invite an independent challenge, preserve useful partial results and continue with accepted evidence after peer feedback.",
+      "scope": "This case also checks durable execution across a separately controlled host interruption. The interruption is a test action, not a reason to invent a limitation in the scientific answer. Preserve exact selected model, sources, messages and prior outputs.",
+      "followup": "Review the latest saved answer against the earlier peer challenge. Explain what changed, what remained supported and the most useful unresolved research question.",
+      "review_checks": ["Durable work survives controlled interruption", "Uncertain effects distinguished from known results", "Unchanged selected model and tool settings", "No duplicated accepted effect", "Useful scientific continuation visible after recovery"]
+    }
+  ]
+}
