@@ -21,8 +21,11 @@ from ora.agents.configuration import (
     _call_request,
 )
 from ora.coordination.traces import TraceContext, TraceJournal, ref
+from ora.evidence.library import EvidenceError
+from ora.evidence.local_text_quality import attest_local_text_quality_tx
 from ora.retrieval.redact import redact_text
 from ora.state import StateStore
+from ora.state.source_lineage import inherited_public_source
 from ora.state.store import canonical
 
 from .groq import (
@@ -34,6 +37,13 @@ from .groq import (
     ModelPreflightError,
     PreparedCall,
     SourceUse,
+)
+from .token_estimate import (
+    LEGACY_BASIS,
+    TOKENIZER_BASIS,
+    TOKENIZER_BASIS_V1,
+    TokenEstimateUnavailable,
+    estimate_request_tokens,
 )
 
 
@@ -72,6 +82,129 @@ def _exact_ref(pointer: dict[str, Any], kind: str) -> None:
 
 def _sha(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
+
+
+def _check_visible_shared_materials(reader, intent: dict, request_body: dict) -> None:
+    """Recheck source-derived peer metadata in exact saved input before send.
+
+    This runs once during ordinary preflight and again in the dispatch-marker
+    transaction. Old requests without a shared catalog retain their saved form.
+    """
+    from ora.mission.context import _shared_material_overview, _shared_material_reader_view
+    from ora.mission.shared_materials import shared_material_entry, shared_material_view
+
+    scope = {
+        "mission_id": intent["body"]["mission_id"],
+        "actor_id": intent["body"]["instance_id"],
+        "task_id": intent["body"]["task_id"],
+    }
+
+    def current(pointer: object) -> dict | None:
+        if (type(pointer) is not dict or set(pointer) != {"kind", "id", "version"}
+                or pointer.get("kind") not in {"retrieval_hit", "report"}):
+            raise SessionError("Visible shared pointer is not exact")
+        return shared_material_entry(reader, **scope, pointer=pointer)
+
+    def summary_for(entry: dict) -> dict:
+        summary = {"kind": entry["ref"]["kind"]}
+        summary.update({key: value for key, value in entry.items() if key != "ref"})
+        title = summary.get("title")
+        if isinstance(title, str):
+            summary["title"] = {
+                "text": title[:300], "total_chars": len(title),
+                "truncated": len(title) > 300,
+            }
+        return summary
+
+    messages = request_body.get("messages", [])
+    for position, message in enumerate(messages):
+        if message.get("role") not in {"user", "tool"}:
+            continue
+        try:
+            content = json.loads(message.get("content") or "")
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(content, dict):
+            continue
+        if content.get("schema") == "ora.working_context.v4":
+            shared = content.get("shared_materials")
+            overview = shared.get("overview") if isinstance(shared, dict) else None
+            if isinstance(overview, dict):
+                saved = current(overview.get("ref"))
+                inclusion_id = f"context:{intent['id']}" if "read_request" in overview else None
+                if saved is None or _shared_material_overview(saved, inclusion_id) != overview:
+                    raise SessionError("Visible shared overview changed before dispatch")
+            for entry in shared.get("entries", []) if isinstance(shared, dict) else []:
+                saved = current(entry.get("ref")) if isinstance(entry, dict) else None
+                expected = (
+                    _shared_material_reader_view(saved, f"context:{intent['id']}")
+                    if saved is not None and "read_request" in entry
+                    else shared_material_view(saved) if saved is not None else None
+                )
+                if expected != entry:
+                    raise SessionError("Visible shared catalog changed before dispatch")
+        items = (
+            content.get("items") if content.get("schema") == "ora.context_omission_page.v2"
+            else content.get("included_items")
+            if content.get("schema") == "ora.context_page_tool_result.v1" else None
+        )
+        if isinstance(items, list):
+            for item in items:
+                if not isinstance(item, dict) or item.get("type") != "shared_material":
+                    continue
+                summary = item.get("summary")
+                if not isinstance(summary, dict):
+                    raise SessionError("Visible shared page summary is invalid")
+                if summary.get("status") in {
+                    "shared_material_unavailable", "summary_deferred_by_page_budget",
+                }:
+                    continue  # These contain no source-derived title or lead.
+                entry = current(item.get("ref"))
+                inclusion_id = (
+                    content.get("inclusion_ref", {}).get("id")
+                    if content.get("schema") == "ora.context_omission_page.v2"
+                    else content.get("inclusion_id")
+                )
+                expected = (
+                    _shared_material_reader_view(entry, inclusion_id)
+                    if entry is not None and "read_request" in summary
+                    else shared_material_view(entry) if entry is not None else None
+                )
+                if expected is None or summary_for(expected) != summary:
+                    raise SessionError("Visible shared page changed before dispatch")
+        if (content.get("schema") == "ora.context_record_window.v1"
+                and isinstance(content.get("ref"), dict)
+                and content["ref"].get("kind") in {"retrieval_hit", "report"}):
+            pointer = content["ref"]
+            if pointer["kind"] == "report":
+                assistant = messages[position - 1] if position else {}
+                calls = assistant.get("tool_calls", []) if isinstance(assistant, dict) else []
+                try:
+                    arguments = json.loads(calls[0]["function"]["arguments"])
+                    inclusion = reader.get(
+                        "context_inclusion", arguments["inclusion_id"], 1,
+                    )
+                except (IndexError, KeyError, TypeError, ValueError):
+                    inclusion = None
+                if inclusion is None or not any(
+                    item.get("type") == "shared_material" and item.get("fetch") == pointer
+                    for item in inclusion["body"].get("omitted", [])
+                ):
+                    continue  # Existing own-report and parent-target paths retain their guards.
+            entry = current(pointer)
+            if entry is None:
+                raise SessionError("Visible shared record lost current authority")
+            if pointer["kind"] == "retrieval_hit":
+                encoded = canonical(shared_material_view(entry))
+                offset, text = content.get("offset"), content.get("text")
+                if (type(offset) is not int or not isinstance(text, str)
+                        or content.get("projection_sha256") != _sha(encoded.encode())
+                        or encoded[offset:offset + len(text)] != text):
+                    raise SessionError("Visible shared hit window changed before dispatch")
+            elif content.get("report_text_status") == "available" and (
+                entry.get("status") != "accepted_text_available"
+            ):
+                raise SessionError("Visible shared report lost accepted text use")
 
 
 def _explicit_prohibition(body: dict) -> bool:
@@ -131,6 +264,19 @@ def _inherited_context_copy(reader, copy_ref: dict, mission_id: str,
     ) if run else None
     target_ref = run["body"].get("target_ref") if run else None
     target = reader.get(**target_ref) if isinstance(target_ref, dict) else None
+    copy = reader.get(**copy_ref)
+    if copy and (copy["body"].get("document_ref") or copy["body"].get("navigation_ref")):
+        return bool(
+            call and actor and run
+            and call["body"].get("mission_id") == mission_id
+            and call["body"].get("instance_id") == actor["id"]
+            and actor["body"].get("mission_id") == mission_id
+            and inherited_public_source(
+                reader, mission_id=mission_id, run_id=run["id"],
+                copy_ref=copy_ref, actor_id=actor["id"],
+                task_id=call["body"].get("task_id"),
+            )
+        )
     return bool(
         call and actor and run and parent and snapshot and target
         and call["body"].get("mission_id") == mission_id
@@ -325,7 +471,13 @@ class ModelSession:
                 raise SessionError("Source copy version or body hash changed")
             body = copy["body"]
             if body.get("mission_id") not in (None, call["body"]["mission_id"]):
-                raise SessionError("Source copy belongs to another mission")
+                actor = self.store.get("agent_instance", call["body"]["instance_id"], 1)
+                if not actor or not inherited_public_source(
+                    self.store, mission_id=call["body"]["mission_id"],
+                    run_id=actor["body"].get("run_id"), copy_ref=pointer,
+                    actor_id=actor["id"], task_id=call["body"]["task_id"],
+                ):
+                    raise SessionError("Source copy belongs to another mission")
             use_record = body.get("use_record")
             if (isinstance(use_record, dict) and use_record.get("use") == "unknown"
                 and selected.use == "permitted"):
@@ -394,6 +546,17 @@ class ModelSession:
                 or content_hash(descriptor.get("schema")) != descriptor.get("schema_sha256")
                 or not isinstance(descriptor.get("description", ""), str)):
                 raise SessionError("Saved tool descriptor changed")
+            if name == "browser_search":
+                if (descriptor.get("execution_model") != "provider_builtin"
+                    or descriptor.get("schema") != {
+                        "type": "object", "properties": {}, "required": [],
+                        "additionalProperties": False,
+                    }):
+                    raise SessionError("Saved browser_search descriptor is invalid")
+                result.append({"type": "browser_search"})
+                continue
+            if descriptor.get("execution_model") == "provider_builtin":
+                raise SessionError("Unsupported provider built-in tool")
             result.append({"type": "function", "function": {
                 "name": name, "parameters": descriptor["schema"],
                 **({"description": descriptor["description"]} if descriptor.get("description") else {}),
@@ -464,6 +627,7 @@ class ModelSession:
                 messages: list[dict[str, Any]], sources: tuple[SourceSelection, ...],
                 parent_call_ref: dict[str, Any] | None = None,
                 context_source_dependency_refs: tuple[dict[str, Any], ...] = (),
+                request_token_estimate: dict[str, Any] | None = None,
                 ) -> SessionPrepared:
         call, config, _actor = self._selection(call_id, call_version)
         prepared, selected, unknown_policy = self._prepare_request(
@@ -471,6 +635,8 @@ class ModelSession:
             parent_call_ref=parent_call_ref,
         )
         request_bytes = canonical(prepared.body).encode()
+        if request_token_estimate is not None:
+            self._check_token_estimate(request_bytes, request_token_estimate)
         blob = self.store.put_blob(request_bytes)
         call_ref, config_ref = ref(call), ref(config)
         source_refs = [selected.copy_ref for selected in sources]
@@ -479,6 +645,8 @@ class ModelSession:
                 "instance_id": call["body"]["instance_id"], "call_ref": call_ref,
                 "configuration_ref": config_ref, "configuration_sha256": selected.configuration_sha256,
                 "request_sha256": prepared.request_sha256, "blob": blob,
+                "effective_reasoning_effort": prepared.body["reasoning_effort"],
+                "reasoning_effort_basis": prepared.manifest()["reasoning_effort_basis"],
                 "phase": phase, "parent_call_ref": parent_call_ref,
                 "source_refs": source_refs,
                 "context_source_dependency_refs": list(context_source_dependency_refs),
@@ -491,6 +659,8 @@ class ModelSession:
         if "credential_profile" in config["body"]["settings"]:
             body.update(credential_profile=selected.credential_profile,
                         quota_domain=selected.quota_domain)
+        if request_token_estimate is not None:
+            body["request_token_estimate"] = request_token_estimate
         intent_id = f"model-intent:{call_id}:{call_version}"
 
         def save(tx):
@@ -498,6 +668,7 @@ class ModelSession:
             saved_config = tx.get(**config_ref)
             if saved_call != call or saved_config != config:
                 raise SessionError("Call or configuration changed before intent commit")
+            quality_refs = []
             for pointer in source_refs:
                 copy = tx.get(**pointer)
                 if copy is None or _explicit_prohibition(copy["body"]):
@@ -506,12 +677,30 @@ class ModelSession:
                 if current is not None and _explicit_prohibition(current["body"]):
                     raise SessionError("Current copy-use record revoked model input")
                 if next(s.allowed_for_model for s in sources if s.copy_ref == pointer):
-                    _current_model_use(tx, pointer)
+                    policy_ref = _current_model_use(tx, pointer)
+                    selection = next(s for s in sources if s.copy_ref == pointer)
+                    try:
+                        quality_refs.append(attest_local_text_quality_tx(
+                            tx, pointer, policy_ref,
+                            require_bound_quality=bool(selection.passage_refs),
+                        ))
+                    except EvidenceError as exc:
+                        raise SessionError(str(exc)) from exc
             for pointer in context_source_dependency_refs:
-                _current_context_dependency_use(tx, pointer, body["mission_id"], call_ref)
+                policy_ref = _current_context_dependency_use(
+                    tx, pointer, body["mission_id"], call_ref,
+                )
+                try:
+                    quality_refs.append(attest_local_text_quality_tx(
+                        tx, pointer, policy_ref,
+                    ))
+                except EvidenceError as exc:
+                    raise SessionError(str(exc)) from exc
             intent = tx.put("model_request_intent", intent_id, body)
             tx.link(intent, saved_call, "prepared_from")
             tx.link(intent, saved_config, "uses_configuration")
+            for quality_ref in {canonical(item): item for item in quality_refs}.values():
+                tx.link(intent, tx.get(**quality_ref), "depends_on")
             for pointer in source_refs:
                 tx.link(intent, tx.get(**pointer), "uses_source_copy")
             for selection in sources:
@@ -525,6 +714,23 @@ class ModelSession:
         intent_ref = self.store.transact(f"model-intent-save:{intent_id}", body, save,
                                          mission_id=body["mission_id"])
         return SessionPrepared(intent_ref, prepared)
+
+    @staticmethod
+    def _check_token_estimate(raw: bytes, saved: dict) -> None:
+        """Retain the exact saved estimate basis; never reprice an old request."""
+        if (not isinstance(saved, dict)
+                or set(saved) != {"tokens", "basis", "asset_sha256", "fallback_reason"}
+                or type(saved.get("tokens")) is not int
+                or saved.get("basis") not in {
+                    LEGACY_BASIS, TOKENIZER_BASIS_V1, TOKENIZER_BASIS,
+                }):
+            raise SessionError("Saved request token estimate is invalid")
+        try:
+            current = estimate_request_tokens(raw, basis=saved["basis"])
+        except (TokenEstimateUnavailable, ValueError) as exc:
+            raise SessionError("Saved request token estimate cannot be reproduced") from exc
+        if any(saved[key] != getattr(current, key) for key in ("tokens", "basis", "asset_sha256")):
+            raise SessionError("Saved request token estimate differs from exact bytes")
 
     def load(self, intent_ref: dict[str, Any], *, for_dispatch: bool = False) -> SessionPrepared:
         _exact_ref(intent_ref, "model_request_intent")
@@ -553,7 +759,19 @@ class ModelSession:
         request_bytes = self.store.read_blob(saved["blob"]["sha256"])
         if _sha(request_bytes) != saved["request_sha256"]:
             raise SessionError("Prepared request bytes changed")
+        if for_dispatch and "request_token_estimate" in saved:
+            self._check_token_estimate(request_bytes, saved["request_token_estimate"])
         body = json.loads(request_bytes)
+        if for_dispatch:
+            _check_visible_shared_materials(self.store, intent, body)
+        if saved.get("effective_reasoning_effort") is not None and (
+            saved["effective_reasoning_effort"] != body.get("reasoning_effort")
+            or saved.get("reasoning_effort_basis") != (
+                "browser_search" if {"type": "browser_search"} in body.get("tools", [])
+                else "selected_configuration"
+            )
+        ):
+            raise SessionError("Saved effective reasoning effort differs from request")
         prepared = PreparedCall(
             call_id=call["id"], attempt_id=saved["attempt_id"],
             parent_call_id=(saved["parent_call_ref"]["id"]
@@ -612,6 +830,8 @@ class ModelSession:
                           "redacted": bool(redacted), "origin": "provider_returned",
                           "access": "restricted_diagnostics"}
         private_payload = {"content": outcome.content, "tool_calls": outcome.tool_calls}
+        if outcome.provider_metadata is not None:
+            private_payload["provider_metadata"] = outcome.provider_metadata
         if outcome.provider_error is not None:
             # Error text can contain account details. Retain it only with the
             # private response, separate from findings and ordinary trace summaries.
@@ -622,6 +842,8 @@ class ModelSession:
             "task_id": body["task_id"], "attempt_id": body["attempt_id"],
             "call_ref": body["call_ref"], "configuration_ref": body["configuration_ref"],
             "intent_ref": intent_ref, "request_sha256": body["request_sha256"],
+            "effective_reasoning_effort": prepared.request.body["reasoning_effort"],
+            "reasoning_effort_basis": prepared.request.manifest()["reasoning_effort_basis"],
             "response_sha256": outcome.response_sha256,
             "response_id": outcome.response_id,
             "provider_request_id": outcome.provider_request_id,
@@ -719,12 +941,21 @@ class ModelSession:
                       for item in call["body"]["input_refs"]
                       if item["kind"] == "source_copy"}
             policy_refs = []
+            quality_refs = []
             for pointer in intent["body"]["source_refs"]:
                 key = (pointer["kind"], pointer["id"], pointer["version"])
                 expected_hash = pinned.pop(key, None)
                 copy = tx.get(**pointer)
                 if expected_hash is None or copy is None or content_hash(copy["body"]) != expected_hash:
                     raise SessionError("Source copy version or body hash changed before dispatch")
+                if copy["body"].get("mission_id") not in (None, intent["body"]["mission_id"]):
+                    actor = tx.get("agent_instance", intent["body"]["instance_id"], 1)
+                    if not actor or not inherited_public_source(
+                        tx, mission_id=intent["body"]["mission_id"],
+                        run_id=actor["body"].get("run_id"), copy_ref=pointer,
+                        actor_id=actor["id"], task_id=intent["body"]["task_id"],
+                    ):
+                        raise SessionError("Source copy belongs to another mission")
                 if _explicit_prohibition(copy["body"]):
                     raise SessionError("Saved copy prohibits model input")
                 current = tx.get("source_copy", pointer["id"])
@@ -736,6 +967,13 @@ class ModelSession:
                     policy_ref = _current_model_use(tx, pointer)
                     if policy_ref:
                         policy_refs.append(policy_ref)
+                    try:
+                        quality_refs.append(attest_local_text_quality_tx(
+                            tx, pointer, policy_ref,
+                            require_bound_quality=bool(decision.get("passage_refs")),
+                        ))
+                    except EvidenceError as exc:
+                        raise SessionError(str(exc)) from exc
             if pinned:
                 raise SessionError("Prepared request omitted a pinned source copy")
             for pointer in intent["body"].get("context_source_dependency_refs", []):
@@ -744,9 +982,18 @@ class ModelSession:
                 )
                 if policy_ref is not None:
                     policy_refs.append(policy_ref)
+                try:
+                    quality_refs.append(attest_local_text_quality_tx(
+                        tx, pointer, policy_ref,
+                    ))
+                except EvidenceError as exc:
+                    raise SessionError(str(exc)) from exc
+            _check_visible_shared_materials(tx, saved_intent, prepared.request.body)
             saved = tx.put("model_dispatch_attempt", marker_id,
                            {**marker_body, "source_use_refs": policy_refs})
             tx.link(saved, saved_intent, "attempts_request")
+            for quality_ref in {canonical(item): item for item in quality_refs}.values():
+                tx.link(saved, tx.get(**quality_ref), "depends_on")
             return {"marker_ref": ref(saved)}
 
         decision = self.store.transact(f"model-dispatch-mark:{uuid.uuid4().hex}", marker_body,

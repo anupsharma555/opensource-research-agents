@@ -1,8 +1,8 @@
 {
-  "registry_version": "1.0.2",
+  "registry_version": "1.0.3",
   "roles": {
     "path": "roles/roles.json",
-    "sha256": "66685a5e62715ac4ea6a194e44467fa44ca938821cf0317efc9e17fdacda3303"
+    "sha256": "86b433b82d8dd5071d2ef16bdbebd7ac528b0880ea2f5178367fc1cc158f07a2"
   },
   "schema": "ora.runtime_skills.registry.v1",
   "skills": [
@@ -15,6 +15,11 @@
       "manifest": "runtime_skills/study_appraisal/manifest.json",
       "optional": true,
       "skill_id": "study-appraisal"
+    },
+    {
+      "manifest": "runtime_skills/general_web_discovery/manifest.json",
+      "optional": false,
+      "skill_id": "general-web-discovery"
     }
   ]
 }

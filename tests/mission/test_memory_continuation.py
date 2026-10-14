@@ -142,7 +142,9 @@ def test_forged_peer_actor_argument_is_local_then_authorized_request_succeeds(
 
     def transport(request, *, timeout):
         body = json.loads(request.data)
-        role = "critique" if "Mxra" in json.dumps(body["messages"]) else "synthesis"
+        instructions = body["messages"][0]["content"]
+        assert instructions.startswith(("You are Sage,", "You are Mxra,"))
+        role = "critique" if instructions.startswith("You are Mxra,") else "synthesis"
         counts[role] += 1
         step = counts[role]
         if role == "synthesis" and step == 1:

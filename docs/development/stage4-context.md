@@ -1,5 +1,10 @@
 # Stage 4 working context and within-run notes
 
+For bounded note/board tool results, optional skill activation, model-authored
+conversation compaction and the controlled evidence-recovery evaluation, also
+read [context efficiency](stage4-context-efficiency.md).
+It owns those additions and their separate offline/live proof boundaries.
+
 `ora.mission.context.WorkingContext` prepares one selected peer's next model input
 from current saved records. It reads the current board proposal, the call's pinned
 configuration, exact source-copy references, incoming messages, requester-owned
@@ -24,9 +29,53 @@ Working-note text is also rechecked against exact `input_refs` before it enters
 context or a note-reading result. Direct source copies, passages, windows and
 same-task note ancestry resolve to current source use; incomplete ancestry
 produces a text-free diagnostic. The saved historical note remains intact.
+Accepted follow-ups can save notes linked to an inherited checked public copy,
+passage or reading window. The note path verifies accepted-parent ancestry and
+current task membership. Ownerless reading windows also require their exact
+saved copy, quality, source-use and passage links; changing the current passage
+selection does not erase a previously checked read. Foreign notes retain their
+ordinary scope restriction, and inherited source text remains subject to current
+source-use checks on note reads, search, replay and prepared inputs.
+New notes also retain the source dependencies of their producing model input,
+including source-derived notes and history when no source packet was selected.
+The writer checks the exact saved request and context inclusion before copying
+those dependencies; missing lineage cannot become a source-free note.
 Prepared inputs carry those exact copy dependencies into the saved intent. The
 model session checks them again inside the dispatch-marker transaction, so a
 later source-use change blocks only the affected call before provider dispatch.
+
+Reports inherit the direct and context source dependencies of their exact
+producing request through `ora.mission.report_lineage`. The mission service
+rechecks current use inside both the report-save transaction and the later
+board-acceptance transaction. A source-use change after dispatch therefore
+cannot silently accept source-dependent report text; the captured response and
+usage remain saved. Later report reads and current Atlas projections withhold
+the affected title, body, limitations and summaries. Reading current state
+refreshes that local projection without dispatching research; historical saved
+snapshots remain immutable, and parent comparisons are masked when returned.
+New provisional-answer feedback retains its exact candidate reference without
+copying report prose outside the context dependency record. Previously prepared
+legacy inputs and exported snapshots remain separate historical proof limits.
+These checks establish source-use lineage, not whether a cited passage supports
+the report's scientific interpretation.
+
+The task-specific shared-material catalog connects separate peer work items in
+the same research mission. `ora.mission.shared_materials` supplies compact
+titles, saved author names, status and exact references for ordinary scholarly
+hits and accepted sibling reports. It does not generate a short finding or copy
+a teammate's full report into the next input. Native browser leads, private
+notes and unaccepted report drafts are excluded. A completed report is an
+accepted workflow result, not a certification of scientific correctness.
+
+Peers can discover omitted entries through `read_context_page` and open a
+listed report through `read_context_record`. Reading a scholarly hit uses
+`inspect_hit` and the existing source-copy admission and window readers. These
+are internal reads of saved material; web search is needed only for additional
+retrieval. Each new input lists its actually attached function names so the
+peer can distinguish tools it can call now from tools it must request first.
+The catalog preserves source-use checks and leaves scientific choices and
+whether to request critique with the agents. Access, actual delivery, reading,
+peer review and useful contribution remain separate evaluation outcomes.
 
 Call `assemble(call_ref, task_ref, ...)` before `ModelSession.prepare`. Pass the
 returned `pack.messages` to the model bridge and the same exact source-copy
@@ -53,6 +102,14 @@ model-facing layout for restart recovery. If detail is omitted, the prompt gives
 the saved inclusion ID and a `read_context_page` cursor; the inclusion receipt
 retains the omitted exact refs in priority order. A very short detail can replace
 an omission marker when that uses fewer bytes.
+
+Packer v37 also projects an exactly verified rejection of an unexposed local
+function as a short error notice naming the rejected function. The complete
+provider receipt and host feedback remain saved; the next input already carries
+its exposed tool definitions and capability-selection guidance. Unknown,
+scope-mismatched, native-browser and route-specific errors retain their original
+feedback. A preparation retry preserves existing provider or scientific feedback
+instead of replacing it with a mechanical version-change notice.
 
 Packer v6 keeps this peer's routine, non-completing executor outcome wrappers
 as a count, recent references and pageable omissions. Classification checks the
@@ -103,19 +160,43 @@ is context for reconsideration, not an instruction or automatically accepted
 child finding. The immutable completed parent snapshot is not revised when a
 child starts. Older saved model requests retain their original input bytes.
 
+A public document inherited by an accepted follow-up keeps its original source
+ownership. `ora.state.source_lineage.inherited_public_source` checks the child's
+original and current source references, accepted parent snapshot and target,
+exact copy and acquisition records, and current task membership. This narrowly
+permits inherited source inputs across later follow-ups; current source-use
+permission, checked passages and pinned input hashes still apply. Other foreign
+records and outputs retain the ordinary mission boundary.
+Conversation compaction and history paging apply this same inheritance check to
+their input and archived dependencies. A parent-owned source is usable only while
+that exact inheritance remains valid and its current use is permitted.
+
 `read_omitted_page` validates the saved call, actor and task before returning a
 bounded page of exact omitted refs with safe summaries. `read_omitted_record`
 returns bounded character windows of non-source peer/board/note projections and
 reports linked from an omitted outcome or answer. Source copies, passages,
-retrieval hits, arbitrary peer payloads and private reasoning are excluded from
-this generic read path. Source text still uses an explicit checked
+raw retrieval-hit bodies, arbitrary peer payloads and private reasoning are
+excluded from this generic read path. An exact shared-material omission can
+additionally expose a permitted sibling report or safe scholarly-hit metadata;
+it does not expose a hit's retained source text. Source text still uses an explicit checked
 `SourceSelection` with current-use validation. The mission host must supply its
 authenticated actor/task to these methods; model arguments never set scope.
+An incomplete record window returns an executable `next_request` with the same
+inclusion and exact record version. Historical working-note results that lack
+this additive field can receive it in a derived replay view only when every
+saved field still matches the current authorized projection. The original result
+and call arguments remain unchanged; changed or revoked note content cannot be
+silently treated as the previous window.
 Older completed tool turns may be passed as `archived_tool_turn_refs`; they stay
 as exact receipt omissions and page as tool/result IDs, function names and effect
-refs. Their raw provider reasoning and tool-result content do not re-enter later
-model input. The latest unfinished tool pair remains in `tool_turn_refs` until
-that turn is resolved.
+refs. Their raw provider reasoning does not re-enter later model input. Packer
+v38 can retain exact earlier `read_context_record` windows for reports and
+working notes, with their original assistant/tool pairs, before optional board
+metadata. Each retained window rechecks its scope, saved projection and current
+source use. Duplicate windows and tool-call ID conflicts are omitted; windows
+that do not fit remain explicitly fetchable. Other archived result content stays
+outside the input. The latest unfinished tool pair remains in `tool_turn_refs`
+until that turn is resolved.
 
 Page replies are bounded by serialized size as well as item count. A reply that
 cannot fit every requested item returns the exact next cursor, leaving all
@@ -147,6 +228,14 @@ separate policy is visible but does not by itself revoke a frozen older version.
 selection. For checked passage selection, `SourceSelection.passage_refs` identifies
 the exact passages; the prepared source packet carries the original copy SHA and
 the selected text SHA separately.
+
+An original pasted submission with a current use grant can default to its saved
+whole-submission passage. The host verifies its retained bytes, exact offsets
+and locator through the same checked-passage boundary, so the first source
+packet includes a usable citation reference. Explicit passage selections still
+take precedence, and historical submissions without a separate use record keep
+their raw-text route. The complete request must still fit normal admission;
+citation coordinates do not establish claim support or successful model use.
 
 `save_tool_result` records one completed tool result against the provider's saved
 tool-call ID. Passing its response reference as `tool_turn_refs` on the next
@@ -229,8 +318,36 @@ host does not invent a rate ceiling. If neither selected-source nor source-free
 preparation fits, that branch keeps a local waiting diagnostic; no provider
 request is inferred. A text-free inventory tool result is carried into the next
 source-free turn only while its exact current-use status still matches. These
-estimates are not the provider tokenizer, and a full selected abstract may still
+estimates are not an exact reproduction of provider rendering, and a full selected abstract may still
 need split windows under an observed limit.
+
+Preparation v12 also previews the hard bound when a fitting soft-target request
+omits an already-read working-note window. It uses the expanded request only if
+additional exact note windows fit without losing previously retained report or
+note windows. Complete-request, completion-reserve and current-use checks still
+apply; no unread text or generated summary is added by this retention step.
+
+For supported high-reasoning, nonstreaming GPT-OSS local-function requests,
+`ora.models.token_estimate` counts the complete canonical request with pinned
+`tiktoken==0.11.0`. New requests use the versioned canonical-JSON estimate without
+an added token cushion; saved `plus128.v1` requests retain their original
+128-token allowance. The bundled vocabulary is hash-checked locally; runtime
+counting never downloads an asset. Native
+browser requests, unfamiliar formats or unavailable assets use the labeled
+legacy byte estimate for new requests. Context-fragment counts guide packing;
+only the complete request estimate can admit a call, subject to both the model
+context ceiling and the observed account ceiling with its completion reserve.
+
+New intents, call budgets and capacity records retain the estimate basis and
+exact request identity. Dispatch rechecks a saved tokenizer estimate with that
+same basis and fails closed if it cannot be reproduced. Historical intents are
+not repriced, and legacy queued-placeholder repair retains its byte basis.
+The canonical-JSON count is an empirical estimate of provider-rendered input,
+not a guaranteed upper bound or evidence of improved live research quality.
+Changing this estimate does not change the observed provider quota or the
+completion reservation. Preparation v13 records the new estimate for new
+requests while dispatch continues to verify historical requests under their
+saved basis.
 
 Replacing an undispatched request preserves the last captured response's
 completion-token allowance. The replacement has no response of its own yet, so
@@ -267,6 +384,11 @@ coverage measures retained windows, not what a model has seen or understood.
 The initial view includes two copies; `read_source_inventory` pages the same
 navigation for later permitted copies without exposing their source text. The
 peer can reopen an earlier requested window or fetch an uncovered range.
+For a permitted public web document, the inventory also retains its exact saved
+URL after checking the linked fetch, copy and current use record. This helps a
+peer identify the page behind a reading reference without treating the URL as
+source text. An unusually long URL can be explicitly omitted to keep that
+bounded inventory page readable; the copy and reading reference remain.
 Checked-window compaction also retains the original source's partial status and
 any verified PDF page/table caution; passage text alone does not preserve those
 qualifications. Exact prepared inputs remain the evidence for text delivery.
@@ -322,3 +444,99 @@ provider-returned tool-turn reasoning, and notes after reopening the state store
 They do not establish a live model call, scientific usefulness, source retrieval,
 mission wake/recovery, or Atlas presentation. Those checks belong to the
 integrated Stage 4 mission run and its provider/UI qualification.
+
+Newly prepared peer instructions make successful publication's effect explicit:
+it finishes that peer task and can close the run once required work is done.
+Before publishing, peers assess the saved question's roles and requested outcome.
+Peers develop complementary perspectives from their roles, exploring relevant
+assumptions, alternatives or counterevidence within scope. When the outcome needs
+or could benefit from another perspective, comparison or review, they can read a
+shared contribution or seek a focused response. Requests carry a focused question,
+brief context and exact saved references when available; replies separate supported
+findings from interpretation and uncertainty. Peers review the reply and describe
+its actual effect on their assessment while independent work can continue. A catalog
+title alone does not establish the report's findings. Independent completion
+remains valid when peer input would not add useful value. This guidance changes no saved
+request, tool schema or completion policy; offline packet and publication checks
+do not establish that a live model will choose useful collaboration.
+
+Ordinary research turns attach the existing permitted `board_read` function
+alongside peer requests and context readers, so an agent can inspect shared work
+without spending a separate turn to select that small local reader. Permission
+and descriptor checks still apply; optional tools remain selectable on demand.
+Saved requests retain their original tool lists. Direct board access is separate
+from whether a model chooses a useful peer exchange.
+
+### Choosing skills and tools
+
+The model chooses an operation from the task's needs. A supported direct answer
+is valid when no additional information or action is needed. Each newly prepared request
+includes a tool-availability notice derived from that exact call's manifest and
+the current matching permission descriptors:
+
+- `call_now_local_functions`: attached functions that can be called directly.
+- `request_first_local_functions`: permitted optional functions to select with
+  `request_capability`; the model waits for the schema on a later turn.
+- `not_ready_local_functions`: a concrete missing-data explanation. For example,
+  `inspect_hit` needs an eligible saved search result. A capability request cannot
+  create that result.
+
+The chooser labels distinguish listing saved records (`read_context_page`),
+reading saved report/message/note text (`read_context_record`), reading source
+text with citation spans (`read_source_window`), and saving a report that ends
+the peer's task (`publish_result`). Labels describe results; stable tool IDs
+preserve saved-call identity.
+
+Every mission tool has both a short purpose in the catalog and a description
+attached to its local function schema. Descriptions state the useful operation,
+input references and returned information or saved effect. Common collaboration
+tools receive mission-specific descriptions too, without changing the generic
+capability library. Native browser search retains its provider descriptor;
+its purpose and selection instructions appear in the mission catalog instead.
+Catalog coverage and serialization checks verify that descriptions reach model
+requests; they do not establish that the model will choose every tool correctly.
+Saved requests retain their original descriptions. During mission continuation,
+prose-only description changes do not revoke a permitted tool: the host still
+requires matching names, versions, schemas, permissions and implementation
+references, and validates each saved schema hash before comparing it. A changed
+argument rule or execution contract remains a mismatch.
+
+The original-source reader is attached automatically when source evidence is
+selected or source recovery needs it. Source-free tasks keep it requestable;
+explicit selection also attaches it. This avoids repeating its full schema in
+memo-only turns while retaining the same permission and source-use checks.
+
+Native browser turns expose only the provider's browser descriptor. Their notice
+states that local functions return on the next ordinary turn. Historical error
+feedback is interpreted against the current menu: it must not ask the model to
+request a tool that is now attached. Old saved requests are not rewritten.
+
+Skills supply reusable workflow instructions and may expose associated granted
+tools. The role catalog distinguishes active skills from optional skills and lists
+their tools. An agent can activate a relevant optional skill with its exact ID,
+then use the next turn's instructions and tool schemas. One missing operation can
+instead be requested directly. Activation does not grant additional permissions
+or bypass source/data requirements. Optional selections persist until released;
+releasing a skill does not remove core tools or independently requested tools.
+
+Shared report entries and their compact overviews provide an exact `read_request`,
+including the context index ID and the separate record reference. The model can copy those arguments
+instead of assembling them from separate catalog fields. This pointer contains
+no report body and grants no access; the reader still checks the requesting task
+and current source permissions. A compact overview therefore does not require a
+separate page lookup before reading the identified report. Older saved request
+packets remain unchanged.
+
+Publication distinguishes record attribution from source citation. A peer report
+can be named in the answer, but its ID is not a source-copy ID and reading it does
+not inspect its underlying sources. The citation tool fields accept exact checked
+source/span pairs. A supported summary based only on task input or permitted peer
+records already read can use an empty citation list while stating its basis and
+verification limits. Invalid references remain rejected before publication.
+
+Single-agent evaluations use ordinary outcome-based prompts without tool names or
+forced selections. Record the actual menu, chosen operation, arguments, delivered
+result and useful outcome separately. A correct direct answer can pass the task
+while leaving an optional tool or skill unexercised. Refine descriptions, grouping
+and examples from observed confusion; offline menu checks alone do not establish
+that a live model will choose appropriately.

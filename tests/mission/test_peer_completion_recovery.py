@@ -39,7 +39,16 @@ def test_failed_peer_request_keeps_direct_text_provisional_across_restart(
             messages = json.dumps(body["messages"])
             assert "failed_peer_request_still_unresolved" in messages
             assert "direct_answer_provisional_pending_peer_action" in messages
-            assert "A useful provisional answer" in messages
+            candidate = host._control(run.run_id, "agent-synthesis")["body"][
+                "provisional_direct_report_ref"
+            ]
+            feedback = next(
+                json.loads(item["content"])["host_feedback"]
+                for item in body["messages"]
+                if item["role"] == "user" and '"host_feedback"' in item["content"]
+            )
+            assert feedback["candidate_ref"] == candidate
+            assert "A useful provisional answer" not in messages
             return tool("request_capability", {"tool_id": "propose_scope_completion"}, step)
         if step == 4:
             assert "propose_scope_completion" in {

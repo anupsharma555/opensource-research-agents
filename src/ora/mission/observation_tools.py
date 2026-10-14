@@ -63,7 +63,10 @@ OBSERVATION_TOOL_SCHEMAS = {
 
 OBSERVATION_TOOL_DESCRIPTIONS = {
     "estimate_latency": "Record or revise your rough task duration category with a plain-language basis. You may choose positive review_after_seconds for one future progress review; this is not a deadline or work limit. Pass the current saved expectation version, or zero for the first estimate.",
-    "wait_for_dependencies": "Choose to wait for exact unresolved peer requests or prerequisite proposals. Name each target task control and explain why. Completed or answered inputs return for review instead of parking your task; peers choose how to continue after a cycle notice.",
+    "wait_for_dependencies": "Wait when progress depends on an unresolved peer answer or "
+    "prerequisite proposal. Supply dependencies with their exact request/proposal and "
+    "target_control IDs/versions, plus reason. Saves a wait; already answered or completed "
+    "inputs return for review instead. Peers choose how to continue after a cycle notice.",
 }
 
 

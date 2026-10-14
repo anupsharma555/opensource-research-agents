@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
-import math
 import time
+from dataclasses import asdict
 
 import pytest
 
 from ora.contracts.models import LiveStartRequest
 from ora.mission import service as service_module
+from ora.models.token_estimate import TOKENIZER_BASIS, estimate_request_tokens
 from ora.state.store import canonical
 from tests.mission.test_service import service, tool
 
@@ -113,9 +114,13 @@ def test_stale_source_free_intent_is_fenced_only_before_dispatch(
         assert next_budget["prior_completion_response_ref"] == control["body"]["response_ref"]
         next_control = host._control(run.run_id, "agent-synthesis")
         next_spec = host.executor._spec_from(host._work_for(next_control))
-        assert next_spec.estimated_tokens == (
-            math.ceil(len(canonical(next_body).encode("utf-8")) / 4 * 1.25) + prior_completion
+        estimate = estimate_request_tokens(canonical(next_body).encode())
+        assert estimate.basis == TOKENIZER_BASIS
+        assert next_intent["body"]["request_token_estimate"] == asdict(estimate)
+        assert next_budget["estimated_tokens_with_completion_reservation"] == (
+            estimate.tokens + prior_completion
         )
+        assert next_spec.estimated_tokens == estimate.tokens + prior_completion
         assert len(requests) == 1  # Neither supersession nor preparation dispatched a model call.
     finally:
         host.close()

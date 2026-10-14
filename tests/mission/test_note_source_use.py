@@ -224,10 +224,23 @@ def test_policy_change_after_inclusion_blocks_only_affected_dispatch(tmp_path, m
         ))
         control = host._control(run.run_id, "agent-synthesis")
         mission_id, actor_id = control["body"]["mission_id"], control["body"]["actor_id"]
+        blob = host.store.put_blob(PASSAGE.encode("utf-8"))
 
         def save(tx):
+            publication = tx.put("publication", "dispatch-note-publication", {
+                "title": "Synthetic local note source",
+            })
+            encounter = tx.put("source_encounter", "dispatch-note-encounter", {
+                "publication": ref(publication), "route": "user_supplied",
+                "status": "accepted",
+            })
             copy = tx.put("source_copy", "dispatch-note-copy", {
                 "mission_id": mission_id, "rights_status": "permitted",
+                "publication": ref(publication), "encounter": ref(encounter),
+                "mime_type": "text/plain", "blob": blob,
+                "content_sha256": blob["sha256"], "retain_bytes": True,
+                "inspection_state": "checked", "validation_record": "synthetic-local-check",
+                "passage_ids": [],
             })
             use = tx.put("source_use", "dispatch-note-use", {
                 "copy_ref": ref(copy), "allowed_uses": ["model_input"],
@@ -297,10 +310,23 @@ def test_note_use_revoked_between_preflight_and_dispatch_mark_has_no_external_ef
         ))
         control = host._control(run.run_id, "agent-synthesis")
         mission_id = control["body"]["mission_id"]
+        blob = host.store.put_blob(PASSAGE.encode("utf-8"))
 
         def save(tx):
+            publication = tx.put("publication", "race-note-publication", {
+                "title": "Synthetic local note source",
+            })
+            encounter = tx.put("source_encounter", "race-note-encounter", {
+                "publication": ref(publication), "route": "user_supplied",
+                "status": "accepted",
+            })
             copy = tx.put("source_copy", "race-note-copy", {
                 "mission_id": mission_id, "rights_status": "permitted",
+                "publication": ref(publication), "encounter": ref(encounter),
+                "mime_type": "text/plain", "blob": blob,
+                "content_sha256": blob["sha256"], "retain_bytes": True,
+                "inspection_state": "checked", "validation_record": "synthetic-local-check",
+                "passage_ids": [],
             })
             use = tx.put("source_use", "race-note-use", {
                 "copy_ref": ref(copy), "allowed_uses": ["model_input"],

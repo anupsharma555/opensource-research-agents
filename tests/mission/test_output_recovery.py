@@ -49,7 +49,8 @@ def _copy(store: StateStore, *, suffix: str = "first") -> dict:
 
 def _saved_partial(tmp_path: Path, *, visible: str | None = VISIBLE,
                    with_source: bool = True, with_context: bool = True,
-                   tool_name: str | None = None) -> tuple:
+                   tool_name: str | None = None,
+                   source_turn_mode: str = "all_allowed_sources_fit") -> tuple:
     store = StateStore(tmp_path)
     copy_ref = _copy(store) if with_source else None
     policy_body = ({
@@ -163,7 +164,7 @@ def _saved_partial(tmp_path: Path, *, visible: str | None = VISIBLE,
         def save_context(tx):
             budget = tx.put("mission_call_budget", call["id"], {
                 "mission_id": "mission", "call_ref": call_ref,
-                "source_turn_mode": "all_allowed_sources_fit",
+                "source_turn_mode": source_turn_mode,
                 "retained_source_refs": [copy_ref] if copy_ref else [],
                 "current_tool_turn_ref": current_tool_turn_ref,
                 "compacted_tool_turn_refs": [],
@@ -259,6 +260,25 @@ def test_source_free_call_without_evidence_can_resume_visible_text(tmp_path: Pat
     result = _read(store, response_ref, actor_id, [])
     assert result["status"] == "available" and result["text"] == VISIBLE[:15]
     assert result["source_refs"] == []
+
+
+def test_requested_window_mode_preserves_partial_output_source_checks(tmp_path: Path) -> None:
+    store, response_ref, actor_id, source, _ = _saved_partial(
+        tmp_path, source_turn_mode="requested_window_recovery",
+    )
+    allowed = _read(store, response_ref, actor_id, [source])
+    assert allowed["status"] == "available" and allowed["text"] == VISIBLE[:15]
+
+    other = _copy(store, suffix="omitted-requested-window")
+    budget = store.get("mission_call_budget", "call-first")
+    store.transact("requested-window-retained-copy", {}, lambda tx: tx.put(
+        "mission_call_budget", budget["id"], {
+            **budget["body"], "retained_source_refs": [source, other],
+        }, expected_version=budget["version"],
+    ))
+    omitted = _read(store, response_ref, actor_id, [source])
+    assert omitted["status"] == "reissue_required"
+    assert omitted["reason"] == "source_context_changed" and "text" not in omitted
 
 
 def test_missing_context_or_unselected_retained_source_never_replays_draft(tmp_path: Path) -> None:

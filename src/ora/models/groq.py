@@ -109,6 +109,11 @@ class PreparedCall:
             "configuration_sha256": self.configuration_sha256,
             "credential_profile": self.credential_profile,
             "quota_domain": self.quota_domain,
+            "effective_reasoning_effort": self.body["reasoning_effort"],
+            "reasoning_effort_basis": (
+                "browser_search" if {"type": "browser_search"} in self.body.get("tools", [])
+                else "selected_configuration"
+            ),
             "requested_settings": {key: value for key, value in self.body.items()
                                    if key not in {"messages", "tools"}},
             "request_sha256": self.request_sha256,
@@ -139,6 +144,7 @@ class ModelOutcome:
     retry_after_seconds: float | None = None
     partial_response: bytes | None = field(default=None, repr=False)
     provider_error: dict[str, Any] | None = field(default=None, repr=False)
+    provider_metadata: dict[str, Any] | None = field(default=None, repr=False)
 
     @property
     def executable_tool_calls(self) -> tuple[dict[str, Any], ...]:
@@ -240,6 +246,11 @@ def classify_tool_failure_from_tools(
                     return "optional_selected_id_null"
         return None
     attempted = matched.group(1)
+    if (attempted == "browser_search"
+            and {"type": "browser_search"} in tools):
+        # The native descriptor has no function.name. A provider rejection of
+        # that name is distinct from an unregistered local function call.
+        return "native_tool_validation"
     if attempted in {item.get("name") for item in functions if isinstance(item, dict)}:
         return None
     for function in functions:
@@ -249,6 +260,35 @@ def classify_tool_failure_from_tools(
         if isinstance(route, dict) and isinstance(route.get("enum"), list) and attempted in route["enum"]:
             return "route_used_as_function_name"
     return "unregistered_tool_function"
+
+
+def rejected_unregistered_local_tool_name(
+    tools: list[dict[str, Any]], error: dict[str, Any] | None,
+) -> str | None:
+    """Return only a literal, bounded rejected local function name."""
+    if (not isinstance(error, dict)
+            or error.get("type") != "invalid_request_error"
+            or error.get("code") != "tool_use_failed"):
+        return None
+    message = error.get("message")
+    if not isinstance(message, str) or len(message) > 180:
+        return None
+    match = _MISSING_TOOL_NAME.search(message)
+    if match is None:
+        return None
+    attempted = match.group(1)
+    if (attempted == "browser_search"
+            or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,80}", attempted) is None
+            or message not in {
+                f"attempted to call tool '{attempted}' which was not in request.tools",
+                "Tool call validation failed: "
+                f"attempted to call tool '{attempted}' which was not in request.tools",
+                "Tool call validation failed: tool call validation failed: "
+                f"attempted to call tool '{attempted}' which was not in request.tools",
+            }
+            or classify_tool_failure_from_tools(tools, error) != "unregistered_tool_function"):
+        return None
+    return attempted
 
 
 def classify_missing_required_tool_argument(
@@ -474,13 +514,19 @@ class GroqSelectedAdapter:
             if schema is not None or schema_name is not None:
                 raise ModelPreflightError("collection cannot request strict output")
             if not tools:
-                raise ModelPreflightError("collection needs at least one local function tool")
+                raise ModelPreflightError("collection needs at least one tool")
             if len(tools) > 128:
                 raise ModelPreflightError("selected endpoint supports at most 128 functions")
             names: set[str] = set()
+            browser_search_seen = False
             for tool in tools:
+                if type(tool) is dict and tool == {"type": "browser_search"}:
+                    if browser_search_seen:
+                        raise ModelPreflightError("browser_search may be selected only once")
+                    browser_search_seen = True
+                    continue
                 if not isinstance(tool, dict) or tool.get("type") != "function":
-                    raise ModelPreflightError("only local function tools are supported")
+                    raise ModelPreflightError("unsupported tool type")
                 function = tool.get("function")
                 if (not isinstance(function, dict)
                     or not isinstance(function.get("name"), str)
@@ -490,6 +536,10 @@ class GroqSelectedAdapter:
                 if function["name"] in names:
                     raise ModelPreflightError("local tool names must be distinct")
                 names.add(function["name"])
+            if browser_search_seen and configuration.stream:
+                raise ModelPreflightError("browser_search requires a non-streaming response")
+            if browser_search_seen:
+                body["reasoning_effort"] = "low"
             body.update({"tools": list(tools), "tool_choice": "auto",
                          "parallel_tool_calls": False})
             if configuration.stream:
@@ -730,7 +780,20 @@ class GroqSelectedAdapter:
                            reasoning=reasoning, reasoning_status=reasoning_status,
                            usage=usage, timings={"wall_seconds": elapsed, **{
                                key: value for key, value in usage.items() if key.endswith("_time")
-                           }})
+                           }}, provider_metadata=metadata)
+
+        # Browser search is server-side. Preserve any provider-returned metadata
+        # without treating it as a locally executable tool call or source record.
+        metadata = None
+        if {"type": "browser_search"} in prepared.body.get("tools", []):
+            metadata = {
+                "response": {key: value for key, value in payload.items()
+                             if key not in {"choices", "usage"}},
+                "choice": {key: value for key, value in choice.items()
+                           if key not in {"message", "finish_reason"}},
+                "message": {key: value for key, value in message.items()
+                            if key not in {"role", "content", "reasoning", "tool_calls"}},
+            }
 
         # A length cutoff can interrupt JSON tool arguments. Keep the visible
         # response for continuation, but never expose a cutoff call to execution.
@@ -769,7 +832,8 @@ class GroqSelectedAdapter:
                             {"wall_seconds": elapsed, **{key: value for key, value in usage.items()
                                                           if key.endswith("_time")}},
                             "invalid_final_schema" if prepared.phase == "final" and status == "partial"
-                            and finish == "stop" else None)
+                            and finish == "stop" else None,
+                            provider_metadata=metadata)
 
     def _failed(self, prepared: PreparedCall, kind: str, started: float | None,
                 http_status: int | None = None, retry_after: float | None = None,

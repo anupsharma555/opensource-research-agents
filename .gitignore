@@ -29,6 +29,7 @@ tmp/
 .local/
 output/
 THREADS.md
+.session-handoffs/
 .codex/BACKLOG.md
 .vscode/
 

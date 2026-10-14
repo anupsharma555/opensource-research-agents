@@ -64,7 +64,7 @@ class RuntimeSkillTests(unittest.TestCase):
     def test_live_plan_role_names_and_shared_skill_identity(self) -> None:
         registry = load_registry(ROOT, CAPABILITIES)
         self.assertEqual([role["name"] for role in registry.roles.values()], ROLE_NAMES)
-        self.assertEqual(len(registry.skills), 2)
+        self.assertEqual(len(registry.skills), 3)
         a = registry.start_skill_attempt("evidence_preparation_synthesis", "evidence-linking", "A")
         b = registry.start_skill_attempt("independent_methods_reviewer_critic", "evidence-linking", "B")
         self.assertEqual((a.skill_id, a.skill_version, a.helper_sha256), (b.skill_id, b.skill_version, b.helper_sha256))
@@ -186,7 +186,7 @@ class RuntimeSkillTests(unittest.TestCase):
             for variant in case["variants"]:
                 self.assertTrue(registry.render_instructions(case["skill_id"], variant).strip())
             attempt = registry.start_skill_attempt(case["role_id"], case["skill_id"], "qualification-fixture")
-            expected_version = {"evidence-linking": "1.0.2", "study-appraisal": "1.0.3"}[case["skill_id"]]
+            expected_version = {"evidence-linking": "1.0.3", "study-appraisal": "1.0.3"}[case["skill_id"]]
             self.assertEqual(attempt.skill_version, expected_version)
 
 

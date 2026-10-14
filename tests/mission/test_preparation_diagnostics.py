@@ -23,14 +23,16 @@ def _failed_preparation(tmp_path, monkeypatch):
     ))
     control = host._control(run.run_id, "agent-synthesis")
     call_id, attempt_id = host._model_ids(control, control["body"]["sequence"] + 1)
-    original_assemble = host.context.assemble
+    original_dependencies = host.context.context_source_dependency_refs
 
-    def cannot_fit(*args, **kwargs):
+    def cannot_fit(_pack):
         raise ContextOverflow("PRIVATE model input and exception detail")
 
-    monkeypatch.setattr(host.context, "assemble", cannot_fit)
+    # Fail after the host has saved the call, attempt, and budget but before
+    # ModelSession.prepare writes any request intent or dispatch record.
+    monkeypatch.setattr(host.context, "context_source_dependency_refs", cannot_fit)
     assert host._drive_run(host._run(run.run_id))[0]
-    monkeypatch.setattr(host.context, "assemble", original_assemble)
+    monkeypatch.setattr(host.context, "context_source_dependency_refs", original_dependencies)
     call = host.store.get("agent_call", call_id)
     attempt = host.store.get("agent_attempt", attempt_id)
     budget = host.store.get("mission_call_budget", call_id)
@@ -98,6 +100,52 @@ def test_context_failure_remains_secondary_when_same_call_later_succeeds(tmp_pat
         assert host.store.get("mission_host_diagnostic", diagnostic["id"]) == diagnostic
         assert len(calls) == 1
         assert len(host.store.records("model_response_receipt")) == 1
+    finally:
+        host.close()
+
+
+def test_source_free_preflight_fences_both_unfit_attempts_before_dispatch(tmp_path, monkeypatch):
+    calls = []
+
+    def transport(request, *, timeout):
+        calls.append(request)
+        return answer("Unexpected response.", len(calls))
+
+    host = service(tmp_path, monkeypatch, transport)
+    try:
+        run = host.start(LiveStartRequest(
+            request_id="source-free-preflight-diagnostic",
+            question="Inspect an unfit local preparation",
+            agent_ids=["agent-synthesis"],
+        ))
+
+        def cannot_fit(*_args, **_kwargs):
+            raise ContextOverflow("PRIVATE model input and exception detail")
+
+        monkeypatch.setattr(host.context, "assemble", cannot_fit)
+        assert host._drive_run(host._run(run.run_id))[0]
+        diagnostics = host.store.records("mission_host_diagnostic")
+        assert len(diagnostics) == 2
+        assert {item["body"]["call_ref"]["id"] for item in diagnostics} == {
+            item["id"] for item in host.store.records("agent_call")
+        }
+        for diagnostic in diagnostics:
+            saved = diagnostic["body"]
+            call = host.store.get(**saved["call_ref"])
+            attempt = host.store.get(**saved["attempt_ref"])
+            budget = host.store.get(**saved["budget_ref"])
+            assert saved["category"] == "local_context_source_free_recovery"
+            assert saved["error_class"] == "ContextOverflow"
+            assert call and attempt and budget
+            assert attempt["body"]["status"] == "failed"
+            assert call["body"]["attempt_id"] == attempt["id"]
+            assert budget["body"]["call_ref"] == ref(call)
+            assert "PRIVATE" not in str(saved)
+        assert calls == []
+        assert host.store.records("model_request_intent") == []
+        assert host.store.records("model_dispatch_attempt") == []
+        assert host.store.records("model_response_receipt") == []
+        assert {item.status for item in host.state(run.run_id).snapshot.attempts} == {"failed"}
     finally:
         host.close()
 

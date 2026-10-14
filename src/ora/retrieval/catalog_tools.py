@@ -91,13 +91,40 @@ CATALOG_TOOL_SCHEMAS = {
         "required": ["navigation_ref", "link_offset", "link_limit"],
         "additionalProperties": False,
     },
+    "inspect_navigation_document": {
+        "type": "object",
+        "properties": {
+            "navigation_ref": {
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string", "enum": ["venue_navigation"]},
+                    "id": {"type": "string"},
+                    "version": {"type": "integer", "minimum": 1},
+                },
+                "required": ["kind", "id", "version"],
+                "additionalProperties": False,
+            },
+        },
+        "required": ["navigation_ref"],
+        "additionalProperties": False,
+    },
 }
 
 CATALOG_TOOL_DESCRIPTIONS = {
-    "list_venues": "Browse typed, dated venue navigation leads; an absent venue can still be discovered and proposed.",
-    "propose_venue": "Save an unlisted relevant venue with rationale and use its URL as a discovery lead immediately.",
-    "navigate_venue": "Open an exact saved venue lead or proposal; report the actual page, redirects, and links as navigation leads only.",
-    "page_venue_navigation": "Page links from an exact saved navigation result without fetching the venue again.",
+    "list_venues": "List dated research-venue leads using optional text/kinds filters and "
+    "offset/limit paging. Returns catalog references for navigation, not publication "
+    "evidence or a quality ranking; an absent venue can still be discovered and proposed.",
+    "propose_venue": "Save an additional research venue with name, kind, public url and "
+    "rationale. Returns a venue reference usable for navigation; this does not fetch its page.",
+    "navigate_venue": "Fetch a saved venue by exact catalog_ref, optionally choosing "
+    "link_index and link_offset/limit. Returns visit status, redirects and discovered public "
+    "links when available. Use page_venue_navigation to read more saved links without refetching.",
+    "page_venue_navigation": "Read more links using the saved navigation_ref and exact "
+    "link_offset/limit. Returns a page of retained links without another fetch; it does "
+    "not open linked papers.",
+    "inspect_navigation_document": "Inspect retained public HTML by exact navigation_ref "
+    "from this task. Returns a source-copy reference when current checks permit bounded "
+    "document reading, without fetching again. This does not inspect the page's linked papers.",
 }
 
 
@@ -455,6 +482,7 @@ def navigate_catalog_lead(
             "link_preview": page.links[:50],
             "link_preview_truncated": len(page.links) > 50,
             "access_basis": fetched.get("access_basis"),
+            "authenticated": fetched.get("authenticated") if type(fetched.get("authenticated")) is bool else None,
         }
     except PublicSourceHTTPError as exc:
         response = {
@@ -560,9 +588,9 @@ def _navigation_result(
         "evidence_status": "navigation_lead_only",
         "next_action": (
             "Request page_venue_navigation if needed, then use next_request to read retained links; "
-            "verify any article and its source copy separately"
+            "inspect useful saved HTML with inspect_navigation_document, and verify any article separately"
             if next_offset is not None else
-            "Follow useful links or search the venue, then verify any article and its source copy separately"
+            "Inspect useful saved HTML with inspect_navigation_document or follow links; verify any article separately"
         ),
     }
 

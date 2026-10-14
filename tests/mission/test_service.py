@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import math
 import subprocess
 import threading
 import time
@@ -21,13 +20,22 @@ from ora.coordination.executor import WorkSpec
 from ora.evidence.intake import extract_blocks
 from ora.mission import MissionService
 from ora.mission.context import PACKER_VERSION, ContextOverflow
-from ora.mission.service import _visible_title_identity
+from ora.mission.service import ESTIMATOR_VERSION, _visible_title_identity
 from ora.models import GroqSelectedAdapter, ModelSession
+from ora.models.token_estimate import TOKENIZER_BASIS, estimate_request_tokens
 from ora.retrieval.providers import HTTPResult
 from ora.state import StateStore
 
 ROOT = Path(__file__).resolve().parents[2]
 MODEL = "openai/gpt-oss-120b"
+
+
+def _dense_synthetic_rows(length: int) -> str:
+    """Keep source-pressure fixtures varied under the actual tokenizer."""
+    return " ".join(
+        f"row{i:04d}: x={i * 317 % 997}; y={i * 409 % 991}; z={i * 613 % 983}."
+        for i in range(length // 20 + 1)
+    )[:length]
 
 
 class Response:
@@ -1145,10 +1153,14 @@ def test_requested_tool_exposure_survives_host_restart(tmp_path, monkeypatch):
 def test_bad_tool_action_is_local_and_other_peer_can_finish(tmp_path, monkeypatch):
     lock = threading.Lock()
     counts = {"synthesis": 0, "critique": 0}
+    requests = []
 
     def transport(request, *, timeout):
         body = json.loads(request.data)
-        role = "critique" if "Mxra" in json.dumps(body["messages"]) else "synthesis"
+        requests.append(body)
+        instructions = body["messages"][0]["content"]
+        assert instructions.startswith(("You are Sage,", "You are Mxra,"))
+        role = "critique" if instructions.startswith("You are Mxra,") else "synthesis"
         with lock:
             counts[role] += 1
             count = counts[role]
@@ -1173,8 +1185,10 @@ def test_bad_tool_action_is_local_and_other_peer_can_finish(tmp_path, monkeypatc
     message = json.loads(host.store.read_blob(tool_result["body"]["blob"]["sha256"]))
     invalid = json.loads(message["content"])
     assert invalid["status"] == "rejected"
-    assert invalid["field"] == "hit_id"
-    assert invalid["external_action"] == "none"
+    assert invalid["reason"] == "Tool is not actor-granted"
+    assert "inspect_hit" not in {
+        item["function"]["name"] for item in requests[0]["tools"]
+    }
 
 
 def test_search_inspect_and_cited_publish_use_checked_copy(tmp_path, monkeypatch):
@@ -1252,10 +1266,17 @@ def test_search_inspect_and_cited_publish_use_checked_copy(tmp_path, monkeypatch
     snapshot = host.state(receipt.run_id).snapshot
     assert snapshot.mission.status == "completed"
     assert len(requests) == 3
+    assert "inspect_hit" not in {
+        item["function"]["name"] for item in requests[0]["tools"]
+    }
+    assert "inspect_hit" in {
+        item["function"]["name"] for item in requests[1]["tools"]
+    }
     search_tool = next(
         item for item in requests[0]["tools"] if item["function"]["name"] == "search_scholarly"
     )
-    assert "route argument" in search_tool["function"]["description"]
+    assert "Choose route and limit" in search_tool["function"]["description"]
+    assert "search routes use query" in search_tool["function"]["description"]
     assert len(snapshot.sources) == 1
     assert snapshot.artifacts[0].citations[0].source_id == snapshot.sources[0].id
     assert len(host.store.records("source_use")) == 1
@@ -1625,7 +1646,15 @@ def test_window_preview_pressure_still_prepares_exact_checked_source_input(
             "mission_call_budget", prepared_call["id"]
         )["body"]
         assert prepared_budget["packer_version"] == PACKER_VERSION
-        assert prepared_budget["exact_complete_request_estimate_tokens"] <= 8700 * .70
+        # The soft target may yield to an exact preview within the observed
+        # ceiling, after reserving the prior response's completion tokens.
+        admission_target = prepared_budget["preview_admission_target_tokens"]
+        assert 8700 * .70 <= admission_target
+        assert prepared_budget["exact_complete_request_estimate_tokens"] <= admission_target
+        assert admission_target <= (
+            prepared_budget["observed_account_limit"]
+            - prepared_budget["prior_completion_reservation"]
+        )
         assert prepared_budget["exact_complete_request_sha256"] == intent["body"][
             "request_sha256"
         ]
@@ -1659,7 +1688,7 @@ def test_three_checked_windows_over_target_recover_without_dropping_selection(
         return tool("read_source_window", args, len(requests))
 
     prefix = "DOI: 10.1234/three-windows. "
-    source_text = prefix + "A" * (1600 - len(prefix)) + "B" * 800 + "C" * 262
+    source_text = prefix + _dense_synthetic_rows(2662 - len(prefix))
     host = service(tmp_path, monkeypatch, transport)
     try:
         run = host.start(LiveStartRequest(
@@ -1739,7 +1768,10 @@ def test_checked_window_exact_soft_fit_and_boundary_drift(
         run = host.start(LiveStartRequest(
             request_id="checked-window-exact-soft-fit",
             question="Check a bounded synthetic excerpt",
-            evidence_text="DOI: 10.1234/soft-fit. " + "A" * 3000,
+            evidence_text="DOI: 10.1234/soft-fit. " + (
+                _dense_synthetic_rows(3000)
+                if boundary in {"over_target", "hard_revoked"} else "A" * 3000
+            ),
             agent_ids=[actor],
         ))
         source_ref = host._control(run.run_id, actor)["body"]["source_refs"][0]
@@ -1753,9 +1785,13 @@ def test_checked_window_exact_soft_fit_and_boundary_drift(
             pytest.fail("Checked source window was not saved")
         # The saved complete request exceeds a 5,600-token synthetic target.
         # Separately exercise exact preview under a deliberately conservative
-        # soft source reservation, with a complete request that fits 7,000.
+        # soft source reservation. The unchanged/commit cases need room for
+        # both the automatic capability catalog and the current tool envelope.
         target = (5600 if boundary in {"over_target", "hard_revoked"} else
-                  4550 if boundary == "just_over_ceiling" else 7000)
+                  4900 if boundary == "just_over_ceiling" else
+                  8500 if boundary == "unchanged" else
+                  8000 if boundary == "post_commit_overflow" else
+                  9000 if boundary == "late_message" else 7000)
         host._update_control(
             control, input_budget={"observed_limit_tokens": target * 10 // 7,
                                    "target_fraction": .70},
@@ -1837,9 +1873,9 @@ def test_checked_window_exact_soft_fit_and_boundary_drift(
         budget = host.store.get("mission_call_budget", call_ref["id"])["body"]
         request = json.loads(host.store.read_blob(intent["body"]["blob"]["sha256"]))
         if boundary == "just_over_ceiling":
-            assert budget["exact_complete_request_estimate_tokens"] <= 6494
-            assert budget["preview_admission_target_tokens"] <= 6494
-            assert budget["observed_account_limit"] == 6500
+            assert budget["exact_complete_request_estimate_tokens"] <= 6994
+            assert budget["preview_admission_target_tokens"] <= 6994
+            assert budget["observed_account_limit"] == 7000
             if intent["body"]["source_decisions"]:
                 assert intent["body"]["source_decisions"][0]["copy_ref"] == source_ref
             else:
@@ -1848,9 +1884,7 @@ def test_checked_window_exact_soft_fit_and_boundary_drift(
             return
         if boundary == "over_target":
             assert budget["source_turn_mode"] == "all_allowed_sources_fit"
-            assert budget["preview_admission_basis"] == (
-                "conservative_complete_request_preview_not_provider_tokenizer_exact"
-            )
+            assert budget["preview_admission_basis"] == TOKENIZER_BASIS
             assert budget["exact_complete_request_estimate_tokens"] > target
             assert budget["exact_complete_request_estimate_tokens"] <= (
                 budget["observed_account_limit"] - 6
@@ -1910,9 +1944,7 @@ def test_checked_window_exact_soft_fit_and_boundary_drift(
             ) is not None
             return
         assert budget["source_turn_mode"] != "source_free_recovery"
-        assert budget["preview_admission_basis"] == (
-            "conservative_complete_request_preview_not_provider_tokenizer_exact"
-        )
+        assert budget["preview_admission_basis"] == TOKENIZER_BASIS
         assert budget["exact_complete_request_sha256"] == intent["body"][
             "request_sha256"
         ]
@@ -1930,8 +1962,10 @@ def test_checked_window_exact_soft_fit_and_boundary_drift(
         assert tool_result["status"] == "saved_window_text_in_selected_source_packet"
         assert tool_result["next_cursor"]["char_offset"] == 1600
         assert tool_result["window_ref"]["kind"] == "source_read_window"
-        assert math.ceil(len(json.dumps(request, sort_keys=True, separators=(",", ":"))
-                             .encode()) / 4 * 1.25) <= target
+        assert estimate_request_tokens(
+            host.store.read_blob(intent["body"]["blob"]["sha256"]),
+            basis=intent["body"]["request_token_estimate"]["basis"],
+        ).tokens <= target
         assert len(requests) == 1
     finally:
         host.close()
@@ -2119,14 +2153,10 @@ def test_any_starting_peer_can_close_scope_while_other_peer_continues(tmp_path, 
         reason="The accepted analysis answers the requested scope; the second peer continues",
     )
     assert signal["status"] == "recorded"
-    report_ref = host._save(
-        "report",
-        "synthetic-independent-report",
-        {"mission_id": run["body"]["mission_id"], "run_id": run["id"], "text": "A bounded result"},
-        mission_id=run["body"]["mission_id"],
-    )
-    assert host._complete_direct(sage, report_ref)
-    host._update_control(sage, phase="done", report_ref=report_ref)
+    assert host._schedule_model(sage)
+    asyncio.run(host.executor.run_ready(run["body"]["mission_id"]))
+    assert host._advance(host._control(receipt.run_id, "agent-synthesis"))
+    assert host._control(receipt.run_id, "agent-synthesis")["body"]["phase"] == "done"
     assert host._maybe_complete(host._run(receipt.run_id))
     current = host._run(receipt.run_id)["body"]
     assert current["status"] == "completed"
@@ -3264,9 +3294,11 @@ def test_restart_corrects_historical_8192_reservation_without_model_dispatch(
 
 def test_restart_repairs_saved_413_with_observed_input_allowance(tmp_path, monkeypatch):
     invocations = []
+    request_sizes = []
 
     def transport(request, *, timeout):
         invocations.append(json.loads(request.data))
+        request_sizes.append(len(request.data))
         if len(invocations) == 1:
             raise urllib.error.HTTPError(
                 "https://example.invalid",
@@ -3285,7 +3317,10 @@ def test_restart_repairs_saved_413_with_observed_input_allowance(tmp_path, monke
     host = service(tmp_path, monkeypatch, transport)
     receipt = host.start(
         LiveStartRequest(
-            request_id="mission-413", question="Repair input?", agent_ids=["agent-synthesis"]
+            request_id="mission-413", question="Repair input?",
+            evidence_text="DOI: 10.1234/oversized-413. "
+                          + "Synthetic report detail requiring source inspection. " * 700,
+            agent_ids=["agent-synthesis"],
         )
     )
     control = host._control(receipt.run_id, "agent-synthesis")
@@ -3330,6 +3365,7 @@ def test_restart_repairs_saved_413_with_observed_input_allowance(tmp_path, monke
     drain(resumed, receipt.run_id)
     assert resumed.state(receipt.run_id).snapshot.mission.status == "completed"
     assert len(invocations) == 2
+    assert request_sizes[1] < request_sizes[0]
     budgets = resumed.store.records("mission_call_budget")
     assert any(item["body"]["observed_account_limit"] == 8000 for item in budgets)
     assert (
@@ -3547,7 +3583,7 @@ def test_restart_retries_old_context_overreserve_with_actual_tool_estimate(
         item for item in resumed.store.records("mission_call_budget") if item["id"] != next_call_id
     ]
     assert len(latest) == 1
-    assert latest[0]["body"]["estimator_version"] == "source_working_set_v8"
+    assert latest[0]["body"]["estimator_version"] == ESTIMATOR_VERSION
     assert len(latest[0]["body"]["exposed_tool_ids"]) < len(config["body"]["permitted_tools"])
     assert len(invocations) == 1
     assert resumed.state(receipt.run_id).snapshot.mission.status == "completed"

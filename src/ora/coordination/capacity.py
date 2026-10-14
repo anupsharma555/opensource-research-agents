@@ -15,6 +15,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Mapping
 
+from ora.models.token_estimate import LEGACY_BASIS, estimate_request_tokens
 from ora.state.blobs import IntegrityFault
 from ora.state.store import StateConflict, StateError, StateStore, Transaction, canonical
 
@@ -210,6 +211,7 @@ class CapacityScheduler:
         review: bool = False, mission_id: str = "", run_id: str = "",
         attempt_id: str = "", call_id: str = "", budget_version: str = "",
         retry_limit: int = 2,
+        request_token_estimate: dict | None = None,
     ) -> dict:
         if kind not in KINDS or not isinstance(task_id, str) or not task_id or not isinstance(lane, str) or not lane:
             raise StateError("Capacity work needs task, lane and known resource kind")
@@ -223,6 +225,13 @@ class CapacityScheduler:
             raise StateError("Transport retry limit must be nonnegative")
         if kind != "model" and (estimated_tokens or review):
             raise StateError("Non-model work uses request quotas and no review reserve")
+        if request_token_estimate is not None and (
+            kind != "model" or not isinstance(request_token_estimate, dict)
+            or type(request_token_estimate.get("tokens")) is not int
+            or not 0 <= request_token_estimate["tokens"] <= estimated_tokens
+            or not isinstance(request_token_estimate.get("basis"), str)
+        ):
+            raise StateError("Capacity request estimate needs a valid model input count")
         if len(set(quota_scopes)) != len(quota_scopes) or set(quota_scopes) - set(self.policy.quotas):
             raise StateError("Every quota scope must have one configured ceiling")
         for scope in quota_scopes:
@@ -235,9 +244,12 @@ class CapacityScheduler:
             "task_id": task_id, "lane": lane, "kind": kind, "quota_scopes": list(quota_scopes),
             "estimated_tokens": estimated_tokens, "review": review,
         }
+        if request_token_estimate is not None:
+            intent["request_token_estimate"] = request_token_estimate
         body = {
             **intent, "phase": "queued",
-            "estimate_basis": "caller_prepared_request_estimate" if kind == "model" else None,
+            "estimate_basis": (request_token_estimate["basis"] if request_token_estimate
+                               else "caller_prepared_request_estimate" if kind == "model" else None),
             "submitted_at": self.store.clock(), "queued_at": self.store.clock(),
             "queue_wait_seconds": 0, "provider_wait_seconds": 0,
             "quota_wait_seconds": 0,
@@ -341,7 +353,8 @@ class CapacityScheduler:
                         observed = (prior["body"].get("usage") or {}).get("completion_tokens")
                         if type(observed) is int and observed >= 0:
                             prior_completion = observed
-                estimate = max(1, math.ceil(len(raw) / 4 * 1.25) + prior_completion)
+                estimate = max(1, estimate_request_tokens(raw, basis=LEGACY_BASIS).tokens
+                               + prior_completion)
 
                 def save(tx):
                     current = tx.get(OPERATION, record["id"])
@@ -527,7 +540,8 @@ class CapacityScheduler:
                 observed = (prior["body"].get("usage") or {}).get("completion_tokens")
                 if type(observed) is int and observed >= 0:
                     prior_completion = observed
-        exact_estimate = max(1, math.ceil(len(raw) / 4 * 1.25) + prior_completion)
+        exact_estimate = max(1, estimate_request_tokens(raw, basis=LEGACY_BASIS).tokens
+                             + prior_completion)
         if exact_estimate != body["estimated_tokens"]:
             return unsafe("estimate_mismatch")
         return {
@@ -1356,6 +1370,44 @@ class CapacityScheduler:
             return tx.put(OPERATION, operation_id, updated, expected_version=record["version"])["body"]
 
         return self.store.transact(f"capacity-reconciled-{operation_id}-{generation}", {"owner": owner, "generation": generation, "effect": effect, "used_tokens": used_tokens, "cached_tokens": cached_tokens, "output_ref": output_ref}, save)
+
+    def settle_known_uncertain_tx(
+        self, tx: Transaction, operation_id: str, owner: str, generation: int, *,
+        outcome: str, output_ref: str, used_tokens: int | None = None,
+        cached_tokens: int = 0,
+    ) -> dict:
+        """Settle a recovered effect alongside its accepted or unaccepted record.
+
+        The caller must hold a fresh reconciliation claim and save the exact
+        result in this same transaction. An uncertain operation is never
+        requeued as a claimed no-effect when its result has been found.
+        """
+        if outcome not in {"completed", "known_unaccepted"} or not output_ref:
+            raise StateError("Known uncertain effect needs a saved output and outcome")
+        self._check_usage("completed", used_tokens, cached_tokens)
+        now = self.store.clock()
+        record = self._owned(tx, operation_id, owner, generation, now)
+        body = record["body"]
+        if body["phase"] != "uncertain":
+            raise StateConflict("Only uncertain work may use known-result settlement")
+        if outcome == "completed" and body["cancel_requested"]:
+            raise StateConflict("Canceled uncertain work cannot accept a late result")
+        attempts = list(body["attempts"])
+        if not attempts or attempts[-1]["status"] not in {"dispatched", "uncertain"}:
+            raise StateConflict("Uncertain work has no dispatched attempt to reconcile")
+        attempts[-1] = dict(
+            attempts[-1], status=outcome,
+            charged_tokens=used_tokens if used_tokens is not None else attempts[-1]["charged_tokens"],
+            usage_known=used_tokens is not None,
+            cached_tokens=cached_tokens if used_tokens is not None else None,
+            completed_at=now,
+        )
+        updated = dict(
+            body, phase=outcome, attempts=attempts, reservation=False,
+            local_active=False, external_active=False, output_ref=output_ref,
+            owner=None, lease_until=None,
+        )
+        return tx.put(OPERATION, operation_id, updated, expected_version=record["version"])["body"]
 
     def cancel(self, operation_id: str, *, reason: str = "user_cancel") -> dict:
         """Stop future dispatch; retain an already dispatched uncertain effect."""

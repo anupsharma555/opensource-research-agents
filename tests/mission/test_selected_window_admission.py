@@ -70,16 +70,19 @@ def _bind_source_free_pack(host, pack):
     return host.context.save_inclusion("synthetic-report-inclusion", pack, intent_ref)
 
 
-def _ready_selected_window(tmp_path, monkeypatch):
+def _ready_selected_window(
+    tmp_path, monkeypatch, *, window_chars=2000, completion_tokens=6, crowded=True,
+):
     def unexpected_provider_call(_request, *, timeout):
         raise AssertionError("Offline preparation must not call the model provider")
 
     host = service(tmp_path, monkeypatch, unexpected_provider_call)
     run = host.start(LiveStartRequest(
         request_id="crowded-selected-window", question="Review the supplied abstract",
-        scope="Evaluate the synthetic result within this exact question. " * 10,
+        scope=("Evaluate the synthetic result within this exact question. " * 10
+               if crowded else ""),
         evidence_text="DOI: 10.1234/synthetic. SELECTED_MARKER " + "A" * 4000,
-        agent_ids=["agent-synthesis", "agent-critique"],
+        agent_ids=["agent-synthesis", "agent-critique"] if crowded else ["agent-synthesis"],
     ))
     actor = "agent-synthesis"
     control = host._control(run.run_id, actor)
@@ -112,21 +115,22 @@ def _ready_selected_window(tmp_path, monkeypatch):
 
     host.store.transact("synthetic-parent-for-window", {}, add_parent,
                         mission_id=mission_id)
-    recipient = host._control(run.run_id, "agent-critique")["body"]["actor_id"]
-    task = host.store.get("board_proposal", control["body"]["task_id"])
-    for number in range(2):
-        PeerMailbox(host.store).send_request(
-            f"synthetic-peer-request-{number}", mission_id=mission_id,
-            request_id=f"synthetic-request-with-long-identity-{number}",
-            message_id=f"synthetic-message-with-long-identity-{number}",
-            requester_id=control["body"]["actor_id"], recipient_id=recipient,
-            question=f"Independently assess synthetic point {number}",
-            expected_artifact="A scoped review", cause_ref=ref(task),
-            payload={}, task_ref=ref(task),
-        )
+    if crowded:
+        recipient = host._control(run.run_id, "agent-critique")["body"]["actor_id"]
+        task = host.store.get("board_proposal", control["body"]["task_id"])
+        for number in range(2):
+            PeerMailbox(host.store).send_request(
+                f"synthetic-peer-request-{number}", mission_id=mission_id,
+                request_id=f"synthetic-request-with-long-identity-{number}",
+                message_id=f"synthetic-message-with-long-identity-{number}",
+                requester_id=control["body"]["actor_id"], recipient_id=recipient,
+                question=f"Independently assess synthetic point {number}",
+                expected_artifact="A scoped review", cause_ref=ref(task),
+                payload={}, task_ref=ref(task),
+            )
 
     history = []
-    for number in range(12):
+    for number in range(12 if crowded else 0):
         response, _ = _saved_tool_request(
             host, control, response_id=f"synthetic-archived-response-{number}",
             tool_id=f"synthetic-archive-tool-{number}", name="read_source_inventory",
@@ -136,17 +140,17 @@ def _ready_selected_window(tmp_path, monkeypatch):
 
     window = read_source_window(
         host.evidence, "synthetic-selected-read", copy_ref,
-        block_offset=0, block_limit=1, char_offset=0, char_limit=2000,
+        block_offset=0, block_limit=1, char_offset=0, char_limit=window_chars,
     )
     window.update(
-        requested_char_limit=2000, effective_char_limit=2000,
+        requested_char_limit=window_chars, effective_char_limit=window_chars,
         returned_chars=sum(len(item["text_preview"]) for item in window["passages"]),
         remaining_in_block_chars=next(
             (item["characters"] for item in window["omissions"]
              if item["reason"] == "remaining_characters_in_block"), 0,
         ),
         next_request={"source_id": copy_ref["id"], "source_version": copy_ref["version"],
-                      **window["next_cursor"], "char_limit": 2000,
+                      **window["next_cursor"], "char_limit": window_chars,
                       "selection_mode": "replace"},
     )
     window["passages"] = [
@@ -162,8 +166,9 @@ def _ready_selected_window(tmp_path, monkeypatch):
         response_id=f"model-response:model-intent:{original_call['id']}:{original_call['version']}",
         tool_id="synthetic-selected-window-tool", name="read_source_window",
         arguments={"source_id": copy_ref["id"], "source_version": copy_ref["version"],
-                   "block_offset": 0, "char_offset": 0, "char_limit": 2000,
+                   "block_offset": 0, "char_offset": 0, "char_limit": window_chars,
                    "selection_mode": "replace"}, result=window,
+        completion_tokens=completion_tokens,
     )
     host._update_control(
         control, phase="ready_model", tool_turn_refs=[*history, response],
@@ -183,7 +188,7 @@ def test_selected_window_archives_exact_duplicate_when_full_request_needs_space(
         control = host._control(run.run_id, actor)
         proposal = host.store.get("board_proposal", control["body"]["task_id"])
         candidates = []
-        for target in range(6500, 7001, 50):
+        for target in range(6200, 6801, 50):
             plan = plan_source_turn(host.store, ref(control),
                                     source_input_allowance_tokens=target)
             if plan["mode"] == "source_free_recovery":
@@ -303,7 +308,7 @@ def test_selected_window_fallback_rejects_unselected_or_restricted_text(
         )
         host._update_control(
             control, input_budget={"observed_limit_tokens": (
-                10006 if boundary == "revoked" else 6756
+                10006 if boundary == "revoked" else 7506
             ),
                                    "target_fraction": .70},
         )

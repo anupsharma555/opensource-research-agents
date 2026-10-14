@@ -26,8 +26,16 @@ from .latency import (
     read_expectation,
     read_review_delivery_response,
 )
+from .report_lineage import (
+    accepted_report as _accepted_report,
+)
+from .report_lineage import (
+    report_text_access,
+)
 
-PROJECTION_VERSION = "stage4-atlas-v20"
+PROJECTION_VERSION = "stage4-atlas-v21"
+
+_REPORT_TEXT_UNAVAILABLE = "Report text unavailable because source-use permission changed."
 
 
 def _now() -> str:
@@ -323,40 +331,47 @@ def _exact_report(store: StateStore, pointer: dict | None, mission_id: str) -> d
     return report if report and report["body"].get("mission_id") == mission_id else None
 
 
-def _accepted_report(store: StateStore, control: dict, mission_id: str) -> dict | None:
-    """Follow the completed task's exact board outcome, not a saved candidate pointer."""
-    body = control["body"]
-    report = _exact_report(store, body.get("report_ref"), mission_id)
-    if body.get("phase") != "done" or report is None:
-        return None
-    proposal = store.get("board_proposal", body["task_id"])
-    if (proposal is None or proposal["body"].get("mission_id") != mission_id
-            or proposal["body"].get("status") != "completed"):
-        return None
-    outcome_ref = proposal["body"].get("outcome_ref")
-    if not isinstance(outcome_ref, dict) or outcome_ref.get("kind") != "board_outcome":
-        return None
-    outcome = store.get(**outcome_ref)
-    if (outcome is None or outcome["body"].get("mission_id") != mission_id
-            or (outcome["body"].get("proposal_ref") or {}).get("id") != body["task_id"]):
-        return None
-    report_ref = ref(report)
-    for pointer in outcome["body"].get("result_refs", []):
-        if pointer == report_ref:
-            return report
-        if pointer.get("kind") == "executor_artifact":
-            artifact = store.get(**pointer)
-            if (artifact and artifact["body"].get("mission_id") == mission_id
-                    and report_ref in artifact["body"].get("output_refs", [])):
-                return report
-    return None
+def _report_policy_state(store: StateStore, controls: list[dict], mission_id: str) -> list[dict]:
+    """Bind a refreshed view to current use of each accepted report's exact copies."""
+    state = []
+    for control in controls:
+        report = _accepted_report(store, control, mission_id)
+        if report is None:
+            continue
+        access = report_text_access(store, report)
+        copies = []
+        for pointer in access["source_dependency_refs"]:
+            current = store.get("source_copy", pointer["id"])
+            selected_use = store.resolve(
+                "source_use.copy", f"{pointer['id']}:{pointer['version']}"
+            )
+            current_use = store.resolve(
+                "source_use.copy", f"{current['id']}:{current['version']}"
+            ) if current else None
+            copies.append({
+                "copy_ref": pointer,
+                "current_copy_ref": ref(current) if current else None,
+                "selected_use_ref": ref(selected_use) if selected_use else None,
+                "current_use_ref": ref(current_use) if current_use else None,
+            })
+        state.append({
+            "report_ref": ref(report),
+            "status": access["status"],
+            "lineage_complete": access["dependency_lineage_complete"],
+            "copies": copies,
+        })
+    return sorted(state, key=lambda item: item["report_ref"]["id"])
 
 
 def _source(store: StateStore, pointer: dict, window_refs: list[dict]) -> tuple[dict, dict]:
     copy = store.get(**pointer)
     body = copy["body"]
     encounter = store.get(**body["encounter"])
-    publication = store.get(**body["publication"])
+    publication = store.get(**body["publication"]) if body.get("publication") else None
+    navigation = store.get(**body["navigation_ref"]) if body.get("navigation_ref") else None
+    document = store.get(**body["document_ref"]) if body.get("document_ref") else None
+    if sum(origin is not None for origin in (publication, navigation, document)) != 1:
+        raise StateError("Source copy needs one exact publication or document origin")
     route = encounter["body"]["route"]
     supplied = route == "user_supplied"
     passages = []
@@ -454,9 +469,17 @@ def _source(store: StateStore, pointer: dict, window_refs: list[dict]) -> tuple[
         "id": copy["id"],
         "copyId": copy["id"],
         "version": copy["version"],
-        "title": publication["body"]["titles"][0],
+        "title": (
+            publication["body"]["titles"][0] if publication else
+            navigation["body"].get("title") or navigation["body"].get("heading") or "Saved web document"
+            if navigation else "Saved web document"
+        ),
         "accessState": (
-            "supplied_text"
+            "navigation_text"
+            if navigation
+            else "document_text"
+            if document
+            else "supplied_text"
             if supplied
             else "full_text"
             if body["access_surface"] == "full_text"
@@ -480,7 +503,8 @@ def _source(store: StateStore, pointer: dict, window_refs: list[dict]) -> tuple[
 
 
 def build_snapshot(
-    store: StateStore, run: dict, controls: list[dict], *, snapshot_id: str
+    store: StateStore, run: dict, controls: list[dict], *, snapshot_id: str,
+    pinned_report_access: dict[str, str] | None = None,
 ) -> tuple[dict, list[dict], list[dict], list[dict]]:
     """Build a read model only from saved versions; never infer scientific support."""
     body = run["body"]
@@ -542,12 +566,28 @@ def build_snapshot(
         if (report := _accepted_report(store, control, mission_id)) is not None
     }.values())
     reports = [store.get(**pointer) for pointer in accepted]
+    if pinned_report_access is not None and any(
+        item["id"] not in pinned_report_access for item in reports
+    ):
+        raise StateConflict("Accepted report changed while building current snapshot")
+    report_access = {
+        item["id"]: (
+            {"status": pinned_report_access[item["id"]]}
+            if pinned_report_access is not None
+            else report_text_access(store, item)
+        ) for item in reports
+    }
     artifacts = [
-        {
+        ({
             key: item["body"][key]
             for key in ("id", "version", "kind", "title", "body", "citations", "limitations")
-        }
-        | {"producerAttemptId": item["body"]["producer_attempt_ref"]["id"]}
+        } if report_access[item["id"]]["status"] == "available" else {
+            "id": item["body"]["id"], "version": item["body"]["version"],
+            "kind": item["body"]["kind"],
+            "title": _REPORT_TEXT_UNAVAILABLE,
+            "body": _REPORT_TEXT_UNAVAILABLE,
+            "citations": [], "limitations": [_REPORT_TEXT_UNAVAILABLE],
+        }) | {"producerAttemptId": item["body"]["producer_attempt_ref"]["id"]}
         for item in reports
     ]
     attempts, attempt_provenance = [], []
@@ -709,7 +749,11 @@ def build_snapshot(
         token_quota = inspect_provider_token_quota(store, call, item, response)
         if token_quota is not None and accepted_report is None:
             explanation = provider_token_quota_explanation(token_quota)
-        summary = accepted_report["body"].get("body", "")[:500] if accepted_report else None
+        summary = (
+            accepted_report["body"].get("body", "")[:500]
+            if report_access[accepted_report["id"]]["status"] == "available"
+            else _REPORT_TEXT_UNAVAILABLE
+        ) if accepted_report else None
         attempts.append(
             {
                 "id": item["id"],
@@ -920,7 +964,15 @@ def build_snapshot(
                 else "awaiting_review"
                 if request["body"].get("status") in {"awaiting_review", "partial_awaiting_review"}
                 else "acknowledged",
-                "summary": report["body"].get("body", "")[:500] or report["body"].get("title"),
+                "summary": (
+                    report["body"].get("body", "")[:500] or report["body"].get("title")
+                    if (
+                        report_access[report["id"]]["status"]
+                        if report["id"] in report_access
+                        else report_text_access(store, report)["status"]
+                    ) == "available"
+                    else _REPORT_TEXT_UNAVAILABLE
+                ),
                 "createdAt": saved["created_at"],
                 "updatedAt": request["body"].get("resolved_at"),
             }
@@ -1083,6 +1135,7 @@ def persist_snapshot(store: StateStore, run: dict, controls: list[dict]) -> dict
         if len(page) < 500:
             break
         cursor = page[-1]["sequence"]
+    report_policy = _report_policy_state(store, controls, mission_id)
     signature = hashlib.sha256(
         canonical(
             {
@@ -1091,16 +1144,42 @@ def persist_snapshot(store: StateStore, run: dict, controls: list[dict]) -> dict
                 "controls": [ref(item) for item in controls],
                 "details": detail_refs,
                 "events": relevant_events,
+                "report_source_use": report_policy,
             }
         ).encode()
     ).hexdigest()[:32]
     snapshot_id = f"snapshot-{run['id']}-{signature}"
     existing = store.get("research_snapshot", snapshot_id)
     if existing:
+        if _report_policy_state(store, controls, mission_id) != report_policy:
+            raise StateConflict("Report source use changed while reading current snapshot")
         return ref(existing)
+    pinned_report_access = {
+        item["report_ref"]["id"]: item["status"] for item in report_policy
+    }
     snapshot, source_prov, attempt_prov, outputs = build_snapshot(
-        store, run, controls, snapshot_id=snapshot_id
+        store, run, controls, snapshot_id=snapshot_id,
+        pinned_report_access=pinned_report_access,
     )
+    def validate_output_projection(tx, report: dict, projected: dict) -> bool:
+        if _report_policy_state(tx, controls, mission_id) != report_policy:
+            raise StateConflict("Report source use changed while saving current snapshot")
+        status = pinned_report_access.get(report["id"])
+        if status is None:
+            return False
+        expected = (
+            {field: report["body"].get(field) for field in (
+                "title", "body", "citations", "limitations",
+            )}
+            if status == "available"
+            else {
+                "title": _REPORT_TEXT_UNAVAILABLE,
+                "body": _REPORT_TEXT_UNAVAILABLE,
+                "citations": [],
+                "limitations": [_REPORT_TEXT_UNAVAILABLE],
+            }
+        )
+        return all(projected[field] == value for field, value in expected.items())
     initial = [pointer["id"] for pointer in run["body"].get("source_refs", [])]
     parent = (
         {"kind": "research_snapshot", "id": run["body"]["parent_snapshot_id"], "version": 1}
@@ -1119,14 +1198,59 @@ def persist_snapshot(store: StateStore, run: dict, controls: list[dict]) -> dict
             parent_ref=parent,
             followup_target=run["body"].get("target_ref"),
             initial_source_ids=initial,
+            run_id=run["id"],
+            validate_output_projection=validate_output_projection,
         )
     except StateConflict:
         # Two builders can choose the same input fingerprint but different
         # capturedAt times. The first accepted immutable view owns this ID.
+        if _report_policy_state(store, controls, mission_id) != report_policy:
+            raise
         accepted = store.get("research_snapshot", snapshot_id, 1)
         if accepted is None:
             raise
         return ref(accepted)
+
+
+def current_report_view(store: StateStore, snapshot: dict) -> dict:
+    """Mask revoked report prose in a returned view, including historical comparisons.
+
+    The saved snapshot remains immutable. Its inspection records are forensic
+    material, so this current UI view must mask those separately from artifacts.
+    """
+    view = json.loads(canonical(snapshot))
+    hidden: set[tuple[str, int]] = set()
+    hidden_attempts: set[str] = set()
+    for artifact in view.get("artifacts", []):
+        report = store.get("report", artifact["id"], artifact["version"])
+        if report is None or report_text_access(store, report)["status"] != "available":
+            hidden.add((artifact["id"], artifact["version"]))
+            hidden_attempts.add(artifact.get("producerAttemptId"))
+            artifact.update({
+                "title": _REPORT_TEXT_UNAVAILABLE,
+                "body": _REPORT_TEXT_UNAVAILABLE,
+                "citations": [],
+                "limitations": [_REPORT_TEXT_UNAVAILABLE],
+            })
+    for attempt in view.get("attempts", []):
+        if attempt["id"] in hidden_attempts:
+            attempt["resultSummary"] = _REPORT_TEXT_UNAVAILABLE
+    inspection = view.get("inspection") or {}
+    for entry in inspection.get("records", []):
+        pointer = entry.get("reference") or {}
+        if (pointer.get("kind"), pointer.get("id"), pointer.get("version")) in {
+            ("report", report_id, version) for report_id, version in hidden
+        }:
+            entry["data"] = {
+                "availability": "data_unavailable_due_source_use",
+                "explanation": _REPORT_TEXT_UNAVAILABLE,
+            }
+    for message in view.get("messages", []):
+        answer = store.get("mail_answer", message["id"])
+        pointer = answer["body"].get("artifact_ref") if answer else None
+        if isinstance(pointer, dict) and (pointer.get("id"), pointer.get("version")) in hidden:
+            message["summary"] = _REPORT_TEXT_UNAVAILABLE
+    return view
 
 
 def latest_snapshot(store: StateStore, run_id: str) -> dict | None:

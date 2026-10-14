@@ -1,0 +1,4 @@
+interface:
+  display_name: "OS · Eval testing"
+  short_description: "Design realistic, progressive research-agent evals"
+  default_prompt: "Use $os-eval-testing to design and progressively test a realistic research task under selected conditions, separating offline checks from authorized live model behavior."
