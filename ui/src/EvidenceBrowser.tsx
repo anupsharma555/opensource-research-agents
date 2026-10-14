@@ -14,7 +14,7 @@ type Props = {
   mode: 'live' | 'recorded' | 'sample';
 };
 
-const accessLabel = (value: SourceView['accessState']) => ({ abstract_only: 'Abstract only', full_text: 'Full-text source', locator_only: 'Reference or access notice', supplied_text: 'Supplied text' })[value];
+const accessLabel = (value: SourceView['accessState']) => ({ abstract_only: 'Abstract only', full_text: 'Full-text source', locator_only: 'Reference or access notice', supplied_text: 'Supplied text', navigation_text: 'Web page text', document_text: 'Public web document' })[value];
 
 // Compare only ranges whose saved locator and text lengths agree. A repeated
 // range is not another source, and conflicting saved text is never merged.

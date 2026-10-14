@@ -26,6 +26,7 @@ labeled design decision; none should be read as evidence of a live research run.
 | How do I start and inspect the optional live Atlas task? | [Local live research](development/live-research.md) |
 | How do I run the Stage 4 research workspace? | [Local launch and qualification](development/stage4-local.md), [mission loop](development/stage4-runtime.md), [context recovery](development/stage4-context.md), [Atlas inspection](development/stage4-atlas.md) |
 | How do peers discover and inspect publications? | [Discovery and venues](development/stage4-discovery.md), [source intake and reading windows](development/stage4-intake.md) |
+| How are large tool results and optional instructions kept usable? | [Bounded results, optional skills and evidence recovery](development/stage4-context-efficiency.md) |
 | What external UI research informs Atlas? | [Eight-resource UI review](research/research-atlas-ui-review.md) |
 | How do multiple developers integrate work? | [Git workflow](development/git-workflow.md) |
 | How do cloud tasks use the same setup? | [Cloud development](development/cloud.md) |

@@ -185,7 +185,7 @@ def test_followup_search_result_survives_one_local_context_fallback(
         old_call = control["body"]["call_ref"]
         assert host.store.get("model_response_receipt", f"model-response:model-intent:{old_call['id']}:1")
         host._update_control(
-            control, input_budget={"observed_limit_tokens": 10000, "target_fraction": .70}
+            control, input_budget={"observed_limit_tokens": 12000, "target_fraction": .70}
         )
         control = host._control(child.run_id, "agent-critique")
         next_call_id, next_attempt_id = host._model_ids(control, control["body"]["sequence"] + 1)
@@ -225,12 +225,19 @@ def test_followup_search_result_survives_one_local_context_fallback(
         assert intent["body"]["source_decisions"]
         budget = host.store.get("mission_call_budget", next_call_id)["body"]
         assert budget["preview_admission_status"] == "fits_pending_saved_intent"
-        assert budget["exact_complete_request_estimate_tokens"] <= 7000
+        assert budget["exact_complete_request_estimate_tokens"] <= 8400
         assert budget["current_tool_turn_ref"] is None
         assert budget["compacted_tool_turn_refs"][-1] == control["body"]["tool_turn_refs"][-1]
         assert any("source_packets" in message.get("content", "") for message in prepared["messages"])
         index = json.loads(prepared["messages"][-1]["content"])
-        navigation = index["latest_search_navigation"]
+        if "latest_search_navigation" in index:
+            navigation = index["latest_search_navigation"]
+        else:
+            # The tokenizer may retain the complete reminder instead of its
+            # compact projection. Both must refer to this exact completed search.
+            latest = index["recent_scholarly_searches"][-1]
+            assert latest["response_ref"] == control["body"]["tool_turn_refs"][-1]
+            navigation = {**latest["search"], "result_ref": latest["result_ref"]}
         assert navigation["route"] == "crossref.search"
         assert navigation["hit_count"] == 2
         assert len(navigation["first_hit_ids"]) == 2

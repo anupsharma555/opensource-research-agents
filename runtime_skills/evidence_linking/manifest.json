@@ -25,11 +25,11 @@
   "instruction_variants": {
     "concise": {
       "path": "runtime_skills/evidence_linking/CONCISE.md",
-      "sha256": "234eb40ecbf50b761e57608bdd322d34fa8377b3655fbd4e2f04e7d52de40b73"
+      "sha256": "e9af1341754ff1c3088194e53b81270b458153ef63f93d842cb8e786f3c750af"
     },
     "rich": {
       "path": "runtime_skills/evidence_linking/RICH.md",
-      "sha256": "00e0e781d2f76ee82a1a974448a72027fae23361608b810419098739e3777806"
+      "sha256": "7f780eb836b89c9eb56a64021b8b7288a3692d12524e81b54a22f981c6a01c89"
     }
   },
   "output_contract": "project-owned internal candidate record; not a wire schema",
@@ -40,5 +40,5 @@
   "schema": "ora.runtime_skill.v1",
   "skill_id": "evidence-linking",
   "trigger": "Use when a synthesis or critique claim needs source support, challenge or context.",
-  "version": "1.0.2"
+  "version": "1.0.3"
 }

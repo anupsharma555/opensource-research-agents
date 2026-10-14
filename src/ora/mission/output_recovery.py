@@ -154,7 +154,8 @@ def _context_source_refs(store: StateStore, *, intent: dict, call: dict, config:
         planned.get("mission_id") != mission_id
         or planned.get("call_ref") != call_ref
         or planned.get("source_turn_mode") not in {
-            "all_allowed_sources_fit", "model_working_set", "source_free_recovery"
+            "all_allowed_sources_fit", "model_working_set", "source_free_recovery",
+            "requested_window_recovery",
         }
         or included.get("mission_id") != mission_id
         or included.get("intent_ref") != intent_ref

@@ -1,0 +1,18 @@
+{
+  "schema": "ora.context_recovery_reference.v1",
+  "case_id": "synthetic-qualified-benefit",
+  "case_version": 2,
+  "review_required": [
+    "population_qualification",
+    "followup_qualification",
+    "late_counterevidence",
+    "bounded_conclusion"
+  ],
+  "criteria": {
+    "population_qualification": "The six-week result is restricted to the baseline-score subgroup, or, under revocation, the response explicitly limits inference because that evidence is unavailable.",
+    "followup_qualification": "Do not generalize a six-week result to durable benefit. Under revocation do not reproduce the restricted passage.",
+    "late_counterevidence": "Compare the six-month null result and acknowledge different samples and follow-up; do not simply erase either study.",
+    "bounded_conclusion": "Durable benefit is not established by these synthetic sources; avoid asserting definitive ineffectiveness. Revocation requires an explicit access limitation."
+  },
+  "scoring_boundary": "A qualified reviewer must judge the final response against passages. Mechanical delivery and citation checks do not establish scientific support. Scripted fixture responses establish no model quality."
+}

@@ -354,6 +354,8 @@ class EvidenceLibrary:
         retrieved_at: str,
         route: str,
         actor_ref: dict[str, Any] | None = None,
+        navigation_ref: dict[str, Any] | None = None,
+        document_ref: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if status not in {"accepted", "partial", "failed", "unresolved"}:
             raise EvidenceError("Unknown encounter status")
@@ -362,15 +364,43 @@ class EvidenceLibrary:
         publication_ref = _require_ref(publication_ref, "publication") if publication_ref else None
         retrieval_hit_ref = _require_ref(retrieval_hit_ref, "retrieval_hit") if retrieval_hit_ref else None
         actor_ref = _require_ref(actor_ref, "agent_instance") if actor_ref else None
+        navigation_ref = _require_ref(navigation_ref, "venue_navigation") if navigation_ref else None
+        document_ref = _require_ref(document_ref, "public_document_fetch") if document_ref else None
+        if sum(pointer is not None for pointer in (publication_ref, navigation_ref, document_ref)) != 1:
+            raise EvidenceError("Encounter needs one exact publication or document origin")
+        if navigation_ref and (publication_ref or retrieval_hit_ref or route != "catalog_navigation"):
+            raise EvidenceError("Navigation encounter must retain its own nonpublication origin")
+        if document_ref and (retrieval_hit_ref or route != "public_document_fetch"):
+            raise EvidenceError("Public document encounter must retain its fetched origin")
         request = {
             "publication": publication_ref, "retrieval_hit": retrieval_hit_ref, "status": status,
             "access_surface": access_surface, "retrieved_at": retrieved_at, "route": route, "actor": actor_ref,
         }
+        if navigation_ref:
+            request["navigation_ref"] = navigation_ref
+        if document_ref:
+            request["document_ref"] = document_ref
 
         def action(tx: Any) -> dict[str, Any]:
             publication = _identity_anchor(tx, publication_ref) if publication_ref else None
             hit = _exact(tx, retrieval_hit_ref) if retrieval_hit_ref else None
             actor = _exact(tx, actor_ref) if actor_ref else None
+            navigation = _exact(tx, navigation_ref) if navigation_ref else None
+            document = _exact(tx, document_ref) if document_ref else None
+            if navigation and (
+                navigation["body"].get("status") != "navigable"
+                or navigation["body"].get("checked_at") != retrieved_at
+                or status != "accepted"
+                or access_surface != "passage"
+            ):
+                raise EvidenceError("Navigation encounter differs from its saved page")
+            if document and (
+                document["body"].get("status") != 200
+                or document["body"].get("checked_at") != retrieved_at
+                or status != "accepted"
+                or access_surface != "passage"
+            ):
+                raise EvidenceError("Public document encounter differs from its saved fetch")
             encounter_key = None
             if hit:
                 source = hit["body"]["source"]
@@ -404,8 +434,12 @@ class EvidenceLibrary:
                 tx.link(encounter, publication, "encounter_of_publication")
             if hit:
                 tx.link(encounter, hit, "from_retrieval_hit")
+            if document:
+                tx.link(encounter, document, "from_public_document_fetch")
             if actor:
                 tx.link(encounter, actor, "observed_by")
+            if navigation:
+                tx.link(encounter, navigation, "from_navigation")
             return {"encounter_ref": _ref(encounter), "status": status}
 
         return self.store.transact(operation_id, request, action)
@@ -490,7 +524,7 @@ class EvidenceLibrary:
     def add_copy(
         self,
         operation_id: str,
-        publication_ref: dict[str, Any],
+        publication_ref: dict[str, Any] | None,
         encounter_ref: dict[str, Any],
         *,
         content: bytes | None,
@@ -509,10 +543,19 @@ class EvidenceLibrary:
         structured_content: dict[str, Any] | None = None,
         omitted_fields: list[dict[str, str]] | None = None,
         mapping_version: str | None = None,
+        navigation_ref: dict[str, Any] | None = None,
+        document_ref: dict[str, Any] | None = None,
+        intake_operation_id: str | None = None,
     ) -> dict[str, Any]:
         """Retain an inspected copy and exact passages without overwriting old ones."""
-        publication_ref = _require_ref(publication_ref, "publication")
+        publication_ref = _require_ref(publication_ref, "publication") if publication_ref else None
         encounter_ref = _require_ref(encounter_ref, "source_encounter")
+        navigation_ref = _require_ref(navigation_ref, "venue_navigation") if navigation_ref else None
+        document_ref = _require_ref(document_ref, "public_document_fetch") if document_ref else None
+        if sum(pointer is not None for pointer in (publication_ref, navigation_ref, document_ref)) != 1:
+            raise EvidenceError("Copy needs one exact publication or document origin")
+        if (navigation_ref or document_ref) and (not isinstance(intake_operation_id, str) or not intake_operation_id):
+            raise EvidenceError("Nonpublication copy needs its originating inspection operation")
         if access_surface not in ACCESS_RANK or not mime_type or not source_version or not retrieved_at or not rights_basis:
             raise EvidenceError("Copy needs source version, access depth, MIME type, retrieval time, and rights basis")
         if not reference:
@@ -565,6 +608,26 @@ class EvidenceLibrary:
         observed_encounter = self.store.get(**encounter_ref)
         if observed_encounter is None or observed_encounter["body"]["publication"] != publication_ref:
             raise EvidenceError("Encounter belongs to a different or missing publication")
+        navigation = self.store.get(**navigation_ref) if navigation_ref else None
+        document = self.store.get(**document_ref) if document_ref else None
+        if navigation_ref and (
+            navigation is None
+            or observed_encounter["body"].get("navigation_ref") != navigation_ref
+            or navigation["body"].get("content_sha256") != checksum
+            or navigation["body"].get("final_url") != reference
+            or navigation["body"].get("checked_at") != retrieved_at
+            or navigation["body"].get("content_type") != mime_type
+        ):
+            raise EvidenceError("Nonpublication copy differs from its exact navigation")
+        if document_ref and (
+            document is None
+            or observed_encounter["body"].get("document_ref") != document_ref
+            or document["body"].get("content_sha256") != checksum
+            or document["body"].get("final_url") != reference
+            or document["body"].get("checked_at") != retrieved_at
+            or document["body"].get("detected_content_type") != mime_type
+        ):
+            raise EvidenceError("Nonpublication copy differs from its exact public fetch")
         if observed_encounter["body"]["status"] == "failed":
             raise EvidenceError("Failed encounter cannot yield an inspected copy")
         if observed_encounter["body"]["status"] == "unresolved" and retain_bytes:
@@ -591,10 +654,19 @@ class EvidenceLibrary:
             "omitted_fields": omitted_fields or [],
             "mapping_version": mapping_version,
         }
+        if navigation_ref:
+            request["navigation_ref"] = navigation_ref
+            request["mission_id"] = navigation["body"]["mission_id"]
+            request["intake_operation_id"] = intake_operation_id
+        if document_ref:
+            request["document_ref"] = document_ref
+            request["mission_id"] = document["body"]["mission_id"]
+            request["intake_operation_id"] = intake_operation_id
 
         def action(tx: Any) -> dict[str, Any]:
-            _exact(tx, publication_ref)
-            publication = tx.get("publication", publication_ref["id"])
+            if publication_ref:
+                _exact(tx, publication_ref)
+            publication = tx.get("publication", publication_ref["id"]) if publication_ref else None
             encounter = _exact(tx, encounter_ref)
             if encounter["body"]["status"] == "failed":
                 raise EvidenceError("Failed encounter cannot yield an inspected copy")
@@ -602,6 +674,28 @@ class EvidenceLibrary:
                 raise EvidenceError("Unresolved encounter permits locator-only retention")
             if encounter["body"]["publication"] != publication_ref:
                 raise EvidenceError("Encounter belongs to a different publication")
+            if navigation_ref:
+                exact_navigation = _exact(tx, navigation_ref)
+                if tx.resolve(
+                    "source_copy.navigation", f"{navigation_ref['id']}:{navigation_ref['version']}"
+                ):
+                    raise EvidenceError("Navigation already has an inspected source copy")
+                if (
+                    encounter["body"].get("navigation_ref") != navigation_ref
+                    or exact_navigation["body"].get("content_sha256") != checksum
+                    or exact_navigation["body"].get("final_url") != reference
+                ):
+                    raise EvidenceError("Navigation origin changed before copy commit")
+            if document_ref:
+                exact_document = _exact(tx, document_ref)
+                if tx.resolve("source_copy.public_document", f"{document_ref['id']}:{document_ref['version']}"):
+                    raise EvidenceError("Public document already has an inspected source copy")
+                if (
+                    encounter["body"].get("document_ref") != document_ref
+                    or exact_document["body"].get("content_sha256") != checksum
+                    or exact_document["body"].get("final_url") != reference
+                ):
+                    raise EvidenceError("Public document origin changed before copy commit")
             hit_ref = encounter["body"].get("retrieval_hit")
             if hit_ref:
                 hit_source = _exact(tx, hit_ref)["body"]["source"]
@@ -616,7 +710,20 @@ class EvidenceLibrary:
             body = {key: value for key, value in request.items() if key != "passages"}
             body["passage_ids"] = passage_ids
             copy = tx.put("source_copy", copy_id, body)
-            tx.link(copy, _identity_anchor(tx, publication_ref), "copy_of_publication")
+            if publication_ref:
+                tx.link(copy, _identity_anchor(tx, publication_ref), "copy_of_publication")
+            elif navigation_ref:
+                tx.link(copy, exact_navigation, "copy_from_navigation")
+                tx.bind(
+                    "source_copy.navigation", f"{navigation_ref['id']}:{navigation_ref['version']}",
+                    "source_copy", copy["id"],
+                )
+            else:
+                tx.link(copy, exact_document, "copy_from_public_document_fetch")
+                tx.bind(
+                    "source_copy.public_document", f"{document_ref['id']}:{document_ref['version']}",
+                    "source_copy", copy["id"],
+                )
             tx.link(copy, encounter, "copy_from_encounter")
             passage_refs = []
             for item, passage_id in zip(passages, passage_ids, strict=True):
@@ -625,10 +732,11 @@ class EvidenceLibrary:
                 })
                 tx.link(passage, copy, "depends_on")
                 passage_refs.append(_ref(passage))
-            accepted = publication["body"].get("accepted_copy")
+            accepted = publication["body"].get("accepted_copy") if publication else None
             old_rank = ACCESS_RANK[accepted["access_surface"]] if accepted else -1
-            promoted = (
-                inspection_state == "checked"
+            promoted = bool(
+                publication
+                and inspection_state == "checked"
                 and encounter["body"]["status"] in {"accepted", "partial"}
                 and ACCESS_RANK[access_surface] > old_rank
             )
@@ -712,7 +820,8 @@ class EvidenceLibrary:
         copy = self.store.get(**passage["body"]["copy_ref"])
         if copy is None:
             raise EvidenceError("Passage points to a missing retained copy")
-        publication = self.store.get(**copy["body"]["publication"])
+        publication_ref = copy["body"].get("publication")
+        publication = self.store.get(**publication_ref) if publication_ref else None
         return {
             "passage": passage, "copy": copy, "publication": publication,
             "needs_review": self.store.review_status(passage),

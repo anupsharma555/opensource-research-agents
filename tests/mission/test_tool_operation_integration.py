@@ -12,7 +12,7 @@ import pytest
 from ora.contracts.models import LiveStartRequest
 from ora.coordination.board import ref
 from ora.evidence.intake import PublicSourceHTTPError
-from ora.mission.tool_operations import read_navigation_operation
+from ora.mission.tool_operations import read_navigation_operation, reconcile_late_navigation
 from ora.retrieval.catalog_tools import list_catalog_leads
 from ora.state import StateConflict
 from ora.state.store import canonical
@@ -890,3 +890,249 @@ def test_legacy_pending_navigation_finishes_after_restart_without_new_operation_
         assert len(fetches) == 1 and len(calls) == 3
     finally:
         reopened.close()
+
+
+@pytest.mark.parametrize(
+    "scenario", ["late_result", "late_after_reopen", "accepted_then_reopened",
+                 "no_result", "revised_task", "cancelled_uncertain", "cancel_during_accept",
+                 "new_board_claim", "capacity_claim_race"]
+)
+def test_interrupted_navigation_reconciles_only_a_current_saved_result(
+    tmp_path, monkeypatch, scenario
+):
+    """Shutdown during the fetch cannot lose a known page or repeat its effect."""
+    import ora.mission.service as service_module
+
+    started = threading.Event()
+    release = threading.Event()
+    selected = {}
+    calls = []
+    fetches = []
+    html = b"<html><title>Synthetic late page</title></html>"
+
+    def fetch(url, *, max_bytes):
+        fetches.append(url)
+        started.set()
+        assert release.wait(10), "Controlled fetch was not released"
+        return {
+            "status": 200,
+            "content": html,
+            "content_sha256": hashlib.sha256(html).hexdigest(),
+            "byte_length": len(html),
+            "content_type": "text/html",
+            "requested_url": url,
+            "final_url": url,
+            "redirect_chain": [],
+            "access_basis": "public_https_unauthenticated",
+            "authenticated": False,
+            "retrieved_at": "2026-10-12T00:00:00Z",
+        }
+
+    def transport(request, *, timeout):
+        body = json.loads(request.data)
+        calls.append(body)
+        if "Mxra" in body["messages"][0]["content"]:
+            return answer("An independent synthetic sibling result.", 100)
+        count = len([item for item in calls if "Mxra" not in item["messages"][0]["content"]])
+        if count == 1:
+            return tool("request_capability", {"tool_id": "navigate_venue"}, count)
+        if count == 2:
+            return tool("navigate_venue", {"catalog_ref": selected["catalog_ref"]}, count)
+        return answer("Synthetic continuation after navigation.", count)
+
+    monkeypatch.setattr(service_module, "fetch_public_source", fetch)
+    host = service(tmp_path, monkeypatch, transport)
+    reopened = None
+    try:
+        run = host.start(
+            LiveStartRequest(
+                request_id=f"interrupted-navigation-{scenario}",
+                question="Inspect a synthetic venue lead",
+                agent_ids=["agent-synthesis", "agent-critique"],
+            )
+        )
+        initial = host._control(run.run_id, "agent-synthesis")
+        selected["catalog_ref"] = list_catalog_leads(
+            host.store,
+            mission_id=initial["body"]["mission_id"],
+            run_id=run.run_id,
+            actor_id=initial["body"]["actor_id"],
+            limit=1,
+        )["entries"][0]["catalog_ref"]
+        deadline = time.monotonic() + 5
+        while not started.is_set() and time.monotonic() < deadline:
+            host._drive_run(host._run(run.run_id))
+            time.sleep(0.005)
+        assert started.is_set()
+        pending = host._control(run.run_id, "agent-synthesis")
+        pointer = pending["body"]["tool_operation_ref"]
+        scope = dict(
+            mission_id=pending["body"]["mission_id"],
+            actor_id=pending["body"]["actor_id"],
+            task_id=pending["body"]["task_id"],
+        )
+        deadline = time.monotonic() + 5
+        while host._control(run.run_id, "agent-critique")["body"]["phase"] != "done":
+            assert time.monotonic() < deadline
+            host._drive_run(host._run(run.run_id))
+            time.sleep(0.005)
+        assert read_navigation_operation(host.store, pointer, **scope)["status"] == (
+            "fetch_dispatch_recorded"
+        )
+        operation = host.store.get(**pointer)
+        cap_id = operation["body"]["capacity_operation_id"]
+        old_cap = host.capacity.get(cap_id)
+        assert len(fetches) == 1 and len(calls) == 3
+        host.close()
+        reopened = service(tmp_path, monkeypatch, transport)
+        assert reopened.capacity.get(cap_id)["phase"] == "uncertain"
+        current = reopened._control(run.run_id, "agent-synthesis")
+        spec = reopened.executor._spec_from(reopened._work_for(current))
+        if scenario == "revised_task":
+            proposal = reopened.store.get("board_proposal", scope["task_id"])
+            assert reopened.board.revise(
+                "fixture-revise-interrupted-navigation",
+                mission_id=scope["mission_id"],
+                proposal_id=scope["task_id"],
+                actor_id=scope["actor_id"],
+                expected_version=proposal["version"],
+                reason="Synthetic task meaning changed after shutdown",
+            )["status"] == "accepted"
+        if scenario == "cancelled_uncertain":
+            assert reopened.capacity.cancel(cap_id, reason="branch_cancel")["cancel_requested"]
+        if scenario == "cancel_during_accept":
+            original_claim = reopened.capacity.claim_uncertain
+
+            def cancel_after_claim(*args, **kwargs):
+                claimed = original_claim(*args, **kwargs)
+                assert reopened.capacity.cancel(cap_id, reason="branch_cancel")["cancel_requested"]
+                return claimed
+
+            monkeypatch.setattr(reopened.capacity, "claim_uncertain", cancel_after_claim)
+        if scenario in {"new_board_claim", "capacity_claim_race"}:
+            old_claim = next(
+                item["current_claim"] for item in reopened.board.open_work(scope["mission_id"])
+                if item["proposal_ref"] == spec.proposal_ref
+            )
+            reopened.executor._release_board(spec, old_claim)
+            if scenario == "new_board_claim":
+                fresh = reopened.board.claim(
+                    "fixture-fresh-claim-for-other-work",
+                    mission_id=spec.mission_id, proposal_id=spec.proposal_ref["id"],
+                    actor_id=spec.actor_id, ttl=60,
+                    expected_version=spec.proposal_ref["version"],
+                )
+                assert fresh["status"] == "accepted"
+                assert fresh["fence"]["generation"] > old_claim["generation"]
+            else:
+                def unavailable_capacity(*_args, **_kwargs):
+                    raise StateConflict("Synthetic concurrent capacity claimant")
+
+                monkeypatch.setattr(reopened.capacity, "claim_uncertain", unavailable_capacity)
+        if scenario == "late_after_reopen":
+            reopened._drive_run(reopened._run(run.run_id))
+            assert reopened._control(run.run_id, "agent-synthesis")["body"]["phase"] == "waiting"
+        if scenario != "no_result":
+            release.set()
+            deadline = time.monotonic() + 5
+            while not reopened.store.records("venue_navigation"):
+                assert time.monotonic() < deadline
+                time.sleep(0.005)
+        if scenario == "accepted_then_reopened":
+            current = reopened._control(run.run_id, "agent-synthesis")
+            assert reconcile_late_navigation(
+                reopened.executor, current, reopened._work_for(current),
+            )["status"] == "accepted"
+            assert read_navigation_operation(reopened.store, pointer, **scope)["tool_result_ref"] is None
+            reopened.close()
+            reopened = service(tmp_path, monkeypatch, transport)
+        for _ in range(4):
+            reopened._drive_run(reopened._run(run.run_id))
+            observed = read_navigation_operation(reopened.store, pointer, **scope)
+            if scenario in {"no_result", "capacity_claim_race"} or (
+                observed["status"] in {"accepted", "result_unaccepted"}
+                and (
+                    scenario in {"revised_task", "cancelled_uncertain", "cancel_during_accept"}
+                    or observed["tool_result_ref"]
+                )
+            ):
+                break
+        if scenario == "no_result":
+            assert reopened.store.records("venue_navigation") == []
+            assert reopened.capacity.get(cap_id)["phase"] == "uncertain"
+            assert reopened._control(run.run_id, "agent-synthesis")["body"]["phase"] == "waiting"
+        elif scenario in {"revised_task", "cancelled_uncertain", "cancel_during_accept"}:
+            assert observed["status"] == "result_unaccepted"
+            assert observed["navigation_ref"] and observed["tool_result_ref"] is None
+            assert reopened.capacity.get(cap_id)["phase"] == "known_unaccepted"
+            if scenario != "revised_task":
+                source_proposal = reopened.store.get(spec.proposal_ref["kind"], spec.proposal_ref["id"])
+                assert source_proposal["body"]["status"] == "open"
+                claim_view = next(
+                    item for item in reopened.board.open_work(spec.mission_id)
+                    if item["proposal_ref"] == spec.proposal_ref
+                )
+                assert claim_view["current_claim"] is None
+                other_actor = reopened._control(run.run_id, "agent-critique")["body"]["actor_id"]
+                assert reopened.board.claim(
+                    f"fixture-other-peer-after-{scenario}",
+                    mission_id=spec.mission_id, proposal_id=spec.proposal_ref["id"],
+                    actor_id=other_actor, ttl=60,
+                    expected_version=spec.proposal_ref["version"],
+                )["status"] == "accepted"
+        elif scenario == "new_board_claim":
+            assert observed["navigation_ref"] and observed["tool_result_ref"] is None
+            assert reopened.capacity.get(cap_id)["phase"] == "uncertain"
+            current_claim = next(
+                item["current_claim"] for item in reopened.board.open_work(spec.mission_id)
+                if item["proposal_ref"] == spec.proposal_ref
+            )
+            assert current_claim == fresh["fence"]
+        elif scenario == "capacity_claim_race":
+            assert observed["navigation_ref"] and observed["tool_result_ref"] is None
+            assert reopened.capacity.get(cap_id)["phase"] == "uncertain"
+            claim_view = next(
+                item for item in reopened.board.open_work(spec.mission_id)
+                if item["proposal_ref"] == spec.proposal_ref
+            )
+            assert claim_view["current_claim"] is None
+            other_actor = reopened._control(run.run_id, "agent-critique")["body"]["actor_id"]
+            assert reopened.board.claim(
+                "fixture-other-peer-after-capacity-race",
+                mission_id=spec.mission_id, proposal_id=spec.proposal_ref["id"],
+                actor_id=other_actor, ttl=60,
+                expected_version=spec.proposal_ref["version"],
+            )["status"] == "accepted"
+        else:
+            assert observed["status"] == "accepted"
+            assert observed["tool_result_ref"] and observed["navigation_ref"]
+            assert reopened.capacity.get(cap_id)["phase"] == "completed"
+            with pytest.raises(StateConflict, match="owner generation"):
+                reopened.capacity.settle(
+                    cap_id, host.executor.owner, old_cap["generation"],
+                    used_tokens=None, outcome="completed", output_ref="stale",
+                )
+            drain(reopened, run.run_id, limit=30)
+            synthesis_calls = [
+                item for item in calls if "Mxra" not in item["messages"][0]["content"]
+            ]
+            assert len(synthesis_calls) == 3
+            prior = json.loads(
+                next(
+                    item["content"] for item in reversed(synthesis_calls[-1]["messages"])
+                    if item["role"] == "tool"
+                )
+            )
+            assert prior["operation_ref"] == pointer
+            assert prior["navigation_ref"] == observed["navigation_ref"]
+            assert reopened._run(run.run_id)["body"]["status"] == "completed"
+        assert len(fetches) == 1
+        assert len(calls) == (
+            4 if scenario in {"late_result", "late_after_reopen", "accepted_then_reopened"} else 3
+        )
+        assert len(reopened.store.records("venue_navigation")) <= 1
+    finally:
+        release.set()
+        host.close()
+        if reopened is not None:
+            reopened.close()

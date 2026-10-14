@@ -55,6 +55,25 @@ keeps only the requested window, without rewriting earlier records. Coverage
 of the whole submitted text does not establish coverage of the original
 publication. Current source-use checks still apply to both forms of passage.
 
+Older checked local text may lack a complete inspection record. At new model
+intent and dispatch-marker commits, `ora.evidence.local_text_quality` validates
+otherwise-authorized retained bytes and links an exact quality receipt. For plain
+UTF-8 text, it can record a separate current inspection with byte/character lengths,
+a retained-text locator and the saved encounter provenance. An incomplete but
+otherwise valid older quality receipt stays unchanged and is linked to the new
+inspection; contradictory or missing referenced quality is rejected. Non-plain
+formats require their existing complete intake quality rather than being labeled
+as parsed plain text.
+
+This inspection creates no source-use grant. Current restrictions still apply,
+and unknown historical extraction, clipping or external completeness remain
+unknown. It covers direct source inputs and source dependencies carried through
+derived model context. Read-only previews and historical request inspection do
+not backfill records. An uncaptured old request can acquire the separate receipt
+before actual dispatch without changing its saved bytes; already captured calls
+remain unchanged. This does not migrate passive historical UI views or establish
+scientific support for an old report.
+
 Packet construction reuses one checked extraction per exact copy within a
 single call; it does not cache policy across calls. On the saved real PLOS PDF
 with four selected passages, three local repeats went from four PDF-parser

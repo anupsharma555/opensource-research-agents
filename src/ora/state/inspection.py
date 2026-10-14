@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import json
 from contextlib import closing
+from typing import Callable
 
 from ora.contracts.models import ResearchSnapshot, SnapshotInspection
 
 from .blobs import IntegrityFault
 from .snapshot_storage import FORMAT as SNAPSHOT_STORAGE_FORMAT
 from .snapshot_storage import accept_components, prepare_snapshot, read_snapshot
+from .source_lineage import inherited_public_source
 from .steps import explain_event
 from .store import StateError, StateStore, Transaction, canonical, reference
 from .view_policy import project_record, visible_in_mission
@@ -24,7 +26,7 @@ def ref(record):
     return {key: record[key] for key in ("kind", "id", "version")}
 
 
-def save_snapshot(store: StateStore, operation_id: str, snapshot: dict, *, source_provenance: list[dict], attempt_provenance: list[dict], detail_refs: list[dict], accepted_outputs: list[dict], parent_ref: dict | None = None, followup_target: dict | None = None, initial_source_ids: list[str] | None = None, timing_basis: str = "observed_local") -> dict:
+def save_snapshot(store: StateStore, operation_id: str, snapshot: dict, *, source_provenance: list[dict], attempt_provenance: list[dict], detail_refs: list[dict], accepted_outputs: list[dict], parent_ref: dict | None = None, followup_target: dict | None = None, initial_source_ids: list[str] | None = None, timing_basis: str = "observed_local", run_id: str | None = None, validate_output_projection: Callable[[Transaction, dict, dict], bool] | None = None) -> dict:
     validated = ResearchSnapshot.model_validate(snapshot)
     base = validated.model_dump(mode="json", by_alias=True, exclude={"inspection"})
     snapshot_ref = {"kind": "research_snapshot", "id": validated.snapshot_id, "version": 1}
@@ -80,10 +82,49 @@ def save_snapshot(store: StateStore, operation_id: str, snapshot: dict, *, sourc
                     or inherited_source["sourceId"] != item["sourceId"]
                 ):
                     raise StateError("Reused source differs from its declared saved origin")
+            inherited_public = bool(
+                inherited_source is not None and run_id
+                and inherited_public_source(
+                    tx, mission_id=validated.mission.id, run_id=run_id,
+                    copy_ref=item["copyReference"],
+                )
+            )
+            origin_mission_id = (
+                copy_body.get("mission_id") if inherited_public else validated.mission.id
+            )
             for pointer in item["encounterReferences"]:
                 encounter = tx.get(**pointer)
                 publication = encounter["body"].get("publication") if encounter else None
-                if not encounter or encounter["kind"] != "source_encounter" or not publication or publication["kind"] != "publication" or publication["id"] != copy_body["publication"]["id"]:
+                navigation_ref = copy_body.get("navigation_ref")
+                document_ref = copy_body.get("document_ref")
+                if not encounter or encounter["kind"] != "source_encounter":
+                    raise StateError("Source encounter is missing")
+                if navigation_ref:
+                    navigation = tx.get(**navigation_ref)
+                    if (
+                        publication is not None
+                        or encounter["body"].get("navigation_ref") != navigation_ref
+                        or navigation is None
+                        or navigation["body"].get("mission_id") != origin_mission_id
+                        or navigation["body"].get("content_sha256") != copy_body["content_sha256"]
+                        or navigation["body"].get("final_url") != copy_body["reference"]
+                    ):
+                        raise StateError("Source encounter belongs to a different navigation")
+                elif document_ref:
+                    document = tx.get(**document_ref)
+                    if (
+                        publication is not None
+                        or encounter["body"].get("document_ref") != document_ref
+                        or document is None
+                        or document["body"].get("mission_id") != origin_mission_id
+                        or document["body"].get("content_sha256") != copy_body["content_sha256"]
+                        or document["body"].get("final_url") != copy_body["reference"]
+                    ):
+                        raise StateError("Source encounter belongs to a different public fetch")
+                elif (
+                    not publication or publication["kind"] != "publication"
+                    or publication["id"] != copy_body["publication"]["id"]
+                ):
                     raise StateError("Source encounter belongs to a different publication")
                 hit_ref = encounter["body"].get("retrieval_hit")
                 if hit_ref and (
@@ -141,9 +182,14 @@ def save_snapshot(store: StateStore, operation_id: str, snapshot: dict, *, sourc
             artifact = next((item for item in validated.artifacts if item.id == output["id"] and item.version == output["version"]), None)
             if not record or output["kind"] != "report" or artifact is None:
                 raise StateError("Accepted output must resolve to this exact report version")
-            for field in ("title", "body", "citations", "limitations"):
-                if record["body"].get(field) != artifact.model_dump(by_alias=True)[field]:
+            projected = artifact.model_dump(by_alias=True)
+            if validate_output_projection is not None:
+                if not validate_output_projection(tx, record, projected):
                     raise StateError("Report projection differs from accepted output")
+            else:
+                for field in ("title", "body", "citations", "limitations"):
+                    if record["body"].get(field) != projected[field]:
+                        raise StateError("Report projection differs from accepted output")
         all_refs = detail_refs + accepted_outputs
         for item in source_provenance:
             all_refs += [item["copyReference"], *item["encounterReferences"]]

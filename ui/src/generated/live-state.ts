@@ -129,7 +129,8 @@ export type Proofkind =
 export type Sampleversion = string;
 export type Schemaversion1 = "1.0";
 export type Snapshotid = string;
-export type Accessstate = "abstract_only" | "full_text" | "locator_only" | "supplied_text";
+export type Accessstate =
+  "abstract_only" | "full_text" | "locator_only" | "supplied_text" | "navigation_text" | "document_text";
 export type Contenthash = string | null;
 export type Copyid = string;
 export type Id11 = string;

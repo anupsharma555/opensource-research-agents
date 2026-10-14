@@ -9,6 +9,7 @@ from io import BytesIO
 import pytest
 
 from ora.contracts.models import LiveStartRequest
+from ora.models.token_estimate import TOKENIZER_BASIS, estimate_request_tokens
 from tests.mission.test_service import MODEL, answer, service, tool
 
 
@@ -88,7 +89,9 @@ def test_413_recovery_changes_request_and_delivers_selected_source_window(tmp_pa
             pytest.fail("Corrected source-window tool turn was not saved")
         assert len(sent) == 2
         assert len(sent_bytes[1]) < len(sent_bytes[0])
-        assert math.ceil(len(sent_bytes[1]) / 4 * 1.25) <= 8000
+        estimate = estimate_request_tokens(sent_bytes[1])
+        assert estimate.basis == TOKENIZER_BASIS
+        assert estimate.tokens <= 8000
         assert "RECOVERY_PASSAGE" not in json.dumps(sent[1]["messages"])
         second_response = next(
             item for item in host.store.records("model_response_receipt")
@@ -98,6 +101,8 @@ def test_413_recovery_changes_request_and_delivers_selected_source_window(tmp_pa
             "mission_call_budget", second_response["body"]["call_ref"]["id"]
         )["body"]
         assert budget["source_turn_mode"] == "source_free_recovery"
+        assert budget["request_token_estimate"]["tokens"] == estimate.tokens
+        assert budget["request_token_estimate"]["basis"] == estimate.basis
         assert budget["source_inventory_ref"] is not None
         window = host.store.records("source_read_window")
         assert len(window) == 1

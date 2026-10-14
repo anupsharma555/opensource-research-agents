@@ -8,6 +8,7 @@ import pytest
 
 from ora.contracts.models import LiveStartRequest
 from ora.coordination.board import ref
+from ora.models.token_estimate import TOKENIZER_BASIS, estimate_request_tokens
 from tests.mission.test_service import answer, service
 
 
@@ -88,7 +89,15 @@ def test_legacy_overlimit_replans_without_mutating_saved_input(tmp_path, monkeyp
             f"model-intent:{new_call_ref['id']}:{new_call_ref['version']}",
         )
         request_bytes = host.store.read_blob(new_intent["body"]["blob"]["sha256"])
-        assert math.ceil(len(request_bytes) / 4 * 1.25) <= 8000
+        estimate = estimate_request_tokens(request_bytes)
+        assert estimate.basis == TOKENIZER_BASIS
+        assert estimate.tokens <= 8000
+        assert new_intent["body"]["request_token_estimate"] == {
+            "tokens": estimate.tokens,
+            "basis": estimate.basis,
+            "asset_sha256": estimate.asset_sha256,
+            "fallback_reason": estimate.fallback_reason,
+        }
         assert new_intent["body"]["request_sha256"] != original_hash
         assert new_intent["body"]["source_decisions"] == []
         assert host.store.get("mission_call_budget", new_call_ref["id"])["body"][

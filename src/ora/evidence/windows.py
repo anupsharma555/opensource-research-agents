@@ -15,7 +15,7 @@ from typing import Any
 from .intake import IntakeService, _require_model_use_record, extract_blocks
 from .library import EvidenceError, EvidenceLibrary
 
-_COPY_CLASSES = frozenset({"abstract", "passage", "partial", "full_text"})
+_COPY_CLASSES = frozenset({"abstract", "passage", "partial", "full_text", "navigation_document", "web_document"})
 _MAX_BLOCKS_PER_WINDOW = 20
 _MAX_CHARS_PER_BLOCK = 16000
 _MAX_CHARS_PER_WINDOW = 64000

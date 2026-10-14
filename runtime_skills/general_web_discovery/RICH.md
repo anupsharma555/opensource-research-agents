@@ -1,0 +1,7 @@
+# General web discovery
+
+Decide whether external discovery helps the assigned question. Scholarly database routes are useful for publications, identifiers, and research records. General web search can surface broader or current context, such as organization pages, public guidance, and source leads that a scholarly index misses. These routes may complement one another; no fixed search sequence or provider preference is required. Follow a task's explicit no-external-search limit.
+
+When general web discovery is relevant, request the `browser_search` capability and select it for a model turn only after the host grants it. A grant or a request exposing the built-in tool does not prove that a search ran. The provider may return snippets, citation markers, or literal URLs in its response. Read those as discovery leads. Do not turn a snippet or marker into a checked source passage, and do not infer a URL from an opaque citation marker.
+
+For a literal URL lead, use its saved retrieval hit ID with `fetch_source` when the public fetch is appropriate. Inspect the resulting retained copy and its actual access surface, rights, locator, and limitations before using it in a source-backed claim. A failed fetch or metadata-only hit cannot support a claim. Keep counterevidence and uncertainty visible. The shared `prepare_claim_link` helper is available only after a canonical EvidencePacket and an exact checked locator exist; its output remains a candidate for semantic review, not proof of support.

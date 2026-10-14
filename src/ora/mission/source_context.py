@@ -13,10 +13,12 @@ from typing import Iterable
 
 from ora.coordination.board import ref, require_ref
 from ora.evidence import EvidenceError, EvidenceLibrary
-from ora.evidence.intake import checked_model_text
+from ora.evidence.intake import checked_model_text, default_exact_submitted_passage
 from ora.state import StateConflict, StateError, StateStore, Transaction
+from ora.state.source_lineage import inherited_public_source
 from ora.state.store import canonical, identifier
 
+from .browser_search import _fetchable_url
 from .context import MAX_CONTEXT_PAGE_CHARS, WorkingContext
 
 
@@ -82,6 +84,63 @@ def _input_status(store: StateStore, copy: dict, context: WorkingContext) -> str
     return status
 
 
+def _public_document_inventory_url(
+    store: StateStore, copy: dict, status: str,
+) -> str | None:
+    """Display only a permitted copy's exact, scoped public-fetch identity."""
+    if status != "permitted":
+        return None
+    pointer = ref(copy)
+    body = copy["body"]
+    document_ref = body.get("document_ref")
+    encounter_ref = body.get("encounter")
+    if (
+        type(document_ref) is not dict
+        or set(document_ref) != {"kind", "id", "version"}
+        or document_ref.get("kind") != "public_document_fetch"
+        or type(document_ref.get("id")) is not str
+        or not document_ref["id"]
+        or type(document_ref.get("version")) is not int
+        or document_ref["version"] < 1
+        or type(encounter_ref) is not dict
+        or set(encounter_ref) != {"kind", "id", "version"}
+        or encounter_ref.get("kind") != "source_encounter"
+        or type(encounter_ref.get("id")) is not str
+        or not encounter_ref["id"]
+        or type(encounter_ref.get("version")) is not int
+        or encounter_ref["version"] < 1
+    ):
+        return None
+    document = store.get(**document_ref)
+    encounter = store.get(**encounter_ref)
+    use = store.resolve("source_use.copy", f"{pointer['id']}:{pointer['version']}")
+    if document is None or encounter is None or use is None:
+        return None
+    saved = document["body"]
+    url = saved.get("final_url")
+    policy = use["body"]
+    if (
+        not isinstance(url, str) or not _fetchable_url(url)
+        or saved.get("status") != 200
+        or saved.get("mission_id") != body.get("mission_id")
+        or body.get("reference") != url
+        or body.get("content_sha256") != saved.get("content_sha256")
+        or body.get("mime_type") != saved.get("detected_content_type")
+        or body.get("inspection_state") != "checked"
+        or encounter["body"].get("route") != "public_document_fetch"
+        or encounter["body"].get("document_ref") != document_ref
+        or policy.get("copy_ref") != pointer
+        or policy.get("document_ref") != document_ref
+        or policy.get("source_url") != url
+        or policy.get("source_sha256") != body.get("content_sha256")
+        or policy.get("policy_status") != "granted"
+        or not isinstance(policy.get("allowed_uses"), list)
+        or "model_input" not in policy["allowed_uses"]
+    ):
+        return None
+    return url
+
+
 def save_working_sources(
     store: StateStore,
     operation_id: str,
@@ -131,7 +190,14 @@ def save_working_sources(
             or call["body"].get("task_id") != body["task_id"]
         ):
             raise SourceContextError("Working set response belongs to another peer or task")
-        sources = [require_ref(tx, mission_id, pointer) for pointer in selected]
+        sources = [
+            tx.get(**pointer) if inherited_public_source(
+                tx, mission_id=mission_id, run_id=body["run_id"],
+                copy_ref=pointer, actor_id=body["actor_id"],
+                task_id=body["task_id"], control=current,
+            ) else require_ref(tx, mission_id, pointer)
+            for pointer in selected
+        ]
         record_id = _selection_id(current)
         previous = tx.get("mission_working_sources", record_id)
         if (previous["version"] if previous else 0) != expected_version:
@@ -226,14 +292,19 @@ def plan_source_turn(
             encounter = store.get(**copy["body"]["encounter"])
             if encounter is None:
                 raise SourceContextError("Source encounter is unavailable")
-            passages = (
-                []
-                if encounter["body"].get("route") == "user_supplied"
-                else [
+            if encounter["body"].get("route") == "user_supplied":
+                try:
+                    default = default_exact_submitted_passage(EvidenceLibrary(store), pointer)
+                except EvidenceError:
+                    return _recovery(
+                        control_ref, available, "selected_source_window_needs_repair", selection
+                    )
+                passages = [default] if default else []
+            else:
+                passages = [
                     ref(store.get("source_passage", item))
                     for item in copy["body"].get("passage_ids", [])
                 ]
-            )
         if passages:
             try:
                 checked = checked_model_text(EvidenceLibrary(store), pointer, passages)
@@ -245,6 +316,8 @@ def plan_source_turn(
         else:
             if chosen == []:
                 return _recovery(control_ref, available, "empty_selected_source_window", selection)
+            if copy["body"].get("navigation_ref") or copy["body"].get("document_ref"):
+                return _recovery(control_ref, available, "source_needs_checked_window", selection)
             blob = copy["body"].get("blob")
             if not isinstance(blob, dict) or not str(copy["body"].get("mime_type", "")).startswith(
                 "text/"
@@ -306,7 +379,14 @@ def save_source_inventory(store: StateStore, operation_id: str, *, control_ref: 
         current = tx.get(**control_ref)
         if current is None or ref(tx.get("mission_task_control", control_ref["id"])) != control_ref:
             raise StateConflict("Task sources changed before inventory was saved")
-        records = [require_ref(tx, body["mission_id"], pointer) for pointer in available]
+        records = [
+            tx.get(**pointer) if inherited_public_source(
+                tx, mission_id=body["mission_id"], run_id=body["run_id"],
+                copy_ref=pointer, actor_id=body["actor_id"],
+                task_id=body["task_id"], control=current,
+            ) else require_ref(tx, body["mission_id"], pointer)
+            for pointer in available
+        ]
         existing = tx.get("mission_source_inventory", record_id)
         if existing:
             if (
@@ -396,6 +476,13 @@ def source_inventory_page(
         publication = store.get(**publication_ref) if isinstance(publication_ref, dict) else None
         titles = publication["body"].get("titles", []) if publication else []
         title = titles[0] if titles else None
+        if title is None and (navigation_ref := copy["body"].get("navigation_ref")):
+            navigation = store.get(**navigation_ref)
+            if navigation:
+                title = navigation["body"].get("title") or navigation["body"].get("heading")
+        if title is None and copy["body"].get("document_ref"):
+            title = "Saved web document"
+        source_url = _public_document_inventory_url(store, copy, status)
         item = {
             "ref": pointer,
             "title": title[:160] if isinstance(title, str) else None,
@@ -410,6 +497,8 @@ def source_inventory_page(
                 else None
             ),
         }
+        if source_url is not None:
+            item["source_url"] = source_url
         if status == "permitted":
             progress = context._source_progress(control, [copy], body["mission_id"])[0]
             navigation = context._source_free_navigation_item(control, progress)
@@ -425,7 +514,10 @@ def source_inventory_page(
                 "schema": "ora.source_inventory_page.v1",
                 "inventory_ref": inventory_ref,
                 "cursor": cursor,
-                "next_cursor": cursor + len(items) + 1,
+                "next_cursor": (
+                    cursor + len(items) + 1
+                    if cursor + len(items) + 1 < len(sources) else None
+                ),
                 "total": len(sources),
                 "items": [*items, item],
             }
@@ -465,6 +557,16 @@ def source_inventory_page(
                     # page can still name the available tool without repeating
                     # those same fields in its fetch hint.
                     item["fetch"] = {"tool": "read_source_window"}
+                candidate = candidate_page()
+            if len(canonical(candidate)) > reply_char_limit:
+                item.pop("title_omitted_for_page_budget", None)
+                candidate = candidate_page()
+            if len(canonical(candidate)) > reply_char_limit and "source_url" in item:
+                item.pop("saved_reading_omitted_for_page_budget", None)
+                candidate = candidate_page()
+            if len(canonical(candidate)) > reply_char_limit and "source_url" in item:
+                item.pop("source_url")
+                item["source_url_omitted_for_page_budget"] = True
                 candidate = candidate_page()
             if len(canonical(candidate)) > reply_char_limit:
                 raise SourceContextError(

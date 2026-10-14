@@ -7,6 +7,7 @@ are provenance, not proof that the returned bytes are the right article.
 from __future__ import annotations
 
 import hashlib
+import html
 import http.client
 import ipaddress
 import re
@@ -22,10 +23,13 @@ from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
 from xml.etree import ElementTree as ET
 
+from .hit_use import hit_allows_reinspection
 from .identity import normalize_identifier
 from .library import EvidenceError, EvidenceLibrary
 
 PARSER_VERSION = "ora-intake-v1"
+EXACT_SUBMISSION_VALIDATION = "exact-user-submission"
+EXACT_SUBMISSION_PARSER_VERSION = "ora-exact-user-submission-v1"
 MAX_COPY_BYTES = 32 * 1024 * 1024
 MAX_PASSAGES = 100
 _DOI = re.compile(r"10\.\d{4,9}/[^\s<>\"']+", re.I)
@@ -116,7 +120,7 @@ def _exact_submitted_text(store: Any, copy: dict, content: bytes) -> str | None:
     body = copy["body"]
     if (body.get("mime_type") != "text/plain"
             or body.get("inspection_state") != "checked"
-            or body.get("validation_record") != "exact-user-submission"
+            or body.get("validation_record") != EXACT_SUBMISSION_VALIDATION
             or hashlib.sha256(content).hexdigest() != body.get("content_sha256")):
         return None
     encounter_ref = body.get("encounter")
@@ -466,7 +470,7 @@ def _public_fetch_use_policy(
         )
         for block in blocks
     )
-    allowed_surface = classification in {"abstract", "passage", "full_text"}
+    allowed_surface = classification in {"abstract", "passage", "full_text", "navigation_document", "web_document"}
     grant = bool(
         matching
         and identity_checked
@@ -1039,6 +1043,16 @@ class IntakeService:
         def save_use(tx: Any) -> dict[str, Any]:
             copy = tx.get(**copy_ref)
             quality = tx.get(**quality_ref)
+            # Another peer can change the earlier copy's use after the service
+            # precheck. Recheck in the transaction that would grant these same
+            # retained bytes; an independent acquisition has its own policy.
+            if (retain and not separate_source and retrieval_hit_ref
+                    and source and source.get("content_sha256") == digest
+                    and not hit_allows_reinspection(
+                        tx, tx.get(**retrieval_hit_ref), exclude_copy_ref=copy_ref,
+                        exclude_quality_ref=quality_ref,
+                    )):
+                raise EvidenceError("Current use of this same retrieval hit changed before intake grant")
             saved_use = tx.put("source_use", f"source-use-{uuid.uuid4().hex}", use_body)
             tx.link(saved_use, copy, "depends_on")
             tx.link(saved_use, quality, "depends_on")
@@ -1073,6 +1087,499 @@ class IntakeService:
                     independent_context_refs=[],
                 )
                 result["information_need_refs"].append(need)
+        return result
+
+    def inspect_navigation_document(
+        self,
+        operation_id: str,
+        navigation_ref: dict[str, Any],
+        *,
+        mission_id: str,
+        run_id: str,
+        actor_id: str,
+    ) -> dict[str, Any]:
+        """Qualify retained HTML as a document without inventing a publication.
+
+        The navigation is the original source identity. Its bytes remain a
+        discovery lead until their exact fetch and use conditions support a
+        checked, task-scoped copy for the existing source reader.
+        """
+        from ora.retrieval.catalog_tools import page_venue_navigation
+
+        if not operation_id or not isinstance(navigation_ref, dict):
+            raise EvidenceError("Navigation inspection needs an exact saved reference")
+        page_venue_navigation(
+            self.store, mission_id=mission_id, run_id=run_id, actor_id=actor_id,
+            navigation_ref=navigation_ref, link_offset=0, link_limit=1,
+        )
+        navigation = self.store.get(**navigation_ref)
+        body = navigation["body"]
+        if (
+            body.get("mission_id") != mission_id
+            or body.get("run_id") != run_id
+            or body.get("actor_id") != actor_id
+        ):
+            raise EvidenceError("Navigation belongs to another research peer or run")
+        blob = body["blob"]
+        content = self.store.read_blob(blob["sha256"])
+        digest = hashlib.sha256(content).hexdigest()
+        content_type = body["content_type"]
+        actual_type = detected_content_type(content, content_type)
+        if actual_type != "text/html":
+            raise EvidenceError("Navigation document inspection currently supports HTML only")
+        blocks, parser = extract_blocks(content, actual_type)
+        visible_text = "\n".join(item.text for item in blocks)
+        classification = (
+            "empty" if not visible_text.strip() else
+            "access_page" if _LOGIN.search(visible_text[:3000]) else
+            "navigation_document"
+        )
+        snapshot = body.get("catalog_entry_snapshot") or {}
+        access_note = snapshot.get("access_note", "")
+        # The normal block reader omits footer and navigation chrome. Check
+        # those retained bytes for explicit use prohibitions before granting
+        # the document to the model.
+        full_page_text = html.unescape(re.sub(r"<[^>]*>", " ", content.decode("utf-8", errors="ignore")))
+        catalog_restriction = bool(
+            isinstance(access_note, str)
+            and (
+                re.search(r"(?:generative[- ]AI|AI model) input requires written permission", access_note, re.I)
+                or _EXPLICIT_USE_PROHIBITION.search(access_note)
+            )
+        )
+        page_restriction = bool(_EXPLICIT_USE_PROHIBITION.search(full_page_text))
+        identity_basis = (
+            f"verified_source:navigation:{navigation['id']}:{navigation['version']}:"
+            f"sha256={digest}"
+        )
+        fetch_receipt = {
+            "status": body.get("status_code"),
+            "access_basis": body.get("access_basis"),
+            "authenticated": body.get("authenticated"),
+            "content": content,
+            "content_sha256": body.get("content_sha256"),
+            "byte_length": body.get("byte_length"),
+            "content_type": content_type,
+            "retrieved_at": body.get("checked_at"),
+            "requested_url": body.get("requested_url"),
+            "final_url": body.get("final_url"),
+            "redirect_chain": body.get("redirect_chain"),
+        }
+        policy = _public_fetch_use_policy(
+            fetch_receipt, content=content, source_url=body["final_url"],
+            content_type=content_type, retrieved_at=body["checked_at"],
+            classification=classification, identity_basis=identity_basis,
+            expected_doi=None, blocks=blocks,
+            caller_rights_status="restricted" if catalog_restriction or page_restriction else "unknown",
+        )
+        permitted = policy["decision"] == "private_research_use"
+        quality_body = {
+            "schema": "ora.evidence.intake_quality.v1",
+            "navigation_ref": navigation_ref,
+            "catalog_ref": body["request"]["catalog_ref"],
+            "catalog_version": body["catalog_version"],
+            "source_url": body["final_url"],
+            "requested_url": body["requested_url"],
+            "redirect_chain": body["redirect_chain"],
+            "source_sha256": digest,
+            "byte_length": len(content),
+            "returned_content_type": content_type,
+            "detected_content_type": actual_type,
+            "retrieved_at": body["checked_at"],
+            "source_version": f"navigation:{navigation['id']}:{navigation['version']}",
+            "parser": parser,
+            "parser_version": PARSER_VERSION,
+            "classification": classification,
+            "classification_reason": (
+                "Saved HTML document text; publication or study identity not inferred"
+                if classification == "navigation_document" else
+                "Navigation supplied no usable HTML document text"
+            ),
+            "rights_status": "permitted" if permitted else "restricted" if catalog_restriction or page_restriction else "unknown",
+            "rights_basis": policy["basis"],
+            "identity_basis": identity_basis,
+            "inspected_blocks": len(blocks),
+            "inspected_text_length": len(visible_text),
+            "truncated": False,
+            "selected_locators": [],
+            "direct_source_use_policy": policy,
+            "catalog_restriction": catalog_restriction,
+            "page_restriction": page_restriction,
+        }
+
+        def save_quality(tx: Any) -> dict[str, Any]:
+            exact = tx.get(**navigation_ref)
+            if exact != navigation:
+                raise EvidenceError("Navigation changed before quality commit")
+            saved = tx.put("intake_quality", f"intake-quality-{uuid.uuid4().hex}", quality_body)
+            tx.link(saved, exact, "derived_from")
+            return {key: saved[key] for key in ("kind", "id", "version")}
+
+        quality_ref = self.store.transact(
+            f"{operation_id}-quality", quality_body, save_quality, mission_id=mission_id,
+        )
+        result: dict[str, Any] = {
+            "classification": classification,
+            "quality_ref": quality_ref,
+            "navigation_ref": navigation_ref,
+            "copy_ref": None,
+            "passage_refs": [],
+            "source_use_ref": None,
+            "model_input_status": "permitted" if permitted else "not_granted",
+        }
+        prior_copy = self.store.resolve(
+            "source_copy.navigation", f"{navigation_ref['id']}:{navigation_ref['version']}"
+        )
+        copy_ref = None
+        if prior_copy:
+            if (
+                prior_copy["body"].get("navigation_ref") != navigation_ref
+                or prior_copy["body"].get("content_sha256") != digest
+                or prior_copy["body"].get("reference") != body["final_url"]
+            ):
+                raise EvidenceError("Existing navigation copy disagrees with its saved origin")
+            prior_ref = {key: prior_copy[key] for key in ("kind", "id", "version")}
+            current_use = self.store.resolve(
+                "source_use.copy", f"{prior_copy['id']}:{prior_copy['version']}"
+            )
+            if current_use:
+                try:
+                    if not permitted:
+                        raise EvidenceError("Current navigation policy does not grant model input")
+                    if prior_copy["body"].get("model_use") in {"restricted", "prohibited"}:
+                        raise EvidenceError("Current copy does not grant model input")
+                    use_ref = _require_model_use_record(current_use, prior_ref)
+                except EvidenceError:
+                    result["model_input_status"] = "not_granted"
+                else:
+                    result["copy_ref"] = prior_ref
+                    result["source_use_ref"] = use_ref
+                return result
+            if prior_copy["body"].get("intake_operation_id") != operation_id:
+                result["model_input_status"] = "not_granted"
+                return result
+            copy_ref = prior_ref
+        if not permitted:
+            return result
+        if copy_ref is None:
+            encounter_ref = self.library.record_encounter(
+                f"{operation_id}-encounter", publication_ref=None, retrieval_hit_ref=None,
+                navigation_ref=navigation_ref, status="accepted", access_surface="passage",
+                retrieved_at=body["checked_at"], route="catalog_navigation",
+            )["encounter_ref"]
+            saved = self.library.add_copy(
+                f"{operation_id}-copy", None, encounter_ref,
+                navigation_ref=navigation_ref, intake_operation_id=operation_id,
+                content=content, content_sha256=digest,
+                mime_type=content_type,
+                source_version=quality_body["source_version"], access_surface="passage",
+                retrieved_at=body["checked_at"], rights_basis=policy["basis"],
+                retain_bytes=True, reference=body["final_url"], passages=[],
+                inspection_state="checked",
+                validation_record=f"{PARSER_VERSION}:{parser}:source-sha256={digest}",
+                mapping_version=f"{PARSER_VERSION}:{parser}",
+            )
+            copy_ref = saved["copy_ref"]
+        use_body = {
+            "schema": "ora.evidence.source_use.v1",
+            "copy_ref": copy_ref,
+            "navigation_ref": navigation_ref,
+            "source_sha256": digest,
+            "rights_status": "permitted",
+            "rights_basis": policy["basis"],
+            "allowed_uses": policy["allowed_uses"],
+            "export_allowed": False,
+            "policy_status": "granted",
+            "quality_ref": quality_ref,
+            "source_url": body["final_url"],
+            "direct_source_use_policy": policy,
+        }
+
+        def save_use(tx: Any) -> dict[str, Any]:
+            exact_copy = tx.get(**copy_ref)
+            exact_nav = tx.get(**navigation_ref)
+            if (
+                exact_copy is None or exact_nav != navigation
+                or exact_copy["body"].get("navigation_ref") != navigation_ref
+                or exact_copy["body"].get("intake_operation_id") != operation_id
+                or tx.resolve("source_use.copy", f"{copy_ref['id']}:{copy_ref['version']}")
+            ):
+                raise EvidenceError("Navigation copy changed before source-use commit")
+            saved_use = tx.put("source_use", f"source-use-{uuid.uuid4().hex}", use_body)
+            tx.link(saved_use, exact_copy, "depends_on")
+            tx.link(saved_use, exact_nav, "depends_on")
+            tx.link(saved_use, tx.get(**quality_ref), "depends_on")
+            tx.bind(
+                "source_use.copy", f"{copy_ref['id']}:{copy_ref['version']}",
+                "source_use", saved_use["id"],
+            )
+            return {key: saved_use[key] for key in ("kind", "id", "version")}
+
+        result.update(
+            copy_ref=copy_ref,
+            source_use_ref=self.store.transact(
+                f"{operation_id}-use", use_body, save_use, mission_id=mission_id,
+            ),
+        )
+        return result
+
+    def save_public_document_fetch(
+        self, operation_id: str, hit_ref: dict[str, Any], response_ref: dict[str, Any],
+        *, mission_id: str, run_id: str, actor_id: str, task_id: str,
+        fetched: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Retain an exact public fetch behind a same-task browser URL lead."""
+        if not operation_id or hit_ref.get("kind") != "retrieval_hit" or response_ref.get("kind") != "model_response_receipt":
+            raise EvidenceError("Public document fetch needs exact hit and response references")
+        hit = self.store.get(**hit_ref)
+        response = self.store.get(**response_ref)
+        call_ref = response["body"].get("call_ref") if response else None
+        call = self.store.get(**call_ref) if isinstance(call_ref, dict) else None
+        attempt = self.store.get("agent_attempt", response["body"].get("attempt_id")) if response else None
+        if (
+            hit is None or response is None or call is None or attempt is None
+            or attempt["body"].get("run_id") != run_id
+            or attempt["body"].get("call_ref") != call_ref
+            or hit["body"].get("route") != "groq.browser_search.url_leads"
+            or hit["body"].get("source", {}).get("origin") != "original_source"
+            or hit["body"].get("source", {}).get("access_surface") != "metadata"
+            or hit["body"].get("source", {}).get("content") is not None
+            or any(hit["body"].get(key) != value for key, value in (
+                ("mission_id", mission_id), ("task_id", task_id),
+                ("agent_instance_id", actor_id)))
+            or any(call["body"].get(key) != value for key, value in (
+                ("mission_id", mission_id), ("task_id", task_id),
+                ("instance_id", actor_id)))
+            or not any(link["relation"] == "derived_from" and link["target"] == response_ref
+                       for link in self.store.links(hit))
+        ):
+            raise EvidenceError("Public document lead is outside the original peer task")
+        content = fetched.get("content")
+        requested_url = hit["body"]["source"].get("original_url")
+        if (
+            fetched.get("status") != 200
+            or not isinstance(content, bytes) or not content or len(content) > MAX_COPY_BYTES
+            or fetched.get("requested_url") != requested_url
+            or fetched.get("content_sha256") != hashlib.sha256(content).hexdigest()
+            or fetched.get("byte_length") != len(content)
+            or not isinstance(fetched.get("final_url"), str)
+            or not isinstance(fetched.get("retrieved_at"), str)
+            or not isinstance(fetched.get("content_type"), str)
+        ):
+            raise EvidenceError("Public document fetch receipt disagrees with exact source bytes")
+        blob = self.store.put_blob(content)
+        body = {
+            "schema": "ora.evidence.public_document_fetch.v1",
+            "operation_id": operation_id,
+            "mission_id": mission_id, "run_id": run_id, "actor_id": actor_id,
+            "task_id": task_id, "hit_ref": hit_ref, "response_ref": response_ref,
+            "status": 200, "requested_url": requested_url,
+            "final_url": fetched["final_url"],
+            "redirect_chain": fetched.get("redirect_chain"),
+            "checked_at": fetched["retrieved_at"],
+            "content_type": fetched["content_type"],
+            "detected_content_type": detected_content_type(content, fetched["content_type"]),
+            "content_sha256": fetched["content_sha256"],
+            "byte_length": len(content),
+            "access_basis": fetched.get("access_basis"),
+            "authenticated": fetched.get("authenticated"),
+            "hit_rights_status": hit["body"]["source"].get("rights_status"),
+            "blob": blob,
+        }
+        record_id = f"public-document-fetch:{operation_id}"
+
+        def save(tx: Any) -> dict[str, Any]:
+            if tx.get(**hit_ref) != hit or tx.get(**response_ref) != response:
+                raise EvidenceError("Public document lead changed before fetch record")
+            record = tx.put("public_document_fetch", record_id, body)
+            tx.link(record, hit, "fetched_from_browser_hit")
+            tx.link(record, response, "derived_from_browser_response")
+            return {key: record[key] for key in ("kind", "id", "version")}
+
+        return self.store.transact(operation_id, body, save, mission_id=mission_id)
+
+    def inspect_public_document(
+        self, operation_id: str, document_ref: dict[str, Any], *,
+        mission_id: str, run_id: str, actor_id: str, task_id: str,
+    ) -> dict[str, Any]:
+        """Qualify saved browser-fetched HTML without asserting publication identity."""
+        document = self.store.get(**document_ref)
+        if document is None or document_ref.get("kind") != "public_document_fetch":
+            raise EvidenceError("Exact saved public document fetch is missing")
+        body = document["body"]
+        if any(body.get(key) != value for key, value in (
+            ("mission_id", mission_id), ("run_id", run_id),
+            ("actor_id", actor_id), ("task_id", task_id),
+        )):
+            raise EvidenceError("Public document belongs to another research peer or task")
+        hit = self.store.get(**body["hit_ref"])
+        if (
+            hit is None or hit["body"].get("source", {}).get("original_url") != body["requested_url"]
+            or not any(link["relation"] == "derived_from" and link["target"] == body["response_ref"]
+                       for link in self.store.links(hit))
+        ):
+            raise EvidenceError("Public document lost its exact browser lead")
+        content = self.store.read_blob(body["blob"]["sha256"])
+        digest = hashlib.sha256(content).hexdigest()
+        if digest != body["content_sha256"] or len(content) != body["byte_length"]:
+            raise EvidenceError("Public document bytes disagree with saved fetch")
+        actual_type = detected_content_type(content, body["content_type"])
+        if actual_type != body.get("detected_content_type"):
+            raise EvidenceError("Public document type disagrees with saved bytes")
+        if actual_type != "text/html":
+            raise EvidenceError("Public document inspection currently supports HTML only")
+        blocks, parser = extract_blocks(content, actual_type)
+        visible_text = "\n".join(item.text for item in blocks)
+        classification = (
+            "empty" if not visible_text.strip() else
+            "access_page" if _LOGIN.search(visible_text[:3000]) else
+            "web_document"
+        )
+        full_page_text = html.unescape(re.sub(r"<[^>]*>", " ", content.decode("utf-8", errors="ignore")))
+        page_restriction = bool(_EXPLICIT_USE_PROHIBITION.search(full_page_text))
+        hit_restriction = body.get("hit_rights_status") in {"restricted", "not_retained"}
+        identity_basis = (
+            f"verified_source:public_document:{document['id']}:{document['version']}:"
+            f"sha256={digest}"
+        )
+        receipt = {
+            "status": body["status"], "access_basis": body.get("access_basis"),
+            "authenticated": body.get("authenticated"), "content": content,
+            "content_sha256": digest, "byte_length": len(content),
+            "content_type": body["content_type"], "retrieved_at": body["checked_at"],
+            "requested_url": body["requested_url"], "final_url": body["final_url"],
+            "redirect_chain": body["redirect_chain"],
+        }
+        policy = _public_fetch_use_policy(
+            receipt, content=content, source_url=body["final_url"],
+            content_type=body["content_type"], retrieved_at=body["checked_at"],
+            classification=classification, identity_basis=identity_basis,
+            expected_doi=None, blocks=blocks,
+            caller_rights_status="restricted" if page_restriction or hit_restriction else "unknown",
+        )
+        permitted = policy["decision"] == "private_research_use"
+        quality_body = {
+            "schema": "ora.evidence.intake_quality.v1", "document_ref": document_ref,
+            "retrieval_hit_ref": body["hit_ref"], "response_ref": body["response_ref"],
+            "source_url": body["final_url"], "requested_url": body["requested_url"],
+            "redirect_chain": body["redirect_chain"], "source_sha256": digest,
+            "byte_length": len(content), "returned_content_type": body["content_type"],
+            "detected_content_type": actual_type, "retrieved_at": body["checked_at"],
+            "source_version": f"public_document:{document['id']}:{document['version']}",
+            "parser": parser, "parser_version": PARSER_VERSION,
+            "classification": classification,
+            "classification_reason": (
+                "Saved HTML document text; publication or study identity not inferred"
+                if classification == "web_document" else
+                "Public fetch supplied no usable HTML document text"
+            ),
+            "rights_status": "permitted" if permitted else "restricted" if page_restriction or hit_restriction else "unknown",
+            "rights_basis": policy["basis"], "identity_basis": identity_basis,
+            "inspected_blocks": len(blocks), "inspected_text_length": len(visible_text),
+            "truncated": False, "selected_locators": [],
+            "direct_source_use_policy": policy, "page_restriction": page_restriction,
+            "hit_restriction": hit_restriction,
+        }
+
+        def save_quality(tx: Any) -> dict[str, Any]:
+            if tx.get(**document_ref) != document:
+                raise EvidenceError("Public document changed before quality commit")
+            saved = tx.put("intake_quality", f"intake-quality-{uuid.uuid4().hex}", quality_body)
+            tx.link(saved, document, "derived_from")
+            return {key: saved[key] for key in ("kind", "id", "version")}
+
+        quality_ref = self.store.transact(
+            f"{operation_id}-quality", quality_body, save_quality, mission_id=mission_id,
+        )
+        result = {
+            "classification": classification, "quality_ref": quality_ref,
+            "document_ref": document_ref, "copy_ref": None, "passage_refs": [],
+            "source_use_ref": None, "model_input_status": "permitted" if permitted else "not_granted",
+        }
+        prior_copy = self.store.resolve(
+            "source_copy.public_document", f"{document_ref['id']}:{document_ref['version']}"
+        )
+        copy_ref = None
+        if prior_copy:
+            if (
+                prior_copy["body"].get("document_ref") != document_ref
+                or prior_copy["body"].get("content_sha256") != digest
+                or prior_copy["body"].get("reference") != body["final_url"]
+            ):
+                raise EvidenceError("Existing public-document copy disagrees with its saved origin")
+            prior_ref = {key: prior_copy[key] for key in ("kind", "id", "version")}
+            current_use = self.store.resolve(
+                "source_use.copy", f"{prior_copy['id']}:{prior_copy['version']}"
+            )
+            if current_use:
+                try:
+                    if not permitted:
+                        raise EvidenceError("Current public-document policy does not grant model input")
+                    use_ref = _require_model_use_record(current_use, prior_ref)
+                except EvidenceError:
+                    result["model_input_status"] = "not_granted"
+                else:
+                    result["copy_ref"] = prior_ref
+                    result["source_use_ref"] = use_ref
+                return result
+            if prior_copy["body"].get("intake_operation_id") != operation_id:
+                result["model_input_status"] = "not_granted"
+                return result
+            copy_ref = prior_ref
+        if not permitted:
+            return result
+        if copy_ref is None:
+            encounter_ref = self.library.record_encounter(
+                f"{operation_id}-encounter", publication_ref=None, retrieval_hit_ref=None,
+                document_ref=document_ref, status="accepted", access_surface="passage",
+                retrieved_at=body["checked_at"], route="public_document_fetch",
+            )["encounter_ref"]
+            saved = self.library.add_copy(
+                f"{operation_id}-copy", None, encounter_ref,
+                document_ref=document_ref, intake_operation_id=operation_id,
+                content=content, content_sha256=digest, mime_type=actual_type,
+                source_version=quality_body["source_version"], access_surface="passage",
+                retrieved_at=body["checked_at"], rights_basis=policy["basis"],
+                retain_bytes=True, reference=body["final_url"], passages=[],
+                inspection_state="checked",
+                validation_record=f"{PARSER_VERSION}:{parser}:source-sha256={digest}",
+                mapping_version=f"{PARSER_VERSION}:{parser}",
+            )
+            copy_ref = saved["copy_ref"]
+        use_body = {
+            "schema": "ora.evidence.source_use.v1", "copy_ref": copy_ref,
+            "document_ref": document_ref, "source_sha256": digest,
+            "rights_status": "permitted", "rights_basis": policy["basis"],
+            "allowed_uses": policy["allowed_uses"], "export_allowed": False,
+            "policy_status": "granted", "quality_ref": quality_ref,
+            "source_url": body["final_url"], "direct_source_use_policy": policy,
+        }
+
+        def save_use(tx: Any) -> dict[str, Any]:
+            exact_copy = tx.get(**copy_ref)
+            if (
+                exact_copy is None or tx.get(**document_ref) != document
+                or exact_copy["body"].get("document_ref") != document_ref
+                or exact_copy["body"].get("intake_operation_id") != operation_id
+                or tx.resolve("source_use.copy", f"{copy_ref['id']}:{copy_ref['version']}")
+            ):
+                raise EvidenceError("Public-document copy changed before source-use commit")
+            saved_use = tx.put("source_use", f"source-use-{uuid.uuid4().hex}", use_body)
+            tx.link(saved_use, exact_copy, "depends_on")
+            tx.link(saved_use, document, "depends_on")
+            tx.link(saved_use, tx.get(**quality_ref), "depends_on")
+            tx.bind(
+                "source_use.copy", f"{copy_ref['id']}:{copy_ref['version']}",
+                "source_use", saved_use["id"],
+            )
+            return {key: saved_use[key] for key in ("kind", "id", "version")}
+
+        result.update(
+            copy_ref=copy_ref,
+            source_use_ref=self.store.transact(
+                f"{operation_id}-use", use_body, save_use, mission_id=mission_id,
+            ),
+        )
         return result
 
     def open_information_need(
@@ -1313,6 +1820,43 @@ def checked_model_text(
             "quality": store.review_status(quality),
         },
     }
+
+
+def default_exact_submitted_passage(
+    library: EvidenceLibrary, copy_ref: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Find a citable whole-submission span without changing older raw-copy input.
+
+    A historical submission without a separate use record keeps its existing
+    raw-text route. A present use record must pass the normal checked-passage
+    boundary, including its current grant, before the span becomes a default.
+    """
+    if (
+        not isinstance(copy_ref, dict)
+        or set(copy_ref) != {"kind", "id", "version"}
+        or copy_ref.get("kind") != "source_copy"
+    ):
+        return None
+    store = library.store
+    copy = store.get(**copy_ref)
+    if copy is None:
+        return None
+    passage_id = f"{copy_ref['id']}:supplied-1"
+    body = copy["body"]
+    if body.get("passage_ids") != [passage_id]:
+        return None
+    if store.resolve("source_use.copy", f"{copy_ref['id']}:{copy_ref['version']}") is None:
+        return None
+    blob = body.get("blob")
+    if not isinstance(blob, dict):
+        return None
+    submitted = _exact_submitted_text(store, copy, store.read_blob(blob["sha256"]))
+    passage = store.get("source_passage", passage_id)
+    if passage is None or not _is_exact_submitted_passage(passage, copy, submitted):
+        return None
+    pointer = {key: passage[key] for key in ("kind", "id", "version")}
+    checked_model_text(library, copy_ref, [pointer])
+    return pointer
 
 
 def utc_now() -> str:

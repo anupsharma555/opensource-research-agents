@@ -112,6 +112,221 @@ def bind_no_source_pack(
     return context.save_inclusion(f"{operation_id}-inclusion", pack, intent_ref)
 
 
+def save_source_free_search_intent(
+    store: StateStore, call_ref: dict, source_refs: tuple[dict, ...] = (),
+) -> dict:
+    """Give a synthetic archived search exact producing-input lineage."""
+    def save(tx):
+        original = tx.get(**call_ref)
+        prior = tx.put("agent_call", "search-prior-call", original["body"])
+        prior_ref = ref(prior)
+        tx.put("model_request_intent", f"model-intent:{prior['id']}:{prior['version']}", {
+            "call_ref": prior_ref, "source_refs": list(source_refs),
+            "context_source_dependency_refs": [],
+        })
+        return prior_ref
+
+    return store.transact("source-free-search-intent", {}, save, mission_id="m")
+
+
+def test_revoked_source_hides_archived_search_query_and_selected_id(tmp_path) -> None:
+    store = StateStore(tmp_path)
+    call, task = fixture(store)
+    query = "A_ONLY_QUERY_FROM_REVOKED_COPY"
+    selected_id = "A_ONLY_SELECTED_ID_FROM_REVOKED_COPY"
+
+    def source(tx):
+        copy = tx.put("source_copy", "search-source", {
+            "mission_id": "m", "rights_status": "permitted",
+        })
+        use = tx.put("source_use", "search-use", {
+            "copy_ref": ref(copy), "allowed_uses": ["model_input"],
+            "policy_status": "granted",
+        })
+        tx.bind("source_use.copy", "search-source:1", "source_use", use["id"])
+        return {"copy_ref": ref(copy), "use_ref": ref(use)}
+
+    saved = store.transact("search-source", {}, source, mission_id="m")
+    prior_call = save_source_free_search_intent(store, call, (saved["copy_ref"],))
+    private = store.put_blob(canonical({
+        "content": None, "tool_calls": [{"id": "restricted-search", "type": "function",
+            "function": {"name": "search_scholarly", "arguments": canonical({
+                "route": "pubmed.pmid", "query": query, "selected_id": selected_id,
+                "limit": 1,
+            })}}],
+    }).encode())
+    response_ref = store.transact("restricted-search-response", {}, lambda tx: ref(tx.put(
+        "model_response_receipt", "restricted-search-response", {
+            "mission_id": "m", "task_id": "task", "call_ref": prior_call,
+            "status": "tool_requested", "blob": private,
+        },
+    )), mission_id="m")
+    context = WorkingContext(store)
+    context.save_tool_result(
+        "restricted-search-result", response_ref=response_ref,
+        tool_call_id="restricted-search", name="search_scholarly",
+        content=canonical({"route": "pubmed.pmid", "outcome": "success",
+                           "hits": [{"hit_id": "safe-count-only"}]}),
+    )
+    before = context.assemble(call, task, archived_tool_turn_refs=[response_ref])
+    assert query in canonical(before.messages) and selected_id in canonical(before.messages)
+    assert context.context_source_dependency_refs(before) == (saved["copy_ref"],)
+
+    def revoke_source_use(tx):
+        use = tx.get(**saved["use_ref"])
+        return ref(tx.put("source_use", use["id"], {
+            **use["body"], "allowed_uses": [], "policy_status": "revoked",
+        }, expected_version=use["version"]))
+
+    store.transact("revoke-search-use", {}, revoke_source_use, mission_id="m")
+    after = context.assemble(call, task, archived_tool_turn_refs=[response_ref])
+    assert context.context_source_dependency_refs(after) == ()
+    search = json.loads(after.messages[-1]["content"])["recent_scholarly_searches"][0]["search"]
+    assert search["status"] == "data_unavailable_due_source_use"
+    assert search["unavailable_source_refs"] == [saved["copy_ref"]]
+    assert "query_preview" not in search and "selected_id" not in search
+    assert query not in canonical(after.messages) and selected_id not in canonical(after.messages)
+    inclusion = bind_no_source_pack(store, context, after, "restricted-search-inclusion")
+    page = context.read_omitted_page(
+        mission_id="m", actor_id="peer", task_id="task",
+        inclusion_ref=inclusion, cursor=0, limit=1,
+    )
+    record = context.read_omitted_record(
+        mission_id="m", actor_id="peer", task_id="task",
+        inclusion_ref=inclusion, pointer=response_ref, offset=0, limit=2000,
+    )
+    assert query not in canonical(page) + canonical(record)
+    assert selected_id not in canonical(page) + canonical(record)
+    assert json.loads(record["text"])["search"]["hit_count"] == 1
+    assert store.read_blob(private["sha256"]).decode().find(query) >= 0
+
+
+def test_revoked_summary_old_inclusion_and_saved_record_read_hide_text(tmp_path) -> None:
+    store = StateStore(tmp_path)
+    call, task = fixture(store)
+    secret = "A_ONLY_SUMMARY_TEXT_FROM_OLD_INCLUSION"
+
+    def save(tx):
+        copy = tx.put("source_copy", "summary-source", {
+            "mission_id": "m", "rights_status": "permitted",
+        })
+        use = tx.put("source_use", "summary-use", {
+            "copy_ref": ref(copy), "allowed_uses": ["model_input"],
+            "policy_status": "granted",
+        })
+        tx.bind("source_use.copy", "summary-source:1", "source_use", use["id"])
+        summary = tx.put("context_summary", "old-source-summary", {
+            "schema": "ora.context_summary.v2", "mission_id": "m",
+            "actor_id": "peer", "task_id": "task",
+            "authority": "model_authored_continuation_aid", "text": secret,
+            "source_dependency_refs": [ref(copy)], "source_refs": [ref(copy)],
+            "input_refs": [], "archived_note_refs": [],
+        })
+        inclusion = tx.put("context_inclusion", "old-summary-inclusion", {
+            "mission_id": "m", "call_ref": call,
+            "configuration_ref": ref(tx.get("agent_configuration", "config")),
+            "task_ref": task,
+            "omitted": [{"type": "context_summary", "ref": ref(summary),
+                         "fetch": ref(summary)}],
+        })
+        return {"use_ref": ref(use), "summary_ref": ref(summary),
+                "inclusion_ref": ref(inclusion)}
+
+    saved = store.transact(
+        "old-summary-fixture", {}, save, mission_id="m",
+    )
+    use_ref, summary_ref, inclusion_ref = (
+        saved["use_ref"], saved["summary_ref"], saved["inclusion_ref"]
+    )
+    context = WorkingContext(store)
+    scope = {"mission_id": "m", "actor_id": "peer", "task_id": "task",
+             "inclusion_ref": inclusion_ref}
+    before = context.read_omitted_record(
+        **scope, pointer=summary_ref, offset=0, limit=2000,
+    )
+    assert secret in before["text"]
+    response_blob = store.put_blob(canonical({
+        "content": None,
+        "tool_calls": [{"id": "summary-read", "type": "function",
+                        "function": {"name": "read_context_record", "arguments": canonical({
+                            "inclusion_id": inclusion_ref["id"], "kind": "context_summary",
+                            "id": summary_ref["id"], "version": 1, "offset": 0, "limit": 2000,
+                        })}}],
+    }).encode())
+    response_ref = store.transact("old-summary-read-response", {}, lambda tx: ref(tx.put(
+        "model_response_receipt", "old-summary-read-response", {
+            "mission_id": "m", "task_id": "task", "call_ref": call,
+            "status": "tool_requested", "blob": response_blob,
+        },
+    )), mission_id="m")
+    context.save_tool_result(
+        "old-summary-read-result", response_ref=response_ref,
+        tool_call_id="summary-read", name="read_context_record", content=canonical(before),
+    )
+    visible = context.assemble(call, task, tool_turn_refs=[response_ref])
+    assert context.context_source_dependency_refs(visible) == ({
+        "kind": "source_copy", "id": "summary-source", "version": 1,
+    },)
+
+    def revoke_summary_source(tx):
+        current = tx.get(**use_ref)
+        return ref(tx.put("source_use", current["id"], {
+            **current["body"], "allowed_uses": [], "policy_status": "revoked",
+        }, expected_version=current["version"]))
+
+    store.transact("revoke-old-summary-source", {}, revoke_summary_source, mission_id="m")
+    page = context.read_omitted_page(**scope, cursor=0, limit=1)
+    after = context.read_omitted_record(
+        **scope, pointer=summary_ref, offset=0, limit=2000,
+    )
+    exchange, _ = context._tool_exchange(response_ref)
+    restricted = context.assemble(call, task, tool_turn_refs=[response_ref])
+    assert context.context_source_dependency_refs(restricted) == ()
+    assert secret not in canonical(page) + canonical(after) + canonical(exchange)
+    assert page["items"][0]["summary"]["status"] == "data_unavailable_due_source_use"
+    assert json.loads(after["text"])["status"] == "data_unavailable_due_source_use"
+    assert json.loads(exchange[1]["content"])["status"] == "data_unavailable_due_source_use"
+    assert store.get(**summary_ref)["body"]["text"] == secret
+
+
+def test_unknown_summary_lineage_does_not_block_other_omitted_items(tmp_path) -> None:
+    store = StateStore(tmp_path)
+    call, task = fixture(store)
+
+    def save(tx):
+        unknown = tx.put("context_summary", "unknown-summary-lineage", {
+            "mission_id": "m", "actor_id": "peer", "task_id": "task",
+            "authority": "unverified_legacy", "text": "A_ONLY_UNKNOWN_SUMMARY_TEXT",
+        })
+        safe = tx.put("context_summary", "safe-summary-lineage", {
+            "mission_id": "m", "actor_id": "peer", "task_id": "task",
+            "authority": "model_authored_continuation_aid", "text": "Permitted summary.",
+            "source_dependency_refs": [],
+        })
+        inclusion = tx.put("context_inclusion", "two-summary-omissions", {
+            "mission_id": "m", "call_ref": call,
+            "configuration_ref": ref(tx.get("agent_configuration", "config")),
+            "task_ref": task,
+            "omitted": [{"type": "context_summary", "ref": ref(item), "fetch": ref(item)}
+                        for item in (unknown, safe)],
+        })
+        return {"unknown": ref(unknown), "inclusion": ref(inclusion)}
+
+    saved = store.transact("two-summary-omissions", {}, save, mission_id="m")
+    context = WorkingContext(store)
+    scope = {"mission_id": "m", "actor_id": "peer", "task_id": "task",
+             "inclusion_ref": saved["inclusion"]}
+    page = context.read_omitted_page(**scope, cursor=0, limit=2)
+    record = context.read_omitted_record(
+        **scope, pointer=saved["unknown"], offset=0, limit=2000,
+    )
+    assert [item["summary"]["status"] for item in page["items"]] == [
+        "source_lineage_unavailable", "available",
+    ]
+    assert json.loads(record["text"])["status"] == "source_lineage_unavailable"
+    assert "A_ONLY_UNKNOWN_SUMMARY_TEXT" not in canonical(page) + canonical(record)
+
+
 def compact_checked_window_fixture(library, saved: dict, window: dict) -> tuple[dict, dict]:
     """Save one real checked-window result and return its compact model projection."""
     store = library.store
@@ -183,11 +398,18 @@ def test_current_task_and_new_message_override_stale_summary(tmp_path) -> None:
     call, task = fixture(store)
 
     def revise(tx):
+        archive = tx.put("conversation_archive", "old-archive", {
+            "mission_id": "m", "actor_id": "peer", "task_id": "task",
+            "source_dependency_refs": [], "turn_refs": [],
+        })
         summary = tx.put(
             "context_summary",
             "old",
             {
                 "mission_id": "m",
+                "actor_id": "peer", "task_id": "task",
+                "authority": "model_authored_continuation_aid",
+                "source_dependency_refs": [], "archive_ref": ref(archive),
                 "text": "Old interpretation",
                 "input_refs": [task],
             },
@@ -407,7 +629,7 @@ def test_routine_own_executor_outcomes_are_exactly_pageable_without_replaying_bo
     old_required_index = {
         **tight_index,
         "omitted": None,
-        "summary": view["summary"],
+        "summary": view.get("summary"),
         "record_counts": view["record_counts"],
         "routine_own_outcomes": view["routine_own_outcomes"],
     }
@@ -1081,7 +1303,7 @@ def test_compact_page_restores_exact_omissions_without_source_text(tmp_path) -> 
         )
 
 
-def test_linked_local_report_read_rechecks_source_use(tmp_path) -> None:
+def test_linked_local_report_read_rejects_unproven_source_lineage(tmp_path) -> None:
     store = StateStore(tmp_path)
     call_ref, task_ref = fixture(store)
     copy_ref = ref(store.get("source_copy", "copy"))
@@ -1128,7 +1350,9 @@ def test_linked_local_report_read_rechecks_source_use(tmp_path) -> None:
         mission_id="m", actor_id="peer", task_id="task",
         inclusion_ref=inclusion_ref, pointer=report_ref, offset=0, limit=2000,
     )
-    assert json.loads(window["text"])["body"] == "A source-backed synthetic finding"
+    initial = json.loads(window["text"])
+    assert initial["status"] == "data_unavailable_due_source_use"
+    assert "body" not in initial
     page = context.read_omitted_page(
         mission_id="m", actor_id="peer", task_id="task",
         inclusion_ref=inclusion_ref, cursor=0, limit=1,
@@ -1659,6 +1883,7 @@ def test_inclusion_binds_actual_model_session_prepared_intent(tmp_path) -> None:
 def test_restarted_context_recaps_prior_search_without_replaying_tool_text(tmp_path) -> None:
     store = StateStore(tmp_path)
     call, task = fixture(store)
+    prior_call = save_source_free_search_intent(store, call)
     private = store.put_blob(canonical({
         "content": None,
         "tool_calls": [{
@@ -1675,7 +1900,7 @@ def test_restarted_context_recaps_prior_search_without_replaying_tool_text(tmp_p
 
     def save(tx):
         response = tx.put("model_response_receipt", "prior-search", {
-            "mission_id": "m", "task_id": "task", "call_ref": call,
+            "mission_id": "m", "task_id": "task", "call_ref": prior_call,
             "status": "tool_requested", "blob": private,
         })
         return ref(response)
@@ -1735,6 +1960,7 @@ def test_archived_search_recovers_later_saved_hit_ids_without_provider_call(
 ) -> None:
     store = StateStore(tmp_path)
     call, task = fixture(store)
+    prior_call = save_source_free_search_intent(store, call)
     hit_ids = [f"saved-hit-{index}" for index in range(5)]
     for index, hit_id in enumerate(hit_ids):
         mission_id = "other-mission" if foreign_last_hit and index == 4 else "m"
@@ -1758,7 +1984,7 @@ def test_archived_search_recovers_later_saved_hit_ids_without_provider_call(
     response_ref = store.transact(
         "saved-five-hit-search", {},
         lambda tx: ref(tx.put("model_response_receipt", "saved-five-hit-search", {
-            "mission_id": "m", "task_id": "task", "call_ref": call,
+            "mission_id": "m", "task_id": "task", "call_ref": prior_call,
             "status": "tool_requested", "blob": private,
         })),
         mission_id="m",
@@ -1826,6 +2052,7 @@ def test_archived_search_recovers_later_saved_hit_ids_without_provider_call(
 def test_archived_inspection_outcome_survives_new_search_and_context_paging(tmp_path) -> None:
     store = StateStore(tmp_path)
     call, task = fixture(store)
+    prior_call = save_source_free_search_intent(store, call)
     context = WorkingContext(store)
 
     def save_turn(number: int, name: str, arguments: dict, outcome: dict) -> dict:
@@ -1841,7 +2068,7 @@ def test_archived_inspection_outcome_survives_new_search_and_context_paging(tmp_
         response = store.transact(
             f"saved-turn-{number}", {},
             lambda tx: ref(tx.put("model_response_receipt", f"saved-turn-{number}", {
-                "mission_id": "m", "task_id": "task", "call_ref": call,
+                "mission_id": "m", "task_id": "task", "call_ref": prior_call,
                 "status": "tool_requested", "blob": private,
             })),
             mission_id="m",
@@ -2619,18 +2846,73 @@ def test_followup_target_text_is_hidden_after_source_use_revocation(tmp_path, in
             "mission_id": "parent-m", "question": "Synthetic source question?",
             "scope": "Source-grounded", "source_refs": [source_ref],
         })
+        actor = tx.put("agent_instance", "source-parent-actor", {
+            "mission_id": "parent-m", "run_id": parent["id"],
+        })
+        producer_task = tx.put("board_proposal", "parent-task", {
+            "mission_id": "parent-m", "actor_ref": ref(actor),
+        })
         exact_input = {**source_ref, "sha256": content_hash(tx.get(**source_ref)["body"])}
+        config_body = {
+            "mission_id": "parent-m", "instance_id": actor["id"],
+            "provider": "groq", "endpoint": "https://example.invalid",
+            "model_id": "selected-model", "settings": {},
+            "reasoning_settings": {}, "instructions_sha256": "synthetic",
+            "input_refs": [exact_input], "permitted_tools": [],
+        }
+        config_body["configuration_sha256"] = content_hash(config_body)
+        producer_config = tx.put(
+            "agent_configuration", "source-parent-config", config_body,
+        )
         producer_call = tx.put("agent_call", "source-parent-call", {
             "mission_id": "parent-m", "task_id": "parent-task",
-            "input_refs": [exact_input],
+            "instance_id": actor["id"], "attempt_id": "source-parent-attempt",
+            "configuration_id": producer_config["id"],
+            "configuration_sha256": config_body["configuration_sha256"],
+            **{key: config_body[key] for key in (
+                "provider", "endpoint", "model_id", "settings",
+                "reasoning_settings", "instructions_sha256", "input_refs",
+                "permitted_tools",
+            )},
         })
         producer = tx.put("agent_attempt", "source-parent-attempt", {
-            "mission_id": "parent-m", "call_ref": ref(producer_call),
+            "mission_id": "parent-m", "run_id": parent["id"],
+            "task_id": producer_task["id"], "agentId": actor["id"],
+            "call_ref": ref(producer_call),
+            "configuration_ref": ref(producer_config),
+        })
+        request_bytes = canonical({"messages": [{"role": "user", "content": secret}]}).encode()
+        request_blob = store.put_blob(request_bytes)
+        request_sha = hashlib.sha256(request_bytes).hexdigest()
+        intent = tx.put("model_request_intent", "model-intent:source-parent-call:1", {
+            "mission_id": "parent-m", "task_id": producer_task["id"],
+            "instance_id": actor["id"], "attempt_id": producer["id"],
+            "call_ref": ref(producer_call),
+            "configuration_ref": ref(producer_config),
+            "configuration_sha256": config_body["configuration_sha256"],
+            "source_refs": [source_ref], "context_source_dependency_refs": [],
+            "request_sha256": request_sha, "blob": request_blob,
+        })
+        tx.put("context_inclusion", f"context:{intent['id']}", {
+            "mission_id": "parent-m", "task_ref": ref(producer_task),
+            "call_ref": ref(producer_call), "intent_ref": ref(intent),
+            "configuration_ref": ref(producer_config),
+            "source_refs": [source_ref], "context_source_dependency_refs": [],
+            "request_sha256": request_sha,
+        })
+        passage = tx.put("source_passage", "parent-source-span", {
+            "copy_ref": source_ref, "span_id": "span", "text": secret,
+            "inspection_state": "checked",
         })
         report = tx.put("report", "source-parent-report", {
-            "mission_id": "parent-m", "title": secret, "body": secret,
+            "mission_id": "parent-m", "run_id": parent["id"],
+            "title": secret, "body": secret,
             "citations": [{"sourceId": "copy", "spanId": "span"}],
-            "citation_input_provenance": [{"copy_ref": source_ref}],
+            "citation_input_provenance": [{
+                "copy_ref": source_ref, "passage_ref": ref(passage),
+                "source_id": "copy", "span_id": "span",
+                "producing_intent_ref": ref(intent),
+            }],
             "producer_attempt_ref": ref(producer),
             "limitations": [],
         })
@@ -2846,7 +3128,7 @@ def test_report_with_unselected_unknown_source_policy_remains_unavailable(tmp_pa
         {"body": {"citations": [], "citation_input_provenance": []}},
         {"body": {"inspection": {"sources": [{"copyReference": source}]}}}, [],
     )
-    assert access["dependency_lineage_complete"]
+    assert not access["dependency_lineage_complete"]  # No producing report or intent exists.
     assert access["source_dependencies_omitted_from_input"] == [source]
     assert access["unavailable_source_refs"] == [source]
     assert access["status"] == "data_unavailable_due_source_use"

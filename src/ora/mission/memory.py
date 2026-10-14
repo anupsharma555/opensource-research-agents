@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from ora.coordination.board import ref, require_actor, require_ref
 from ora.state import StateError, StateStore, Transaction
+from ora.state.source_lineage import scoped_note_source_input
 from ora.state.store import identifier
 
 from .context import WorkingContext
@@ -68,7 +69,44 @@ class WorkingNotes:
             current_task = tx.get("board_proposal", task["id"])
             if current_task is None or current_task["version"] != task["version"]:
                 raise MemoryError("Task changed; reread before writing a note")
-            inputs = [require_ref(tx, mission_id, item) for item in input_refs or []]
+            actor = tx.get("agent_instance", actor_id, 1)
+            run_id = actor["body"].get("run_id") if actor else None
+
+            def note_input(item: dict) -> dict:
+                if (type(item) is not dict or set(item) != {"kind", "id", "version"}
+                        or type(item.get("id")) is not str
+                        or type(item.get("version")) is not int
+                        or item["version"] < 1 or item.get("kind") not in {
+                            "source_copy", "source_passage", "source_read_window"
+                        }):
+                    return require_ref(tx, mission_id, item)
+                saved = tx.get(**item)
+                if saved is None:
+                    return require_ref(tx, mission_id, item)
+                copy_ref = (item if item["kind"] == "source_copy"
+                            else saved["body"].get("copy_ref"))
+                copy = tx.get(**copy_ref) if (
+                    type(copy_ref) is dict and set(copy_ref) == {"kind", "id", "version"}
+                    and copy_ref.get("kind") == "source_copy"
+                    and type(copy_ref.get("id")) is str
+                    and type(copy_ref.get("version")) is int
+                    and copy_ref["version"] > 0
+                ) else None
+                inherited = copy is not None and copy["body"].get("mission_id") not in (
+                    None, mission_id,
+                )
+                if (inherited or item["kind"] == "source_read_window"
+                        and saved["body"].get("mission_id") != mission_id):
+                    checked = scoped_note_source_input(
+                        tx, mission_id=mission_id, run_id=run_id,
+                        actor_id=actor_id, task_id=task["id"], pointer=item,
+                    ) if isinstance(run_id, str) else None
+                    if checked is None:
+                        raise MemoryError("Note source input is outside this peer's checked task sources")
+                    return checked
+                return require_ref(tx, mission_id, item)
+
+            inputs = [note_input(item) for item in input_refs or []]
             previous = tx.get("working_note", note_id)
             if previous and (
                 previous["body"]["mission_id"] != mission_id

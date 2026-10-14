@@ -1,7 +1,10 @@
-"""Run peer-selected local work concurrently without owning scientific choices.
+"""Run independent work chosen by research agents at the same time.
 
-The registered callback is a trusted host boundary. Intent and dispatch are
-durable before it runs; accepted local effects share the board result commit.
+Check each task and its resource allowance, record the planned execution, and
+call its registered host handler. Save accepted results, peer messages and
+execution records together in one database transaction, while retaining failed
+or uncertain outcomes for recovery. The executor manages when work can run and
+how results are recorded; agents remain responsible for scientific choices.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from typing import Any, Callable, Mapping
 
 from ora.agents.json_shapes import finite_json
 from ora.state import StateConflict, StateError, StateStore
+from ora.state.source_lineage import inherited_public_source
 from ora.state.store import Transaction, canonical
 
 from .board import ProposalBoard, ref, require_ref
@@ -90,6 +94,7 @@ class ConcurrentExecutor:
         *,
         owner: str,
         lease_seconds: float = 60,
+        validate_output_tx: Callable[[Transaction, WorkSpec, WorkResult], None] | None = None,
     ):
         if not owner or not math.isfinite(lease_seconds) or lease_seconds <= 0:
             raise StateError("Executor needs a host owner and positive lease")
@@ -97,6 +102,7 @@ class ConcurrentExecutor:
         self.capacity, self.traces = capacity, traces
         self.handlers = dict(handlers)
         self.owner, self.lease_seconds = owner, lease_seconds
+        self.validate_output_tx = validate_output_tx
 
     @staticmethod
     def _capacity_id(spec: WorkSpec) -> str:
@@ -148,6 +154,16 @@ class ConcurrentExecutor:
         ):
             raise StateError("Work configuration belongs to another actor")
         for pointer in spec.input_refs:
+            if (
+                type(pointer) is dict and pointer.get("kind") == "source_copy"
+                and spec.call_id
+                and inherited_public_source(
+                    tx, mission_id=spec.mission_id, run_id=spec.run_id,
+                    copy_ref=pointer, actor_id=spec.actor_id,
+                    task_id=spec.proposal_ref["id"],
+                )
+            ):
+                continue
             require_ref(tx, spec.mission_id, pointer)
         if spec.call_id:
             if type(spec.call_version) is not int or spec.call_version < 1:
@@ -319,6 +335,27 @@ class ConcurrentExecutor:
                     # admitting this work again would only replay that 429.
                     continue
             if capacity is None:
+                request_estimate = None
+                if spec.kind == "model" and spec.call_id:
+                    intent = self.store.get(
+                        "model_request_intent",
+                        f"model-intent:{spec.call_id}:{spec.call_version}",
+                    )
+                    if intent and "request_token_estimate" in intent["body"]:
+                        saved = intent["body"]
+                        if (saved.get("call_ref") != {
+                                "kind": "agent_call", "id": spec.call_id,
+                                "version": spec.call_version,
+                            } or saved.get("configuration_ref") != spec.configuration_ref
+                                or saved.get("mission_id") != spec.mission_id
+                                or saved.get("task_id") != spec.proposal_ref["id"]
+                                or saved.get("attempt_id") != spec.attempt_id):
+                            raise StateError("Capacity estimate differs from saved model lineage")
+                        request_estimate = {
+                            **saved["request_token_estimate"],
+                            "intent_ref": ref(intent),
+                            "request_sha256": saved["request_sha256"],
+                        }
                 self.capacity.enqueue(
                     cap_id,
                     task_id=spec.proposal_ref["id"],
@@ -332,6 +369,7 @@ class ConcurrentExecutor:
                     attempt_id=spec.attempt_id,
                     call_id=spec.call_id,
                     budget_version=spec.configuration_ref["id"],
+                    request_token_estimate=request_estimate,
                 )
             elif capacity["phase"] not in {"queued", "waiting"}:
                 continue
@@ -773,7 +811,8 @@ class ConcurrentExecutor:
         return {"work_ref": ref(updated_work), "capacity_ref": ref(updated_cap)}
 
     def _record_unaccepted(
-        self, spec: WorkSpec, generation: int, result: WorkResult | None, reason_code: str
+        self, spec: WorkSpec, generation: int, result: WorkResult | None, reason_code: str,
+        *, recovered_uncertain: bool = False,
     ) -> dict | None:
         """Save a known callback/receipt without claiming board acceptance.
 
@@ -853,7 +892,7 @@ class ConcurrentExecutor:
             cap_record = tx.get("capacity_operation", self._capacity_id(spec))
             cap_body = cap_record["body"] if cap_record else {}
             current_owner = (
-                cap_body.get("phase") == "dispatched"
+                cap_body.get("phase") == ("uncertain" if recovered_uncertain else "dispatched")
                 and cap_body.get("owner") == self.owner
                 and cap_body.get("generation") == generation
                 and cap_body.get("lease_until", 0) > self.store.clock()
@@ -909,15 +948,18 @@ class ConcurrentExecutor:
                 proof="recorded_local_event",
             )
             if reconciled:
-                self.capacity.record_unaccepted_tx(
-                    tx,
-                    self._capacity_id(spec),
-                    self.owner,
-                    generation,
-                    used_tokens=used_tokens,
-                    cached_tokens=cached_tokens,
-                    output_ref=observation_id,
-                )
+                if recovered_uncertain:
+                    self.capacity.settle_known_uncertain_tx(
+                        tx, self._capacity_id(spec), self.owner, generation,
+                        outcome="known_unaccepted", output_ref=observation_id,
+                        used_tokens=used_tokens, cached_tokens=cached_tokens,
+                    )
+                else:
+                    self.capacity.record_unaccepted_tx(
+                        tx, self._capacity_id(spec), self.owner, generation,
+                        used_tokens=used_tokens, cached_tokens=cached_tokens,
+                        output_ref=observation_id,
+                    )
             updated_work = tx.put(
                 self.KIND,
                 self._work_record_id(spec),
@@ -998,7 +1040,10 @@ class ConcurrentExecutor:
         self._mark_external_unknown(spec, generation)
         return {"work_id": spec.work_id, "status": "uncertain"}
 
-    def _accept(self, spec: WorkSpec, cap: dict, fence: dict, result: WorkResult) -> dict:
+    def _accept(
+        self, spec: WorkSpec, cap: dict, fence: dict, result: WorkResult, *,
+        recovered_uncertain: bool = False,
+    ) -> dict:
         result_data = json.loads(canonical(asdict(result)))
         result_hash = hashlib.sha256(canonical(result_data).encode()).hexdigest()
         artifact_id = _id("executor-artifact:", [spec.mission_id, spec.work_id])
@@ -1017,6 +1062,8 @@ class ConcurrentExecutor:
 
         def save_related(tx: Transaction) -> list[dict]:
             self._validate_tx(tx, spec)
+            if self.validate_output_tx is not None:
+                self.validate_output_tx(tx, spec, result)
             model_receipt = self._model_receipt_tx(tx, spec, result)
             if model_receipt is not None and (
                 model_receipt["body"].get("status") not in {"complete", "tool_requested"}
@@ -1051,7 +1098,10 @@ class ConcurrentExecutor:
                     "handler_version": spec.handler_version,
                     "payload": result_data["payload"],
                     "result_sha256": result_hash,
-                    "proof": "recorded_callback_result",
+                    "proof": (
+                        "recovered_saved_callback_effect"
+                        if recovered_uncertain else "recorded_callback_result"
+                    ),
                 },
             )
             for pointer in result.output_refs:
@@ -1109,23 +1159,37 @@ class ConcurrentExecutor:
                 category=spec.kind,
                 status="completed",
                 action="Execute peer-selected work",
-                summary="The registered callback returned and its local result was accepted.",
+                summary=(
+                    "A saved callback effect was recovered and accepted under a new fence."
+                    if recovered_uncertain else
+                    "The registered callback returned and its local result was accepted."
+                ),
                 inputs=list(spec.input_refs),
                 outputs=[ref(artifact)],
                 timing=timing,
-                proof="recorded_local_callback",
+                proof=(
+                    "recovered_saved_callback_effect"
+                    if recovered_uncertain else "recorded_local_callback"
+                ),
             )
             pointers.append(trace)
-            self.capacity.settle_tx(
-                tx,
-                self._capacity_id(spec),
-                self.owner,
-                cap["generation"],
-                used_tokens=result.used_tokens,
-                cached_tokens=result.cached_tokens,
-                outcome="completed",
-                output_ref=artifact_id,
-            )
+            if recovered_uncertain:
+                self.capacity.settle_known_uncertain_tx(
+                    tx, self._capacity_id(spec), self.owner, cap["generation"],
+                    outcome="completed", output_ref=artifact_id,
+                    used_tokens=result.used_tokens, cached_tokens=result.cached_tokens,
+                )
+            else:
+                self.capacity.settle_tx(
+                    tx,
+                    self._capacity_id(spec),
+                    self.owner,
+                    cap["generation"],
+                    used_tokens=result.used_tokens,
+                    cached_tokens=result.cached_tokens,
+                    outcome="completed",
+                    output_ref=artifact_id,
+                )
             work = tx.get(self.KIND, self._work_record_id(spec))
             tx.put(
                 self.KIND,
@@ -1151,6 +1215,177 @@ class ConcurrentExecutor:
             related_request=related_request,
             complete_task=result.disposition == "completed",
         )
+
+    def accept_saved_navigation_result(
+        self, spec: WorkSpec, result: WorkResult, navigation_ref: dict,
+    ) -> dict:
+        """Accept one previously saved navigation after its callback was lost.
+
+        The caller validates the original tool operation and reconstructs the
+        result from its immutable navigation. This method fences the old
+        executor generation; it never calls the navigation handler or HTTP.
+        """
+        return self._accept_saved_local_result(
+            spec, result, tool_name="navigate_venue", navigation_ref=navigation_ref,
+        )
+
+    def accept_saved_inspection_result(
+        self, spec: WorkSpec, result: WorkResult, navigation_ref: dict,
+    ) -> dict:
+        """Fence a recovered local inspection without replaying its venue fetch."""
+        return self._accept_saved_local_result(
+            spec, result, tool_name="inspect_navigation_document",
+            navigation_ref=navigation_ref,
+        )
+
+    def accept_saved_public_document_result(
+        self, spec: WorkSpec, result: WorkResult, document_ref: dict,
+    ) -> dict:
+        """Fence a recovered browser fetch using its retained original bytes."""
+        return self._accept_saved_local_result(
+            spec, result, tool_name="fetch_source", navigation_ref=document_ref,
+        )
+
+    def _accept_saved_local_result(
+        self, spec: WorkSpec, result: WorkResult, *, tool_name: str,
+        navigation_ref: dict,
+    ) -> dict:
+        payload = result.payload if isinstance(result.payload, dict) else {}
+        saved_result = payload.get("result")
+        expected_outputs = (
+            (navigation_ref,) if tool_name == "navigate_venue" else
+            (saved_result["copy_ref"],) if isinstance(saved_result, dict)
+            and saved_result.get("copy_ref") else ()
+        )
+        if (
+            tool_name not in {"navigate_venue", "inspect_navigation_document", "fetch_source"}
+            or spec.handler_id != "mission-tool"
+            or result.disposition != "continue_task"
+            or result.messages
+            or result.used_tokens is not None
+            or result.output_refs != expected_outputs
+            or payload.get("name") != tool_name
+            or not isinstance(saved_result, dict)
+            or saved_result.get(
+                "document_ref" if tool_name == "fetch_source" else "navigation_ref"
+            ) != navigation_ref
+        ):
+            raise StateError("Recovered local tool needs one exact saved effect")
+        work = self.store.get(self.KIND, self._work_record_id(spec))
+        if work is None or self._spec_from(work) != spec:
+            raise StateConflict("Recovered navigation work identity changed")
+        if work["body"]["phase"] == "completed":
+            return {"status": "already_completed"}
+        if work["body"]["phase"] != "pending":
+            return {"status": "not_pending"}
+        cap_id = self._capacity_id(spec)
+        cap = self.capacity.get(cap_id)
+        if cap is None or cap["phase"] != "uncertain":
+            return {"status": "not_uncertain"}
+
+        def release_exact(fence: dict | None) -> None:
+            if fence is None:
+                return
+            try:
+                self._release_board(spec, fence)
+            except (StateError, StateConflict):
+                pass  # A newer claim must never be released by this recovery.
+
+        current = next(
+            (
+                item for item in self.board.open_work(spec.mission_id)
+                if item["proposal_ref"] == spec.proposal_ref
+            ),
+            None,
+        )
+        current_claim = current["current_claim"] if current else None
+        original_fence = None
+        if current_claim is not None and current_claim["owner"] == spec.actor_id:
+            segments = work["body"].get("runtime_segments") or []
+            claim_record = self.store.get(
+                "board_claim",
+                f"{spec.mission_id}:{spec.proposal_ref['id']}:{current_claim['generation']}",
+            )
+            if (
+                segments
+                and claim_record is not None
+                and claim_record["body"].get("proposal_ref") == spec.proposal_ref
+                and claim_record["created_at"] <= segments[-1]["recorded_at"]
+            ):
+                original_fence = current_claim
+        proposal = self.store.get(spec.proposal_ref["kind"], spec.proposal_ref["id"])
+        cancelled = cap.get("cancel_requested") is True
+        stale = (
+            cancelled or proposal is None or ref(proposal) != spec.proposal_ref
+            or proposal["body"].get("status") != "open"
+        )
+        fence = None
+        obtained_fence = False
+        if not stale:
+            if current is None:
+                stale = True
+            elif current_claim is not None:
+                if original_fence is None:
+                    # A newer lease, even for the same actor, may own different
+                    # work. Wait until this host can claim the task itself.
+                    return {"status": "claimed_elsewhere"}
+                fence = original_fence
+            else:
+                claimed = self.board.claim(
+                    f"executor-recovery-claim:{uuid.uuid4().hex}",
+                    mission_id=spec.mission_id,
+                    proposal_id=spec.proposal_ref["id"],
+                    actor_id=spec.actor_id,
+                    ttl=self.lease_seconds,
+                    expected_version=spec.proposal_ref["version"],
+                    invitation_id=spec.invitation_id,
+                )
+                if claimed["status"] != "accepted":
+                    return {"status": "claim_unavailable"}
+                fence = claimed["fence"]
+                obtained_fence = True
+        try:
+            claimed_cap = self.capacity.claim_uncertain(
+                cap_id, self.owner, lease_seconds=self.lease_seconds,
+            )
+        except StateConflict:
+            if obtained_fence:
+                release_exact(fence)
+            return {"status": "capacity_claim_unavailable"}
+        if claimed_cap.get("cancel_requested") is True:
+            cancelled = stale = True
+
+        def record_unaccepted(reason: str) -> dict:
+            observed = self._record_unaccepted(
+                spec, claimed_cap["generation"], result, reason,
+                recovered_uncertain=True,
+            )
+            if observed["status"] in {"result_unaccepted", "completed"}:
+                release_exact(fence or original_fence)
+            return observed
+
+        if stale:
+            return record_unaccepted(
+                "saved_local_tool_after_cancel" if cancelled else
+                "saved_local_tool_after_task_revision"
+            )
+        accepted = self._accept(
+            spec, claimed_cap, fence, result, recovered_uncertain=True,
+        )
+        if accepted["status"] == "accepted":
+            release_exact(fence)
+        else:
+            latest = self.store.get(spec.proposal_ref["kind"], spec.proposal_ref["id"])
+            latest_cap = self.capacity.get(cap_id)
+            cancelled = latest_cap is not None and latest_cap.get("cancel_requested") is True
+            if cancelled or latest is None or ref(latest) != spec.proposal_ref:
+                return record_unaccepted(
+                    "saved_local_tool_after_cancel" if cancelled else
+                    "saved_local_tool_after_task_revision"
+                )
+            if obtained_fence:
+                release_exact(fence)
+        return accepted
 
     async def _execute(self, spec: WorkSpec, cap: dict, fence: dict) -> dict:
         cap_id = self._capacity_id(spec)

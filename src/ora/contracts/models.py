@@ -371,7 +371,7 @@ class SourceView(WireModel):
     copy_id: Identifier
     version: Version
     title: Text
-    access_state: Literal["abstract_only", "full_text", "locator_only", "supplied_text"]
+    access_state: Literal["abstract_only", "full_text", "locator_only", "supplied_text", "navigation_text", "document_text"]
     retrieval_status: Text
     content_hash: str | None = None
     provider: str | None = None

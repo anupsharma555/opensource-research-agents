@@ -971,7 +971,9 @@
             "abstract_only",
             "full_text",
             "locator_only",
-            "supplied_text"
+            "supplied_text",
+            "navigation_text",
+            "document_text"
           ],
           "title": "Accessstate",
           "type": "string"

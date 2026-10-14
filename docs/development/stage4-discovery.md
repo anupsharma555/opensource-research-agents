@@ -149,6 +149,38 @@ default, not a freshness measurement. The agent can avoid a duplicate fetch
 when adequate inline/cached text is already available. `costDollars.total`, when returned,
 is a provider estimate, not a measured account charge or Groq usage.
 
+### Groq browser discovery and original-page reading
+
+The mission capability `browser_search` selects one provider-managed browser turn
+on the configured non-streaming GPT-OSS model. That turn exposes the native
+descriptor alone and uses low reasoning; ordinary turns restore the configured
+reasoning setting and granted local tools. The capability catalog is visible
+before selection. `request_capability` normally selects the native turn.
+
+A captured HTTP 400 can also identify an explicit attempt to call this granted
+capability before its descriptor was exposed. The host checks the exact saved
+request and rejection, current descriptor and non-streaming configuration, then
+records `recover_rejected_capability_choice` for the next normal turn. It does
+not execute rejected arguments or issue a request during repair. Unavailable
+capabilities and other errors do not take this path. Native-turn rejection and
+unselected-capability rejection are separate diagnostic cases.
+
+Returned text and URL metadata remain discovery material. Literal safe URLs
+become task-bound leads; opaque citation markers do not establish an inspected
+source. When discovery prose exceeds the input allowance, the context builder
+keeps as many exact hit IDs and URLs as fit before optional board details. These
+remain labeled as uninspected metadata. The saved-result reader preserves access
+to the complete text and leads, including when no lead preview fits.
+`fetch_source` can retain an exact public HTML fetch from such a lead as
+a `public_document_fetch`, without inventing a publication title or identity.
+The normal source-policy and extraction checks govern a checked nonpublication
+copy, and `read_source_window` supplies exact citable text. Restart reuses the
+saved fetch only for the original valid operation; revoked use or replacement
+work cannot inherit permission from that fetch.
+
+Controlled tests establish these mechanics. Natural model selection, successful
+live continuation and factual support require separately saved run evidence.
+
 The route shapes were checked against the official [Europe PMC REST guide](https://europepmc.org/RestfulWebService),
 [NCBI E-utilities guide](https://www.ncbi.nlm.nih.gov/books/NBK25501/),
 [Crossref REST guide](https://www.crossref.org/documentation/retrieve-metadata/rest-api/),
@@ -233,6 +265,19 @@ links as navigation leads only (`evidence_status=navigation_lead_only`). They
 do not return article-body paragraphs or create an inspected source copy. A link or page
 does not establish article identity, permission or claim support; agents can
 select further search or inspection based on the observed page.
+
+The optional `inspect_navigation_document` tool inspects the exact retained
+HTML from a task's saved navigation without fetching it again. A matching
+public, unauthenticated fetch receipt and the existing private-research-use
+policy are required before text becomes a checked source copy. Explicit page
+or catalog use restrictions take precedence; older navigation records without
+authentication evidence remain metadata only. This copy retains its exact
+navigation origin with no inferred publication identity. It appears as
+`navigation_text` in source inspection, and `read_source_window` supplies its
+checked passages through the normal current-use checks. JSON document intake
+is not supported by this path. An interrupted local inspection can complete
+its original saved operation after restart without another HTTP request;
+revocation, cancellation and replacement ownership are checked before delivery.
 
 Direct intake fetch now accepts `fetch_public_source(url)` for any HTTPS host
 whose DNS answers are globally routable; callers may still set

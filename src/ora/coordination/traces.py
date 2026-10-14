@@ -15,8 +15,10 @@ import re
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
+from ora.agents.capabilities import content_hash
 from ora.retrieval.redact import redact, redact_text
 from ora.state import StateConflict, StateError, StateStore
+from ora.state.source_lineage import inherited_public_source
 from ora.state.steps import explain_event
 from ora.state.store import Transaction, canonical
 
@@ -124,13 +126,32 @@ class TraceJournal:
             elif key == "latency_category" and value in {"minimal", "medium", "long", "very_long"}:
                 safe_timing[key] = value
         targets = []
+        pinned_call = (
+            tx.get("agent_call", context.call_id, context.call_version)
+            if context.call_id is not None else None
+        )
         for pointer in [*(inputs or []), *(outputs or [])]:
             record = tx.get(**pointer)
             if record is None:
                 raise StateError("Trace input/output reference is unavailable")
             if record["kind"] == "restricted_reasoning":
                 raise StateError("Returned reasoning uses the separate restricted lookup")
-            if record["body"].get("mission_id") not in (None, context.mission_id):
+            inherited_input = (
+                pointer in (inputs or []) and pointer not in (outputs or [])
+                and record["kind"] == "source_copy" and context.call_id is not None
+                and any(
+                    {key: item.get(key) for key in ("kind", "id", "version")} == pointer
+                    and item.get("sha256") == content_hash(record["body"])
+                    for item in pinned_call["body"].get("input_refs", [])
+                )
+                and inherited_public_source(
+                    tx, mission_id=context.mission_id, run_id=context.run_id,
+                    copy_ref=pointer, actor_id=context.instance_id,
+                    task_id=context.task_id,
+                )
+            )
+            if (record["body"].get("mission_id") not in (None, context.mission_id)
+                    and not inherited_input):
                 raise StateError("Trace reference belongs to another mission")
             targets.append(record)
         typed_links = []

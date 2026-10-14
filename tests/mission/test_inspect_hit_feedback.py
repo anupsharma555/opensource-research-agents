@@ -10,7 +10,8 @@ import pytest
 from ora.contracts.models import LiveFollowupRequest, LiveStartRequest
 from ora.coordination.executor import WorkSpec
 from ora.mission.service import LocalToolRejection
-from tests.mission.test_service import answer, drain, revoke_source, service, tool
+from ora.retrieval.providers import HTTPResult
+from tests.mission.test_service import _search_spec, answer, drain, revoke_source, service, tool
 
 
 def task_spec(host, run_id: str, alias: str = "agent-synthesis") -> WorkSpec:
@@ -139,6 +140,7 @@ def test_wrong_tool_feedback_reaches_model_and_recovers_with_local_source_reader
         body = json.loads(request.data)
         calls.append(body)
         if len(calls) == 1:
+            assert "inspect_hit" in {item["function"]["name"] for item in body["tools"]}
             return tool("inspect_hit", {"hit_id": source_ref["id"]}, 1)
         if len(calls) == 2:
             prior = json.loads(next(m["content"] for m in reversed(body["messages"])
@@ -150,13 +152,24 @@ def test_wrong_tool_feedback_reaches_model_and_recovers_with_local_source_reader
 
     host = service(tmp_path, monkeypatch, transport)
     try:
-        host.discovery_transport = lambda *_a, **_kw: pytest.fail("No discovery is needed")
+        host.discovery_transport = lambda *_a, **_kw: HTTPResult(200, json.dumps({
+            "hitCount": 1, "nextCursorMark": "*", "resultList": {"result": [{
+                "source": "MED", "id": "123", "pmid": "123",
+                "title": "Synthetic eligible hit",
+                "abstractText": "An unrelated synthetic abstract used only for hit eligibility.",
+            }]},
+        }).encode(), {})
         run = host.start(LiveStartRequest(
             request_id="wrong-tool-recovery", question="Inspect the already retained source",
             evidence_text="A project-owned source comparing two support conditions.",
             agent_ids=["agent-synthesis"],
         ))
         source_ref = host._control(run.run_id, "agent-synthesis")["body"]["source_refs"][0]
+        found, _ = host._search(_search_spec(host, run.run_id, suffix="eligible"), {
+            "route": "europe_pmc.search", "query": "synthetic", "limit": 1,
+        })
+        assert found["hits"]
+        saved_searches = host.store.records("retrieval_attempt")
         drain(host, run.run_id)
         assert len(calls) == 3
         assert source_ref["id"] in json.dumps(calls[2]["messages"])
@@ -164,7 +177,7 @@ def test_wrong_tool_feedback_reaches_model_and_recovers_with_local_source_reader
         assert received_rejection["status"] == "rejected"
         assert received_rejection["external_action"] == "none"
         assert received_rejection["source_ref"] == source_ref
-        assert host.store.records("retrieval_attempt") == []
+        assert host.store.records("retrieval_attempt") == saved_searches
         assert len(host.store.records("source_read_window")) == 1
         assert host._run(run.run_id)["body"]["status"] == "completed"
     finally:

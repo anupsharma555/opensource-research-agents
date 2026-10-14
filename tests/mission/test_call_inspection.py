@@ -49,8 +49,24 @@ def test_inspector_shows_saved_output_and_result_without_private_instructions(tm
     assert second["trace"]["intentReference"]
     assert second["trace"]["inclusionReference"]
     assert second["returnedReasoning"]["availability"] in {"absent", "restricted", "truncated"}
-    assert "synthetic-secret" not in json.dumps(inspected)
-    assert "instructions" not in json.dumps(inspected)
+    serialized = json.dumps(inspected)
+    assert "synthetic-secret" not in serialized
+    # Public capability descriptions can legitimately say "instructions".
+    # Protect actual request fields and private prompt content, not that word.
+    for field in ("instructions", "system_prompt", "developer_instructions"):
+        assert f'"{field}":' not in serialized
+    private_sentences = {
+        sentence.strip()
+        for request in requests
+        for message in request["messages"] if message["role"] in {"system", "developer"}
+        for paragraph in message["content"].split("\n\n")
+        for sentence in paragraph.split(". ")
+        if len(sentence.strip()) >= 40
+    }
+    assert private_sentences
+    assert any("Link a narrow claim" in sentence for sentence in private_sentences)
+    for sentence in private_sentences:
+        assert json.dumps(sentence)[1:-1] not in serialized
     assert len(inspect_calls(host.store, receipt.run_id, second["attemptId"])) == 1
     assert inspect_calls(host.store, receipt.run_id, "absent-attempt") == []
 

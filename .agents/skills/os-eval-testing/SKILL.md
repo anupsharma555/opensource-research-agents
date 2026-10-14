@@ -1,0 +1,117 @@
+---
+name: os-eval-testing
+description: Design and progressively execute realistic research-agent evaluations in OpenSource Research Agents, using natural-language tasks across selected context, evidence, tool, recovery and collaboration conditions. Use to create or compare eval cases, select the next useful test, or diagnose an evaluation; not for routine unit checks alone or claiming scientific validity from a harness pass.
+metadata:
+  version: 0.1.1
+---
+
+# Progressive research-agent evaluations
+
+Use this Codex development skill in the OpenSource Research Agents repository.
+It designs tasks and selects tests; it is not loaded into research agents and
+does not impose a research workflow or lifetime limit on them.
+
+Start from a realistic user job and the uncertainty to resolve. Prefer natural
+language and observable outcomes over prescribed tools, exact action sequences,
+or model-visible answers. A valid alternative route is not a failed evaluation.
+
+## Choose the proof needed
+
+Identify the source of uncertainty before spending provider allowance:
+
+| Question | Smallest useful evidence |
+| --- | --- |
+| Does paging, permission enforcement, activation or restart work? | Offline tests or saved replay; zero model API calls |
+| Does the selected model choose and use the capability effectively? | An authorized natural-language backend task with captured model/tool records |
+| Does a change improve quality or efficiency? | Matched tasks with the relevant condition changed; compare quality before token totals |
+| Does the result display correctly? | Interface inspection only when presentation is in scope |
+
+Injected model responses establish mechanisms. A guided live tool sequence
+establishes that the model can follow that sequence. Neither establishes natural
+tool selection. Use guided probes only to isolate a specific defect after an
+observed failure, and label them separately from realistic task performance.
+
+Read current `AGENTS.md`, `README.md` and `docs/development/setup.md` before
+execution. Read only the matching subsystem documentation and tests from
+`docs/development/modules.md`. Reuse the existing runtime rather than inventing
+an eval-only agent path. Consult [case design](references/case-design.md) when
+creating a task, comparison or withheld rubric; it includes adaptable examples.
+
+## Design the task and conditions
+
+Write the user request as a person seeking useful research work would: their
+question, audience, evidence available, desired output and real constraints.
+Do not tell the worker to activate a named skill, call a reader, use an internal
+record ID, or reach the evaluator's expected conclusion unless the human job
+itself requires that action. Normal runtime tool schemas and evidence locators
+remain available; the prohibition is against scripting the evaluated choice.
+
+Keep three surfaces separate:
+
+- **Worker task:** the natural request and evidence currently available.
+- **Controller plan:** condition changes, event timing, evidence identities,
+  model/profile/settings, allowed side effects and authorized test ceiling.
+- **Withheld review:** expected support, counterevidence, unacceptable claims
+  and outcomes. Never put this rubric or future evidence into worker input.
+
+Choose only conditions needed for the question: ordinary context versus
+compaction, small versus large results, optional skills available versus an
+appropriate baseline, source access changes, interruption/restart, contradictory
+evidence, or collaboration. These are options, not a mandatory test matrix.
+Freeze evidence and settings for a comparison where practical; record unavoidable
+differences. Do not silently substitute models, credentials or permissions.
+
+Verify the condition actually occurred in captured input and state. A larger
+document alone does not prove compaction; an available skill does not prove its
+use. If a valid answer avoids the target capability, record task quality and
+**capability not exercised** separately. Do not force a tool path just to obtain
+a green result. Revise an uninformative case without leaking its answer.
+
+## Test progressively
+
+1. Reuse current relevant offline evidence. Check new harness/staging logic with
+   injected transport before any real request; no need to repeat unrelated suites.
+2. Select one natural task that can resolve the most important remaining gap.
+   State what live execution adds beyond the existing offline evidence.
+3. Use existing live authorization and its explicit call/token/run ceiling.
+   If the ceiling is missing, propose the smallest useful one before calling a
+   provider. Do not turn a rough estimate or broad permission to test progressively
+   into unlimited calls. Explain each planned call's purpose where predictable;
+   autonomous paths have estimates, not guaranteed counts.
+4. Run serially by default, capture evidence, and inspect the first mismatch
+   before spending on another case. Diagnose the failing layer and prefer offline
+   fixes/replay. Expand only to answer a named unresolved question within the
+   remaining authorization. A batch ceiling ends the test, not the research scope.
+5. Distinguish an agent failure from a harness defect, invalid comparison,
+   capability not exercised, external quota limit, or inconclusive observation.
+   Do not penalize useful alternative behavior solely for differing from a script.
+
+For live execution, read [runtime and receipts](references/runtime-and-receipts.md).
+Use a fresh private backend workspace when backend testing is requested. Do not
+launch Atlas or require UI acceptance for a backend-only evaluation. Inspect
+concurrent provider work and preserve existing held work. Source fixtures can
+isolate model behavior without live search; external retrieval needs its own
+authorized scope.
+
+## Review and decide the next step
+
+Use `$os-qualify-run` from `../os-qualify-run/SKILL.md` for the selected saved
+run's execution and evidence review, and `$os-groq-usage` from
+`../os-groq-usage/SKILL.md` for saved usage accounting. Read their instructions
+when needed; this skill does not duplicate their record readers. These companions
+ship with this repository; personal KBA skills are not runtime dependencies.
+
+Review actual claims against the permitted passages, including contrary evidence
+and limitations. Citation shape, keywords, model self-assessment and completed
+status are insufficient. When feasible, review matched outputs without revealing
+their condition labels. Record whether semantic review was human or automated;
+an automated review is not independent clinical or scientific validation.
+
+Report the task, condition, useful outcome, first mismatch, actual requests and
+tokens, remaining uncertainty, and the next discriminating test (or why none is
+needed). Separate configured ceilings, local estimates and provider-reported
+usage; missing usage is unknown. For free Groq usage, prioritize allowance and
+rate limits rather than presenting hypothetical paid prices as incurred costs.
+One successful task does not establish generalization, sustained reliability or
+token savings. Preserve failures and exact evidence so a later test can compare
+against them without repeating provider calls.

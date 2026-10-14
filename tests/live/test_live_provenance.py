@@ -127,9 +127,9 @@ def test_calls_pin_shared_actor_configuration_and_exact_loaded_capabilities(tmp_
         assert saved_input["body"]["messages_sha256"] == content_hash(
             json.loads(row["messages"])
         )
-        assert set(config["skills"]) == {"evidence-linking"}
+        assert set(config["skills"]) == {"evidence-linking", "general-web-discovery"}
         assert set(manifest["exposed_tools"]) == {"source_read", "ask_peer", "publish_result"}
-        assert set(manifest["exposed_skill_ids"]) == {"evidence-linking"}
+        assert set(manifest["exposed_skill_ids"]) == {"evidence-linking", "general-web-discovery"}
         assert manifest["configuration_id"] == row["config_id"]
     tool = _rows(host.db_path, "tool_invocations")[0]
     assert tool["status"] == "completed"

@@ -160,7 +160,7 @@ def test_value_test_result_is_versioned_but_does_not_qualify_skill(tmp_path: Pat
         store, ROOT, catalog, available_skill_capabilities={"source_read_by_id"},
     )
     test_body = {
-        "skill_id": "evidence-linking", "skill_version": "1.0.2",
+        "skill_id": "evidence-linking", "skill_version": "1.0.3",
         "role_id": "evidence_preparation_synthesis", "model_id": "model",
         "task_scope": "synthetic support", "outcome": "mixed", "synthetic": True,
     }

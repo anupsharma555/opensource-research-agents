@@ -1,0 +1,37 @@
+{
+  "schema": "ora.runtime_skill.example.v1",
+  "synthetic": true,
+  "scenario": "A broad public-health question may use general web discovery after the host grants browser_search. The synthetic search response contains a literal https://example.org/report URL. The saved URL lead is metadata only. A later, separately fetched and inspected source copy supplies the following EvidencePacket and locator.",
+  "input": {
+    "evidence": {
+      "id": "synthetic-web-evidence-1",
+      "version": 1,
+      "kind": "published_evidence",
+      "artifact": {
+        "id": "synthetic-fetched-copy-1",
+        "version": 1,
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "locators": ["Section 2, paragraph 1"],
+      "validation_record": "synthetic-source-inspection-1",
+      "access_surface": "full_text",
+      "summary": "Synthetic inspected report describes the program's launch date.",
+      "limitations": ["Independent confirmation not yet checked"]
+    },
+    "claim": "The synthetic program launched in March 2025.",
+    "locator": "Section 2, paragraph 1",
+    "relation": "supports"
+  },
+  "expected_helper_output": {
+    "claim": "The synthetic program launched in March 2025.",
+    "relation": "supports",
+    "evidence_packet_id": "synthetic-web-evidence-1",
+    "evidence_packet_version": 1,
+    "evidence_kind": "published_evidence",
+    "artifact_id": "synthetic-fetched-copy-1",
+    "artifact_version": 1,
+    "artifact_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "locator": "Section 2, paragraph 1",
+    "semantic_support_status": "pending_independent_review"
+  }
+}

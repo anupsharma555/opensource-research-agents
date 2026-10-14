@@ -13,7 +13,13 @@ from typing import Any
 
 from ora.state import IntegrityFault, StateStore
 
-from .intake import _exact_submitted_text, _is_exact_submitted_passage, extract_blocks
+from .intake import (
+    EXACT_SUBMISSION_PARSER_VERSION,
+    EXACT_SUBMISSION_VALIDATION,
+    _exact_submitted_text,
+    _is_exact_submitted_passage,
+    extract_blocks,
+)
 from .library import EvidenceError
 from .windows import _window_slices
 
@@ -175,10 +181,25 @@ def extracted_text_coverage(
                 and quality_body.get("inspected_blocks") is None
                 and quality_body.get("inspected_text_length") is None
             )
-        if not blocks or not (inspected_mapping or supplied_without_mapping):
+        submitted_text = _exact_submitted_text(store, copy, content)
+        exact_submission_mapping = (
+            submitted_text is not None
+            and quality_body.get("parser") == EXACT_SUBMISSION_VALIDATION
+            and quality_body.get("parser_version") == EXACT_SUBMISSION_PARSER_VERSION
+            and quality_body.get("copy_ref") == copy_ref
+            and quality_body.get("byte_length") == len(content)
+            and quality_body.get("stored_content_type") == "text/plain"
+            and quality_body.get("source_version") == body.get("source_version")
+            and quality_body.get("inspected_text_length") == len(submitted_text)
+            and quality_body.get("selected_locators")
+            == [f"submitted text; chars=0:{len(submitted_text)}"]
+            and quality_body.get("completeness_scope") == "exact_submitted_text_only"
+        )
+        if not blocks or not (
+            inspected_mapping or supplied_without_mapping or exact_submission_mapping
+        ):
             raise _UnknownCoverage("extraction_mapping_unavailable")
 
-        submitted_text = _exact_submitted_text(store, copy, content)
         intervals = []
         for pointer in selected_passage_refs:
             passage = _record(store, pointer, "source_passage")

@@ -110,6 +110,15 @@ them with current settings. See the [live inspection guide](../development/live-
 
 ## Stage 4 inspection fields (unreleased)
 
+`SourceView.accessState` adds `navigation_text` for checked text inspected from
+retained venue-navigation HTML, and `document_text` for a checked public HTML
+document fetched from an exact browser URL lead. Neither implies a publication
+or study identity.
+The fetch origin, bytes, source-use decision and reading windows are separate
+saved records; older snapshots retain their existing access-state values. Older
+strict clients need the regenerated types and host together before reading a
+new snapshot that contains this value.
+
 The matched client/host adds optional saved-run title, creation/progress/completion
 times, wait explanation and workspace label. Peer entries may include the selected
 model, availability, exact configuration reference and role-template identity.

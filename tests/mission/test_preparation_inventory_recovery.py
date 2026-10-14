@@ -21,10 +21,16 @@ def test_old_source_free_preparation_reuses_call_with_fresh_inventory_operation(
 
     host = service(tmp_path, monkeypatch, no_provider_call)
     try:
+        # Distinct values stay above the observed 12k complete-request bound
+        # under the current tokenizer; a repeated sentence now compresses.
+        evidence = "\n".join(
+            f"Synthetic evidence passage {index:04d}: value {index * index:08d}."
+            for index in range(1200)
+        )
         run = host.start(LiveStartRequest(
             request_id="saved-source-free-overflow",
             question="Inspect the supplied synthetic source",
-            evidence_text="Synthetic evidence passage. " * 1800,
+            evidence_text=evidence,
             agent_ids=["agent-synthesis"],
         ))
         control = host._control(run.run_id, "agent-synthesis")
