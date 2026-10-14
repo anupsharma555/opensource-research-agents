@@ -248,6 +248,7 @@ class ResearchHost:
                 "manifest_sha256": hashlib.sha256(_json(skill.manifest).encode()).hexdigest(),
             }
             for skill_id, skill in registry.skills.items()
+            if skill_id != "task-planning"  # Requires the MissionService plan tools.
         }
         role_map = {
             "agent-synthesis": (
@@ -264,7 +265,8 @@ class ResearchHost:
         self._role_ids: dict[str, str] = {}
         self.agents: list[LiveAgent] = []
         for agent_id, (name, role, role_id) in role_map.items():
-            refs = registry.roles[role_id]["skill_refs"]
+            refs = [item for item in registry.roles[role_id]["skill_refs"]
+                    if item["skill_id"] != "task-planning"]
             versions = ", ".join(f"{ref['skill_id']}@{ref['version']}" for ref in refs)
             if any(
                 ref["skill_id"] not in registry.skills
@@ -1443,6 +1445,7 @@ class ResearchHost:
         skills = [
             self._loaded_skills[ref["skill_id"]]["instructions"]
             for ref in self._skills.roles[role_id]["skill_refs"]
+            if ref["skill_id"] != "task-planning"
         ]
         source_list = [
             {

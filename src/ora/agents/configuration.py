@@ -231,7 +231,8 @@ class ConfigurationRegistry:
                 "variant": variant,
                 "instructions": instructions,
                 "instructions_sha256": _text_sha256(instructions),
-                "helper_sha256": skill.manifest["helper"]["sha256"],
+                "helper_sha256": (skill.manifest["helper"]["sha256"]
+                                  if skill.helper is not None else None),
                 "trigger": skill.manifest["trigger"],
                 "purpose": skill.manifest["purpose"],
                 "input_contract": skill.manifest["input_contract"],
@@ -573,6 +574,9 @@ class ConfigurationRegistry:
                     raise ConfigurationError("Pinned evidence packet is unavailable")
                 registry = load_registry(self.project_root, self.skill_capabilities)
                 skill = registry.skills.get(skill_id)
+                if skill is not None and skill.helper is None:
+                    reason = "Instruction-only skill has no executable helper"
+                    raise ConfigurationError(reason)
                 if (
                     skill is None
                     or skill.version != snapshot["version"]
@@ -586,7 +590,7 @@ class ConfigurationRegistry:
                     raise ConfigurationError("Skill helper did not return a record")
                 content_hash(result)
             except (ConfigurationError, ValueError, TypeError, KeyError):
-                status, reason = "rejected", "Skill input or pinned helper was rejected"
+                status, reason = "rejected", reason or "Skill input or pinned helper was rejected"
                 result = None
             except Exception:
                 status, reason = "failed", "Local skill helper failed"

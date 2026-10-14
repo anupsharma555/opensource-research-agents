@@ -70,7 +70,7 @@ class SkillDefinition:
     manifest: dict[str, Any]
     instruction_paths: dict[str, Path]
     example_path: Path
-    helper: Callable[..., dict[str, object]]
+    helper: Callable[..., dict[str, object]] | None
 
 
 @dataclass
@@ -79,7 +79,7 @@ class SkillAttempt:
     skill_id: str
     skill_version: str
     attempt_id: str
-    helper_sha256: str
+    helper_sha256: str | None
     state: dict[str, object] = field(default_factory=dict)
 
 
@@ -118,7 +118,8 @@ class SkillRegistry:
             skill_id=skill_id,
             skill_version=skill.version,
             attempt_id=attempt_id,
-            helper_sha256=skill.manifest["helper"]["sha256"],
+            helper_sha256=(skill.manifest["helper"]["sha256"]
+                           if skill.helper is not None else None),
         )
 
 
@@ -126,14 +127,24 @@ def _load_skill(root: Path, manifest_path: Path) -> SkillDefinition:
     manifest = _read(manifest_path)
     if manifest.get("schema") != "ora.runtime_skill.v1":
         raise RegistryError(f"Unsupported skill manifest schema: {manifest_path}")
-    for key in ("skill_id", "version", "purpose", "trigger", "input_contract", "output_contract", "failure_handling", "required_capabilities", "instruction_variants", "example", "helper"):
+    for key in ("skill_id", "version", "purpose", "trigger", "input_contract", "output_contract", "failure_handling", "required_capabilities", "instruction_variants", "example"):
         if key not in manifest:
             raise RegistryError(f"Skill manifest {manifest_path} lacks {key}")
+    if "instruction_only" in manifest and type(manifest["instruction_only"]) is not bool:
+        raise RegistryError(f"{manifest['skill_id']} instruction_only must be a boolean")
+    instruction_only = manifest.get("instruction_only", False)
+    if instruction_only and "helper" in manifest:
+        raise RegistryError(f"{manifest['skill_id']} instruction-only package cannot declare a helper")
+    if not instruction_only and "helper" not in manifest:
+        raise RegistryError(f"Skill manifest {manifest_path} lacks helper")
     if not isinstance(manifest["required_capabilities"], list) or not all(
         isinstance(value, str) and value for value in manifest["required_capabilities"]
     ):
         raise RegistryError(f"{manifest['skill_id']} needs named required capabilities")
-    if manifest["input_contract"] != "ora.contracts.models.EvidencePacket":
+    if instruction_only:
+        if not isinstance(manifest["input_contract"], str) or not manifest["input_contract"].strip():
+            raise RegistryError(f"{manifest['skill_id']} needs an instruction input description")
+    elif manifest["input_contract"] != "ora.contracts.models.EvidencePacket":
         raise RegistryError(f"{manifest['skill_id']} must use canonical EvidencePacket input")
     variants = manifest["instruction_variants"]
     if not isinstance(variants, dict) or set(variants) != {"concise", "rich"}:
@@ -146,6 +157,11 @@ def _load_skill(root: Path, manifest_path: Path) -> SkillDefinition:
     example = _read(example_path)
     if example.get("schema") != "ora.runtime_skill.example.v1" or example.get("synthetic") is not True:
         raise RegistryError(f"{manifest['skill_id']} needs a synthetic versioned example")
+    if instruction_only:
+        return SkillDefinition(
+            manifest["skill_id"], manifest["version"], manifest,
+            instruction_paths, example_path, None,
+        )
     helper = manifest["helper"]
     needed = {"path", "sha256", "module", "function", "origin_type", "license", "dependencies", "local_changes", "upstream_url", "upstream_commit"}
     if not isinstance(helper, dict) or needed - helper.keys():

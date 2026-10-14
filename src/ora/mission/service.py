@@ -111,6 +111,7 @@ from .observation_tools import (
 )
 from .passage_search import search_saved_passages
 from .peer_inspection import inspect_peer_record
+from .planning import RuntimePlans
 from .post_scope import record_post_scope_disposition
 from .projection import current_report_view, latest_snapshot, persist_snapshot
 from .report_lineage import (
@@ -176,7 +177,7 @@ ROLE_DISPLAY_DEFAULTS = {
 }
 WORKFLOW_VERSION = "stage4-mission-v1"
 SELECTED_CONTEXT_TOKENS = 131_072
-ESTIMATOR_VERSION = "source_working_set_v13"
+ESTIMATOR_VERSION = "source_working_set_v14"
 DEFAULT_MODEL_SETTINGS = {
     "max_completion_tokens": 8192,
     "stream": False,
@@ -326,6 +327,7 @@ class MissionService:
         self.mailbox = PeerMailbox(self.store)
         self.context = WorkingContext(self.store)
         self.notes = WorkingNotes(self.store)
+        self.plans = RuntimePlans(self.store)
         self.evidence = EvidenceLibrary(self.store)
         self.intake = IntakeService(self.evidence)
         self.registry = AgentRegistry(self.store, self.project_root)
@@ -1018,16 +1020,20 @@ class MissionService:
             if item["skill_id"] in self.skills.skills
         }
         pins = run.get("skill_catalog", {}).get(role_id, {})
+        planning_available = (
+            run.get("skill_lifecycle_version") == 1 and "task-planning" in pins
+        )
         if run.get("skill_lifecycle_version") == 1:
             choices = {name: "concise" for name in selected_ids(pins, body)}
             skills = checked_registry(self.project_root, role_id, pins, list(choices))
         else:
             skills = self.skills
+            choices.pop("task-planning", None)
             pins = {
                 item["skill_id"]: {
                     "purpose": skills.skills[item["skill_id"]].manifest["purpose"],
                 }
-                for item in role["skill_refs"] if item["skill_id"] in skills.skills
+                for item in role["skill_refs"] if item["skill_id"] in choices
             }
         catalog, configurations = self._tool_registry(control)
         supported_tools = {
@@ -1035,6 +1041,7 @@ class MissionService:
             for name in catalog.tools
             if name not in UNHANDLED_COMMON_TOOLS
             and name in TOOL_PURPOSES
+            and (name not in {"save_plan", "read_plan"} or planning_available)
             and (name in COMMON_TOOL_IDS or name in TOOL_SCHEMAS)
             and (name not in {"activate_skill", "release_skill"}
                  or run.get("skill_lifecycle_version") == 1
@@ -1140,6 +1147,20 @@ class MissionService:
             pins, list(choices), supported_tools,
             lifecycle=run.get("skill_lifecycle_version") == 1,
         ))
+        if planning_available and {
+            "save_plan", "read_plan", "discover_capabilities", "activate_skill", "request_capability",
+        } <= supported_tools.keys():
+            instruction_parts.append(
+                "## Planning skill: task-planning\n"
+                "Optional guidance for complex, uncertain or dependent tasks. "
+                "Simple tasks may skip planning. discover_capabilities shows availability. "
+                "When planning structure or revision guidance helps, activate_skill with "
+                "skill_id task-planning loads the guide and selects both save_plan and read_plan "
+                "next turn. These tools retain revision-checked checkpoints. For a simple checkpoint, "
+                "request only the needed tool using request_capability with tool_id save_plan or "
+                "read_plan, then use its attached schema next turn. Plans are advisory; existing work, peer "
+                "and wait tools remain authoritative. No planning call is required."
+            )
         if "browser_search" in body.get("requested_capabilities", []):
             instruction_parts.append(
                 "browser_search is a Groq-managed built-in, not a local function. Never emit "
@@ -1157,7 +1178,8 @@ class MissionService:
             "or reuse text withheld by current source-use decisions."
         )
         grants = {f"common:{name}" for name in COMMON_TOOL_IDS}
-        grants.update(f"mission:{name}" for name in TOOL_SCHEMAS)
+        grants.update(f"mission:{name}" for name in TOOL_SCHEMAS
+                      if name not in {"save_plan", "read_plan"} or planning_available)
         grants.update(f"skill:{name}" for name in choices)
         instructions = "\n\n".join(instruction_parts)
         prior_config = None
@@ -4757,6 +4779,22 @@ class MissionService:
                     result = self.context.read_tool_result(
                         mission_id=spec.mission_id, actor_id=spec.actor_id,
                         task_id=spec.proposal_ref["id"], **args,
+                    )
+                    refs = ()
+                elif name == "save_plan":
+                    result = self.plans.save(
+                        f"mission-plan:{spec.work_id}",
+                        mission_id=spec.mission_id, actor_id=spec.actor_id,
+                        task_ref=spec.proposal_ref, run_ref=ref(self._run(control["run_id"])),
+                        control_ref=ref(control_record), input_refs=self._note_source_inputs(spec),
+                        **args,
+                    )
+                    refs = (result["plan_ref"],) if result.get("changed") else ()
+                elif name == "read_plan":
+                    result = self.plans.read(
+                        mission_id=spec.mission_id, actor_id=spec.actor_id,
+                        task_id=spec.proposal_ref["id"], run_ref=ref(self._run(control["run_id"])),
+                        control_ref=ref(control_record), **args,
                     )
                     refs = ()
                 elif name == "write_note":

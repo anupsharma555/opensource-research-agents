@@ -4,6 +4,14 @@ The current [Python contract models](../../src/ora/contracts/models.py) accept `
 
 ## Three different versions
 
+The additive `runtime_plan` contract describes optional agent-authored advisory
+plans stored as versioned working-note checkpoints. Its generated schema and
+TypeScript type do not alter existing command or snapshot envelopes. The two
+deferred tools `save_plan` and `read_plan` are new grants for new configurations;
+saved calls and role catalogs retain their original pins. Instruction-only skill
+manifests explicitly omit executable helpers; existing helper-backed packages
+retain their previous validation. See [runtime planning](../development/stage4-planning.md).
+
 | Version or identity | Meaning | Compatibility consequence |
 | --- | --- | --- |
 | `schemaVersion` | Shape and interpretation of a wire record, currently only `1.0`. | A client or host that does not understand the version must reject it with an actionable diagnostic. An older strict client may also reject a new optional field. |

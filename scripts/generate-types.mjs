@@ -9,6 +9,7 @@ import { compile } from 'json-schema-to-typescript';
 const repositoryRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const checkOnly = process.argv.includes('--check');
 const contracts = [
+  ['runtime_plan', 'runtime-plan', 'RuntimePlan'],
   ['research', 'contracts', 'ResearchSnapshot'],
   ['live_start', 'live-start', 'LiveStartRequest'],
   ['live_followup', 'live-followup', 'LiveFollowupRequest'],

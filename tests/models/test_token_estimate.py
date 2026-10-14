@@ -11,7 +11,7 @@ from ora.models import token_estimate
 from ora.state.store import canonical
 
 
-def request_bytes(*, text: str = "Read the checked source.") -> bytes:
+def request_bytes(*, text: str = "Read the checked source.", output_cap: object = 8192) -> bytes:
     return canonical({
         "model": "openai/gpt-oss-120b",
         "messages": [
@@ -25,7 +25,7 @@ def request_bytes(*, text: str = "Read the checked source.") -> bytes:
              "content": '{"text":"One checked sentence."}'},
         ],
         "reasoning_effort": "high", "include_reasoning": True,
-        "max_completion_tokens": 8192, "stream": False,
+        "max_completion_tokens": output_cap, "stream": False,
         "tools": [{"type": "function", "function": {
             "name": "publish_result", "description": "Save a result",
             "parameters": {"type": "object", "properties": {}},
@@ -60,6 +60,9 @@ def test_exact_canonical_request_and_context_text_use_verified_local_asset(
     assert token_estimate.estimate_request_tokens(
         raw, basis=token_estimate.TOKENIZER_BASIS_V1,
     ).tokens == estimate.tokens + 128
+    assert token_estimate.estimate_request_tokens(
+        raw, basis=token_estimate.TOKENIZER_BASIS_V2,
+    ).tokens == estimate.tokens
     assert not (tmp_path / "must-not-be-created").exists()
 
 
@@ -74,6 +77,9 @@ def test_native_unfamiliar_and_noncanonical_requests_keep_legacy_basis():
     body["tools"].append({"type": "browser_search"})
     candidates.append(canonical(body).encode())
     body["tools"].pop()
+    body["messages"][2]["content"] = "Some accompanying prose."
+    candidates.append(canonical(body).encode())
+    body["messages"][2]["content"] = None
     body["tools"][0]["function"]["name"] = "browser_search"
     candidates.append(canonical(body).encode())
     body["tools"][0]["function"]["name"] = "publish_result"
@@ -120,3 +126,51 @@ def test_missing_or_corrupt_asset_falls_back_only_for_new_auto_calls(
     assert auto.fallback_reason == "asset_hash_mismatch"
     with pytest.raises(token_estimate.TokenEstimateUnavailable, match="asset_hash_mismatch"):
         token_estimate.estimate_request_tokens(raw, basis=token_estimate.TOKENIZER_BASIS)
+
+
+@pytest.mark.parametrize("output_cap", [1, 768, 1536, 2048, 8192, 65536])
+def test_bounded_output_caps_count_exact_bytes_without_repricing_old_bases(output_cap):
+    raw = request_bytes(output_cap=output_cap)
+    current = token_estimate.estimate_request_tokens(raw)
+    assert current.basis == token_estimate.TOKENIZER_BASIS
+    assert current.fallback_reason is None
+    assert current.tokens == token_estimate.estimate_context_tokens(raw.decode())
+    for basis, allowance in (
+        (token_estimate.TOKENIZER_BASIS_V1, 128),
+        (token_estimate.TOKENIZER_BASIS_V2, 0),
+    ):
+        if output_cap == 8192:
+            assert token_estimate.estimate_request_tokens(raw, basis=basis).tokens == (
+                current.tokens + allowance
+            )
+        else:
+            with pytest.raises(token_estimate.TokenEstimateUnavailable,
+                               match="unsupported_reasoning_or_stream"):
+                token_estimate.estimate_request_tokens(raw, basis=basis)
+    # A historically saved byte estimate remains reproducible after the fix.
+    assert token_estimate.estimate_request_tokens(
+        raw, basis=token_estimate.LEGACY_BASIS,
+    ).tokens == _legacy(raw)
+
+
+@pytest.mark.parametrize("output_cap", [True, False, 0, -1, 65537, 8192.0, "2048", None])
+def test_invalid_output_caps_keep_fallback_and_fail_strict_replay(output_cap):
+    raw = request_bytes(output_cap=output_cap)
+    result = token_estimate.estimate_request_tokens(raw)
+    assert result.basis == token_estimate.LEGACY_BASIS
+    assert result.fallback_reason == "unsupported_completion_budget"
+    assert result.tokens == _legacy(raw)
+    with pytest.raises(token_estimate.TokenEstimateUnavailable,
+                       match="unsupported_completion_budget"):
+        token_estimate.estimate_request_tokens(raw, basis=token_estimate.TOKENIZER_BASIS)
+
+
+def test_v2_keeps_historical_shape_and_asset_failure_behavior(tmp_path, monkeypatch):
+    # The old gate used numeric equality. Preserve it for exact old receipts;
+    # current adapter and v3 still reject floating-point output settings.
+    raw = request_bytes(output_cap=8192.0)
+    old = token_estimate.estimate_request_tokens(raw, basis=token_estimate.TOKENIZER_BASIS_V2)
+    assert old.tokens == token_estimate.estimate_context_tokens(raw.decode())
+    monkeypatch.setattr(token_estimate, "ASSET_PATH", tmp_path / "missing.tiktoken")
+    with pytest.raises(token_estimate.TokenEstimateUnavailable, match="asset_missing"):
+        token_estimate.estimate_request_tokens(raw, basis=token_estimate.TOKENIZER_BASIS_V2)

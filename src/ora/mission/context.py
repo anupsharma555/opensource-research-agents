@@ -509,7 +509,7 @@ class WorkingContext:
     def _checked_note_tool_payload(self, payload: dict, result_ref: dict) -> dict:
         """Keep saved tool pairing while removing restricted note or summary text."""
         name = payload.get("name")
-        if name not in {"read_note", "search_notes", "read_context_page", "read_context_record"}:
+        if name not in {"read_note", "read_plan", "search_notes", "read_context_page", "read_context_record"}:
             return payload
         try:
             content = json.loads(payload["content"])
@@ -555,7 +555,7 @@ class WorkingContext:
             except (ContextError, KeyError, TypeError):
                 return None
 
-        if name == "read_note" and isinstance(content.get("note"), dict):
+        if name in {"read_note", "read_plan"} and isinstance(content.get("note"), dict):
             saved = exact_note(content["note"])
             if saved is None:
                 content["note"] = {
@@ -566,6 +566,8 @@ class WorkingContext:
                 projected = self.working_note_projection(saved)
                 if "text" not in projected["body"]:
                     content["note"] = projected
+                    if name == "read_plan":
+                        content["status"] = "data_unavailable_due_source_use"
                     changed = True
         elif name == "search_notes" and isinstance(content.get("notes"), list):
             safe_notes = []
@@ -648,7 +650,7 @@ class WorkingContext:
         name = payload.get("name")
         if content.get("schema") == RESULT_PAGE_SCHEMA:
             return tuple(content.get("note_text_refs", []))
-        records = ([content.get("note")] if name == "read_note" else
+        records = ([content.get("note")] if name in {"read_note", "read_plan"} else
                    content.get("notes", []) if name == "search_notes" else [])
         refs = []
         for note in records:
@@ -1194,7 +1196,15 @@ class WorkingContext:
                 output.append(entry)
             return output
 
-        if name == "read_note":
+        if name == "read_plan":
+            # Plan annotations contain only host status and exact references;
+            # all agent-authored text lives in the permission-checked note.
+            projection = dict(content)
+            if isinstance(content.get("note"), dict):
+                projection["note"] = note_projection(content["note"])
+                if "text" not in projection["note"]["body"]:
+                    projection["status"] = "data_unavailable_due_source_use"
+        elif name == "read_note":
             projection = {"status": "found", "note": note_projection(content.get("note"))}
         elif name == "search_notes":
             if not isinstance(content.get("notes"), list):
@@ -1314,9 +1324,20 @@ class WorkingContext:
         payload = json.loads(self.store.read_blob(result["body"]["blob"]["sha256"]))
         if payload.get("tool_call_id") != calls[0]["id"]:
             raise ContextError("Saved tool result no longer matches its call")
+        if payload.get("name") == "read_plan" and assistant["content"] is not None:
+            # A read's numeric arguments are safe to replay, but accompanying
+            # model prose may derive from sources visible in its original turn.
+            # Note projection alone cannot remove that separate assistant text.
+            dependencies = self.response_source_dependencies(response_ref, require_permitted=False)
+            if any(
+                (copy := self.store.get(**pointer)) is None
+                or self._source_status(copy)["model_input_status"] != "permitted"
+                for pointer in dependencies
+            ):
+                assistant["content"] = None
         if (payload.get("name") in {
                 "calculate", "search_saved_passages", "read_browser_search_result",
-                "search_scholarly",
+                "search_scholarly", "save_plan",
             }
                 or origin_call and "browser_search" in origin_call["body"].get("exposed_tools", [])):
             dependencies = list(self.response_source_dependencies(response_ref, require_permitted=False))
@@ -3534,8 +3555,9 @@ class WorkingContext:
             origin_call = self.store.get(**origin_response["body"]["call_ref"])
             if ((function.get("name") in {
                     "compact_conversation", "calculate", "search_saved_passages",
-                    "read_browser_search_result", "search_scholarly",
+                    "read_browser_search_result", "search_scholarly", "save_plan",
                 }
+                 or function.get("name") == "read_plan" and exchange[0].get("content") is not None
                  or "browser_search" in origin_call["body"].get("exposed_tools", []))
                     and (compaction or {}).get("status") not in {
                         "compaction_argument_withheld_due_source_use", "tool_argument_withheld_due_source_use",

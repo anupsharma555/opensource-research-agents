@@ -42,7 +42,9 @@ def _resource_spec(skill, resource: str) -> tuple[dict, dict, str]:
         return manifest["instruction_variants"]["rich"], {}, "guidance, not evidence"
     if resource == "example":
         return manifest["example"], {"synthetic": True}, "synthetic example, not fresh source evidence"
-    helper = manifest["helper"]
+    helper = manifest.get("helper")
+    if helper is None:
+        raise StateError("Instruction-only skill has no helper source")
     metadata = {key: helper[key] for key in (
         "module", "function", "dependencies", "helper_version", "origin_type", "side_effects"
     ) if key in helper}

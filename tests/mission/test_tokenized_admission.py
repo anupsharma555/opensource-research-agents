@@ -15,13 +15,19 @@ from ora.models.token_estimate import (
     LEGACY_BASIS,
     TOKENIZER_BASIS,
     TOKENIZER_BASIS_V1,
+    TOKENIZER_BASIS_V2,
     estimate_request_tokens,
 )
 from ora.state import StateStore
 from tests.mission.test_service import ROOT, drain, service, tool
 
 
-def test_tokenized_complete_request_retains_source_and_reserved_completion(tmp_path, monkeypatch):
+@pytest.mark.parametrize("historical_basis,allowance", [
+    (TOKENIZER_BASIS_V1, 128), (TOKENIZER_BASIS_V2, 0),
+])
+def test_tokenized_complete_request_retains_source_and_reserved_completion(
+    tmp_path, monkeypatch, historical_basis, allowance,
+):
     requests = []
     host = None
     evidence = ("Synthetic comparison reports uncertainty and needs independent review. " * 130).strip()
@@ -86,9 +92,9 @@ def test_tokenized_complete_request_retains_source_and_reserved_completion(tmp_p
         first = intents[0]
         first_raw = host.store.read_blob(first["body"]["blob"]["sha256"])
         current = estimate_request_tokens(first_raw, basis=TOKENIZER_BASIS)
-        old = estimate_request_tokens(first_raw, basis=TOKENIZER_BASIS_V1)
+        old = estimate_request_tokens(first_raw, basis=historical_basis)
         assert estimate_request_tokens(first_raw) == current
-        assert old.tokens == current.tokens + 128
+        assert old.tokens == current.tokens + allowance
         assert old.asset_sha256 == current.asset_sha256
         ModelSession._check_token_estimate(
             first_raw, asdict(estimate_request_tokens(first_raw, basis=LEGACY_BASIS))

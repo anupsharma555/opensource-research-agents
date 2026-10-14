@@ -230,10 +230,19 @@ def test_selected_window_archives_exact_duplicate_when_full_request_needs_space(
         assert budget["output_reserve"] == call["body"]["settings"]["max_completion_tokens"]
         assert budget["current_tool_turn_ref"] is None
         assert response in budget["compacted_tool_turn_refs"]
-        assert len(call["body"]["exposed_tools"]) == 12
+        expected_tools = {
+            "activate_skill", "board_read", "discover_capabilities", "peer_request",
+            "publish_result", "read_context_page", "read_context_record",
+            "read_source_inventory", "read_source_window", "release_skill",
+            "request_capability", "review_peer_answer", "search_scholarly",
+            "select_working_sources",
+        }
+        assert len(call["body"]["exposed_tools"]) == len(expected_tools)
+        assert set(call["body"]["exposed_tools"]) == expected_tools
         assert request["model"] == MODEL
         assert request["reasoning_effort"] == "high"
-        assert len(request["tools"]) == 12
+        assert len(request["tools"]) == len(expected_tools)
+        assert {item["function"]["name"] for item in request["tools"]} == expected_tools
         index = json.loads(request["messages"][-1]["content"])
         source_packet = next(
             json.loads(message["content"])["source_packets"][0]

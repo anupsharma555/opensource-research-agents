@@ -51,7 +51,9 @@ def test_latest_requested_window_is_in_next_request_with_other_copy_recoverable(
         control = host._control(run.run_id, actor)
         proposal = host.store.get("board_proposal", control["body"]["task_id"])
         target = None
-        for allowance in range(5300, 6501, 100):
+        # Planning instructions add fixed overhead; allow room around the
+        # one-copy boundary for generated record IDs and timestamps to vary.
+        for allowance in range(5300, 6801, 100):
             all_sources = plan_source_turn(
                 host.store, ref(control), source_input_allowance_tokens=allowance
             )
@@ -93,7 +95,14 @@ def test_latest_requested_window_is_in_next_request_with_other_copy_recoverable(
         budget = host.store.get("mission_call_budget", call["id"])["body"]
         assert request["model"] == MODEL
         assert request["reasoning_effort"] == "high"
-        assert len(request["tools"]) == 10
+        expected_tools = {
+            "activate_skill", "board_read", "discover_capabilities", "peer_request",
+            "publish_result", "read_context_page", "read_context_record",
+            "read_source_window", "release_skill", "request_capability",
+            "review_peer_answer", "search_scholarly",
+        }
+        assert len(request["tools"]) == len(expected_tools)
+        assert {item["function"]["name"] for item in request["tools"]} == expected_tools
         assert {"read_source_window", "discover_capabilities", "request_capability"} <= set(
             call["body"]["exposed_tools"]
         )
