@@ -9,6 +9,7 @@ it separately checks permissions and executes the selected actions.
 from __future__ import annotations
 
 from ora.agents.capabilities import content_hash
+from ora.contracts.models import ReadPlanInput, SavePlanInput
 from ora.retrieval.catalog_tools import CATALOG_TOOL_DESCRIPTIONS, CATALOG_TOOL_SCHEMAS
 from ora.retrieval.discovery import available_routes
 
@@ -74,6 +75,8 @@ TOOL_PURPOSES = {
     "search_notes": "Search this peer's task notes",
     "search_scholarly": "Search scholarly records or retrieve selected content",
     "write_note": "Save or revise this peer's task note",
+    "save_plan": "Save or revise this peer's optional task plan without scheduling work",
+    "read_plan": "Read this peer's exact plan revision and changed reference heads",
     "list_venues": "List dated research-venue discovery leads",
     "propose_venue": "Save an additional research-venue lead",
     "navigate_venue": "Open one saved venue and list public links",
@@ -135,7 +138,27 @@ def _schema(fields: dict[str, dict], required: list[str]) -> dict:
     }
 
 
+def _plan_schema(model) -> dict:
+    """Inline canonical plan definitions for the existing bounded tool validator."""
+    schema = model.model_json_schema(by_alias=False)
+    definitions = schema.get("$defs", {})
+
+    def inline(value):
+        if isinstance(value, list):
+            return [inline(item) for item in value]
+        if not isinstance(value, dict):
+            return value
+        if "$ref" in value:
+            return inline(definitions[value["$ref"].removeprefix("#/$defs/")])
+        return {key: inline(item) for key, item in value.items()
+                if key not in {"$defs", "default", "pattern"}}
+
+    return inline(schema)
+
+
 TOOL_SCHEMAS = {
+    "save_plan": _plan_schema(SavePlanInput),
+    "read_plan": _plan_schema(ReadPlanInput),
     "browser_search": _schema({}, []),
     "read_browser_search_result": _schema(
         {"response_id": {"type": "string", "minLength": 1},
@@ -402,6 +425,16 @@ TOOL_SCHEMAS.update(CATALOG_TOOL_SCHEMAS)
 TOOL_SCHEMAS.update(OBSERVATION_TOOL_SCHEMAS)
 
 TOOL_DESCRIPTIONS = {
+    "save_plan": "Save an optional, advisory plan for this peer's current task. Use "
+    "expected_version 0 to create or the current plan version to revise. Give a "
+    "reason and exact evidence/work/peer references when relevant. Step dependencies "
+    "describe intended reasoning order; they do not schedule work, assign peers, "
+    "satisfy obligations or complete the task. Repeated revisions without new research "
+    "progress return a local churn diagnostic; other research tools remain usable.",
+    "read_plan": "Read this peer's saved plan, or an exact historical version, with "
+    "current task state and stale-reference markers. No arguments reads the current "
+    "plan. The note text contains its structured JSON when current source use permits. "
+    "A plan is a continuation aid, not accepted evidence or permission to execute work.",
     "board_read": "List this mission's open proposal references and optional work. "
     "No arguments needed; topic is unused. Returns work summaries, not report/source text.",
     "discover_capabilities": "List granted tools, purposes and current access status. "

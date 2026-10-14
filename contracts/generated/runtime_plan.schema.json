@@ -1,0 +1,178 @@
+{
+  "$defs": {
+    "PlanReference": {
+      "additionalProperties": false,
+      "description": "An exact existing research record; citation shape does not prove use.",
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "board_proposal",
+            "board_dissent",
+            "board_outcome",
+            "mail_request",
+            "mail_answer",
+            "mail_message",
+            "source_copy",
+            "source_passage",
+            "source_read_window",
+            "evidence_packet",
+            "report"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "version"
+      ],
+      "title": "PlanReference",
+      "type": "object"
+    },
+    "PlanStep": {
+      "additionalProperties": false,
+      "properties": {
+        "depends_on": {
+          "items": {
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          "maxItems": 24,
+          "title": "Depends On",
+          "type": "array"
+        },
+        "description": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Description",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "linked_refs": {
+          "items": {
+            "$ref": "#/$defs/PlanReference"
+          },
+          "maxItems": 24,
+          "title": "Linked Refs",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "todo",
+            "in_progress",
+            "done",
+            "blocked",
+            "deferred"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "description",
+        "status"
+      ],
+      "title": "PlanStep",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Bounded optional continuation aid, with no task-completion authority.",
+  "properties": {
+    "completion_criteria": {
+      "items": {
+        "maxLength": 2000,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "maxItems": 24,
+      "minItems": 1,
+      "title": "Completion Criteria",
+      "type": "array"
+    },
+    "goal": {
+      "maxLength": 4000,
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Goal",
+      "type": "string"
+    },
+    "linked_refs": {
+      "items": {
+        "$ref": "#/$defs/PlanReference"
+      },
+      "maxItems": 64,
+      "title": "Linked Refs",
+      "type": "array"
+    },
+    "revision_reason": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Revision Reason",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "active",
+        "paused",
+        "completed",
+        "cancelled"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "steps": {
+      "items": {
+        "$ref": "#/$defs/PlanStep"
+      },
+      "maxItems": 24,
+      "title": "Steps",
+      "type": "array"
+    },
+    "uncertainties": {
+      "items": {
+        "maxLength": 2000,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "maxItems": 24,
+      "title": "Uncertainties",
+      "type": "array"
+    }
+  },
+  "required": [
+    "goal",
+    "completion_criteria",
+    "status",
+    "revision_reason"
+  ],
+  "title": "RuntimePlan",
+  "type": "object"
+}

@@ -1,0 +1,7 @@
+# Task planning
+
+Use an optional, task-proportionate plan when coordination or uncertainty makes it useful. Simple questions can finish directly. Choose useful fields: goal, uncertainties, next actions, dependencies, evidence, peer feedback, dissent, negative results, and completion or a useful pause. No fixed research pipeline or compulsory planner is required.
+
+Use `save_plan` and `read_plan` with their attached schemas for the task/actor's structured working-note checkpoint. Retain the exact revision returned by a read or save; revise against that revision. Owner or stale-revision rejection means inspect the current checkpoint before deciding how to revise. Plans record intent: `propose_work`, `revise_work`, `peer_request`, and `wait_for_dependencies` remain the authority for execution and communication. Ordinary notes retain findings and context. Saving a dependency in a plan does not dispatch work or begin waiting.
+
+Revise when inspected evidence, peer feedback, or changed dependencies warrant it; preserve exact source references, counterevidence, and unresolved disagreement. Mark completion or a useful pause with its outcome, limitation, and next useful condition. A pause is not proof of scientific completion. While waiting, use existing dependency waits; do not add calls merely to refresh a plan. Repeated replanning without new evidence or progress warrants a host churn diagnostic, separate from scientific findings; it creates no global research cap. This guidance does not narrow available tools or grant permissions.

@@ -42,6 +42,7 @@ from .token_estimate import (
     LEGACY_BASIS,
     TOKENIZER_BASIS,
     TOKENIZER_BASIS_V1,
+    TOKENIZER_BASIS_V2,
     TokenEstimateUnavailable,
     estimate_request_tokens,
 )
@@ -722,7 +723,7 @@ class ModelSession:
                 or set(saved) != {"tokens", "basis", "asset_sha256", "fallback_reason"}
                 or type(saved.get("tokens")) is not int
                 or saved.get("basis") not in {
-                    LEGACY_BASIS, TOKENIZER_BASIS_V1, TOKENIZER_BASIS,
+                    LEGACY_BASIS, TOKENIZER_BASIS_V1, TOKENIZER_BASIS_V2, TOKENIZER_BASIS,
                 }):
             raise SessionError("Saved request token estimate is invalid")
         try:

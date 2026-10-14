@@ -98,6 +98,7 @@ class LiveProvenance:
         )
         skill_choices = {
             ref["skill_id"]: "concise" for ref in registry.roles[role_id]["skill_refs"]
+            if ref["skill_id"] != "task-planning"  # MissionService-only optional capability.
         }
         for skill_id in skill_choices:
             current = registry.skills[skill_id]

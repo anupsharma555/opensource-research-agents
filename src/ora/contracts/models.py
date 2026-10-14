@@ -763,3 +763,78 @@ class RetrievalEnvelope(WireModel):
         if self.returned_window.returned_count < len(self.items) + len(self.item_errors):
             raise ValueError("returned count cannot omit accepted or failed items")
         return self
+
+
+class PlanModel(BaseModel):
+    """Strict snake-case tool input; host ownership is never caller supplied."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+PlanText = Annotated[str, Field(min_length=1, max_length=2000, pattern=r"\S")]
+PlanLocalId = Annotated[str, Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")]
+
+
+class PlanReference(PlanModel):
+    """An exact existing research record; citation shape does not prove use."""
+
+    kind: Literal[
+        "board_proposal", "board_dissent", "board_outcome", "mail_request",
+        "mail_answer", "mail_message", "source_copy", "source_passage",
+        "source_read_window", "evidence_packet", "report",
+    ]
+    id: Annotated[str, Field(min_length=1, max_length=160, pattern=r"\S")]
+    version: Annotated[int, Field(ge=1)]
+
+
+class PlanStep(PlanModel):
+    id: PlanLocalId
+    description: PlanText
+    status: Literal["todo", "in_progress", "done", "blocked", "deferred"]
+    depends_on: list[PlanLocalId] = Field(default_factory=list, max_length=24)
+    linked_refs: list[PlanReference] = Field(default_factory=list, max_length=24)
+
+
+class RuntimePlan(PlanModel):
+    """Bounded optional continuation aid, with no task-completion authority."""
+
+    goal: Annotated[str, Field(min_length=1, max_length=4000, pattern=r"\S")]
+    completion_criteria: list[PlanText] = Field(min_length=1, max_length=24)
+    uncertainties: list[PlanText] = Field(default_factory=list, max_length=24)
+    status: Literal["active", "paused", "completed", "cancelled"]
+    steps: list[PlanStep] = Field(default_factory=list, max_length=24)
+    linked_refs: list[PlanReference] = Field(default_factory=list, max_length=64)
+    revision_reason: PlanText
+
+    @model_validator(mode="after")
+    def valid_step_graph(self):
+        steps = {step.id: step for step in self.steps}
+        if len(steps) != len(self.steps):
+            raise ValueError("Plan step IDs must be unique")
+        visiting, visited = set(), set()
+
+        def visit(step_id):
+            if step_id in visiting:
+                raise ValueError("Plan step dependencies must be acyclic")
+            if step_id in visited:
+                return
+            visiting.add(step_id)
+            for dependency in steps[step_id].depends_on:
+                if dependency not in steps:
+                    raise ValueError("Plan dependency names an unavailable local step")
+                visit(dependency)
+            visiting.remove(step_id)
+            visited.add(step_id)
+
+        for step_id in steps:
+            visit(step_id)
+        return self
+
+
+class SavePlanInput(PlanModel):
+    plan: RuntimePlan
+    expected_version: Annotated[int, Field(ge=0)] = 0
+
+
+class ReadPlanInput(PlanModel):
+    version: Annotated[int, Field(ge=1)] | None = None

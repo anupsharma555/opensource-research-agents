@@ -64,7 +64,7 @@ class RuntimeSkillTests(unittest.TestCase):
     def test_live_plan_role_names_and_shared_skill_identity(self) -> None:
         registry = load_registry(ROOT, CAPABILITIES)
         self.assertEqual([role["name"] for role in registry.roles.values()], ROLE_NAMES)
-        self.assertEqual(len(registry.skills), 3)
+        self.assertEqual(len(registry.skills), 4)
         a = registry.start_skill_attempt("evidence_preparation_synthesis", "evidence-linking", "A")
         b = registry.start_skill_attempt("independent_methods_reviewer_critic", "evidence-linking", "B")
         self.assertEqual((a.skill_id, a.skill_version, a.helper_sha256), (b.skill_id, b.skill_version, b.helper_sha256))

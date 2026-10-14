@@ -1,8 +1,8 @@
 {
-  "registry_version": "1.0.3",
+  "registry_version": "1.1.0",
   "roles": {
     "path": "roles/roles.json",
-    "sha256": "86b433b82d8dd5071d2ef16bdbebd7ac528b0880ea2f5178367fc1cc158f07a2"
+    "sha256": "e21c5a58105e3d36b0045ba22dc817de5882166f10de387bc1f2388152ead756"
   },
   "schema": "ora.runtime_skills.registry.v1",
   "skills": [
@@ -20,6 +20,11 @@
       "manifest": "runtime_skills/general_web_discovery/manifest.json",
       "optional": false,
       "skill_id": "general-web-discovery"
+    },
+    {
+      "manifest": "runtime_skills/task_planning/manifest.json",
+      "optional": true,
+      "skill_id": "task-planning"
     }
   ]
 }

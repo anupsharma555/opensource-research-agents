@@ -429,7 +429,8 @@ def test_role_catalog_lists_active_mandatory_skill_and_supported_tools(tmp_path,
         assert len(seen) == 1
         instructions = seen[0]["messages"][0]["content"]
         index = _index(instructions)
-        assert list(index["skills"]) == ["evidence-linking", "general-web-discovery"]
+        assert list(index["skills"]) == ["evidence-linking", "general-web-discovery", "task-planning"]
+        assert index["skills"]["task-planning"]["state"] == "available_to_activate"
         assert index["skills"]["general-web-discovery"]["state"] == "active"
         assert "# General web discovery" in instructions
         assert index["skills"]["evidence-linking"]["state"] == "active"

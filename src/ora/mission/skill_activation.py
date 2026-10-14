@@ -18,7 +18,10 @@ from ora.state import StateError
 LIFECYCLE_TOOLS = frozenset({"activate_skill", "release_skill", "release_capability"})
 # These are existing host-granted mission tools, not new grants from skill prose.
 # Appraisal uses notes to preserve preliminary assessments and disagreements.
-SKILL_TOOLS = {"study-appraisal": ("write_note", "read_note", "search_notes")}
+SKILL_TOOLS = {
+    "study-appraisal": ("write_note", "read_note", "search_notes"),
+    "task-planning": ("save_plan", "read_plan"),
+}
 
 CALLABILITY_GUIDANCE = (
     "CALL NOW: Call an attached local function directly; do not request it just to use it. "
@@ -42,7 +45,8 @@ def _pin(skill, optional: bool) -> dict:
         "version": skill.version,
         "manifest_sha256": content_hash(skill.manifest),
         "instructions_sha256": hashlib.sha256(instructions).hexdigest(),
-        "helper_sha256": skill.manifest["helper"]["sha256"],
+        "helper_sha256": (skill.manifest["helper"]["sha256"]
+                          if skill.helper is not None else None),
         "purpose": skill.manifest["purpose"],
         "optional": optional,
         "tool_ids": list(SKILL_TOOLS.get(skill.skill_id, ())),

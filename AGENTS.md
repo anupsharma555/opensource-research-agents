@@ -32,3 +32,21 @@ it owns supported toolchains and the shared local/CI/cloud commands. Read the
 
 The current project has no production mission host. Placeholder commands say they
 are unavailable; do not turn a sample UI or contract fixture into an uptime claim.
+
+## Optional runtime planning skill
+
+`task-planning` helps research peers frame complex goals, identify uncertainties
+and dependencies, choose next actions, revise from evidence or peer feedback,
+and recognize completion or a useful pause. Simple tasks can skip planning.
+Peers discover it through the normal capability catalog and `discover_capabilities`,
+then load it with `activate_skill`. Its deferred `save_plan` and `read_plan` tools
+provide exact versioned checkpoints; either tool can also be requested separately
+through `request_capability`. Plans guide choices without scheduling work or
+requiring a fixed pipeline.
+
+This file instructs repository developers; it is not the research model's prompt.
+`MissionService` must include a clearly labelled planning section in the actual
+serialized model instructions only when the pinned runtime exposes the skill and
+tools. Preserve the full catalog and deferred attachment. Test the serialized
+request and the absence of misleading guidance in older or legacy runtimes.
+See [planning design and proof limits](docs/development/stage4-planning.md).

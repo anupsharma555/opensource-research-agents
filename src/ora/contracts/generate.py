@@ -25,11 +25,13 @@ from .models import (
     Receipt,
     ResearchSnapshot,
     RetrievalEnvelope,
+    RuntimePlan,
     Subscription,
 )
 
 MODELS = {
     "research": ResearchSnapshot,
+    "runtime_plan": RuntimePlan,
     "command": Command,
     "query": Query,
     "event": Event,

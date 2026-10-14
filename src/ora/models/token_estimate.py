@@ -20,7 +20,8 @@ from ora.live.provider import MODEL
 
 LEGACY_BASIS = "ora.request_bytes_div4_times1_25.v1"
 TOKENIZER_BASIS_V1 = "ora.o200k_harmony_ordinary_canonical_json_plus128.v1"
-TOKENIZER_BASIS = "ora.o200k_harmony_ordinary_canonical_json.v2"
+TOKENIZER_BASIS_V2 = "ora.o200k_harmony_ordinary_canonical_json.v2"
+TOKENIZER_BASIS = "ora.o200k_harmony_ordinary_canonical_json.v3"
 ASSET_SHA256 = "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d"
 ASSET_PATH = Path(__file__).parent / "assets" / "o200k_base.tiktoken"
 _V1_JSON_ALLOWANCE = 128
@@ -51,7 +52,7 @@ def _legacy(raw: bytes, reason: str | None) -> TokenEstimate:
     )
 
 
-def _ordinary_request_shape(raw: bytes) -> str | None:
+def _ordinary_request_shape(raw: bytes, *, historical_output_cap: bool) -> str | None:
     try:
         body = json.loads(raw)
         encoded = json.dumps(
@@ -71,8 +72,16 @@ def _ordinary_request_shape(raw: bytes) -> str | None:
     if body["model"] != MODEL:
         return "selected_model_mismatch"
     if (body["reasoning_effort"] != "high" or body["include_reasoning"] is not True
-            or body["stream"] is not False or body["max_completion_tokens"] != 8192):
+            or body["stream"] is not False
+            or historical_output_cap and body["max_completion_tokens"] != 8192):
         return "unsupported_reasoning_or_stream"
+    # Output allowance does not change input serialization. Count the exact cap
+    # bytes within the adapter's existing bounds; v1/v2 retain their old gate.
+    if not historical_output_cap and (
+        type(body["max_completion_tokens"]) is not int
+        or not 1 <= body["max_completion_tokens"] <= 65536
+    ):
+        return "unsupported_completion_budget"
     if body["tool_choice"] != "auto" or body["parallel_tool_calls"] is not False:
         return "unsupported_tool_choice"
     tools = body["tools"]
@@ -207,14 +216,17 @@ def estimate_request_tokens(raw: bytes, *, basis: str = "auto") -> TokenEstimate
     if type(raw) is not bytes:
         raise TypeError("Exact request bytes are required")
     if type(basis) is not str or basis not in {
-        "auto", LEGACY_BASIS, TOKENIZER_BASIS_V1, TOKENIZER_BASIS,
+        "auto", LEGACY_BASIS, TOKENIZER_BASIS_V1, TOKENIZER_BASIS_V2, TOKENIZER_BASIS,
     }:
         raise ValueError("Unknown token estimate basis")
     if basis == LEGACY_BASIS:
         return _legacy(raw, None)
-    reason = _ordinary_request_shape(raw)
+    strict = basis != "auto"
+    reason = _ordinary_request_shape(
+        raw, historical_output_cap=basis in {TOKENIZER_BASIS_V1, TOKENIZER_BASIS_V2},
+    )
     if reason:
-        if basis in {TOKENIZER_BASIS_V1, TOKENIZER_BASIS}:
+        if strict:
             raise TokenEstimateUnavailable(reason)
         return _legacy(raw, reason)
     try:
@@ -223,11 +235,11 @@ def estimate_request_tokens(raw: bytes, *, basis: str = "auto") -> TokenEstimate
         if basis == TOKENIZER_BASIS_V1:
             tokens += _V1_JSON_ALLOWANCE
     except TokenEstimateUnavailable as exc:
-        if basis in {TOKENIZER_BASIS_V1, TOKENIZER_BASIS}:
+        if strict:
             raise
         return _legacy(raw, exc.reason)
     except (UnicodeError, ValueError, RuntimeError) as exc:
-        if basis in {TOKENIZER_BASIS_V1, TOKENIZER_BASIS}:
+        if strict:
             raise TokenEstimateUnavailable("tokenization_failed") from exc
         return _legacy(raw, "tokenization_failed")
     return TokenEstimate(tokens, TOKENIZER_BASIS if basis == "auto" else basis, ASSET_SHA256, None)
