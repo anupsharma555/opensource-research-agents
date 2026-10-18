@@ -27,6 +27,8 @@ jobs:
       - name: Install the committed dependency set
         run: scripts/dev setup
       - name: Verify offline contracts, skills, behavior and React
+        env:
+          PYTEST_ADDOPTS: "-x --tb=short"
         run: scripts/dev check
       - name: Exercise the portable repository skill helper
         run: .venv/bin/python .agents/skills/os-check-foundation/scripts/check.py --mode smoke
