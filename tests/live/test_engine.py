@@ -321,6 +321,33 @@ def test_saved_run_dates_and_roster_do_not_change_when_viewer_refreshes(tmp_path
         host.close()
 
 
+def test_legacy_host_persists_provider_cache_observation(tmp_path):
+    class CacheProvider(FakeProvider):
+        @staticmethod
+        def _response(content=None, tool_calls=None, finish_reason="stop"):
+            result = FakeProvider._response(content, tool_calls, finish_reason)
+            result["usage"]["prompt_tokens_details"] = {"cached_tokens": 20}
+            result["cache_observation"] = {"status": "reported_hit", "cached_tokens": 20}
+            return result
+
+    host = ResearchHost(ROOT, tmp_path, CacheProvider())
+    receipt = host.start(LiveStartRequest(
+        request_id="request-cache-observation",
+        question="What does this text say?",
+        evidence_text="A synthetic passage with a measured result.",
+        agent_ids=["agent-synthesis"],
+    ))
+    _, status = wait_done(host, receipt.run_id)
+    assert status == "completed"
+    calls = host.calls(receipt.run_id)
+    assert calls
+    assert all(call["response"]["cache_observation"] ==
+               {"status": "reported_hit", "cached_tokens": 20} for call in calls)
+    assert all(call["response"]["usage"]["prompt_tokens_details"] ==
+               {"cached_tokens": 20} for call in calls)
+    host.close()
+
+
 def test_start_peer_followup_and_restart(tmp_path):
     provider = FakeProvider()
     host = ResearchHost(ROOT, tmp_path, provider)

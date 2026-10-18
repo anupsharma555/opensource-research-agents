@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One explicitly chosen round; this is not a lifetime research budget.",
+  "properties": {
+    "informationNeed": {
+      "description": "Brief information need, not private reasoning.",
+      "maxLength": 1000,
+      "minLength": 1,
+      "title": "Informationneed",
+      "type": "string"
+    },
+    "limit": {
+      "default": 10,
+      "maximum": 10,
+      "minimum": 1,
+      "title": "Limit",
+      "type": "integer"
+    },
+    "mode": {
+      "description": "Quick web lookup: one targeted information gap. Research web search: complementary questions, comparison or counterevidence.",
+      "enum": [
+        "quick",
+        "research"
+      ],
+      "title": "Mode",
+      "type": "string"
+    },
+    "provider": {
+      "default": "exa",
+      "description": "Optional agent selection for an identified research gap. Default Exa; quick uses the configured fallback.",
+      "enum": [
+        "exa",
+        "tavily",
+        "searxng"
+      ],
+      "title": "Provider",
+      "type": "string"
+    },
+    "queries": {
+      "items": {
+        "maxLength": 1000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 10,
+      "minItems": 1,
+      "title": "Queries",
+      "type": "array"
+    },
+    "refresh": {
+      "default": false,
+      "description": "Reuse an identical saved search in this peer task by default. Set true to intentionally start fresh retrieval; different queries or options remain separate searches.",
+      "title": "Refresh",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "mode",
+    "informationNeed",
+    "queries"
+  ],
+  "title": "SearchWebInput",
+  "type": "object"
+}

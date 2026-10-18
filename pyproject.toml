@@ -8,10 +8,16 @@ version = "0.1.0"
 description = "Persistent healthcare research agents for literature discovery, evidence synthesis, and peer review in a shared visual workspace."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-dependencies = ["pydantic==2.13.5", "tiktoken==0.11.0"]
+dependencies = ["pydantic==2.13.5", "tiktoken==0.11.0", "pillow==12.3.0"]
 
 [project.scripts]
 ora = "ora.cli:main"
+
+[project.optional-dependencies]
+observability = [
+    "opentelemetry-sdk==1.45.1",
+    "opentelemetry-exporter-otlp-proto-http==1.45.1",
+]
 
 [dependency-groups]
 dev = ["pytest==8.4.2", "ruff==0.14.0"]

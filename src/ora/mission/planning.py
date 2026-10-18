@@ -11,7 +11,13 @@ from __future__ import annotations
 import hashlib
 import json
 
-from ora.contracts.models import ReadPlanInput, RuntimePlan, SavePlanInput
+from ora.contracts.models import (
+    LegacySavePlanInput,
+    ModifyPlanInput,
+    ReadPlanInput,
+    RuntimePlan,
+    SavePlanInput,
+)
 from ora.coordination.board import ref, require_actor, require_ref
 from ora.state import StateConflict, StateError, StateStore, Transaction
 from ora.state.store import canonical
@@ -202,19 +208,59 @@ class RuntimePlans:
     def _progress_alias(note_id: str, token: str) -> str:
         return hashlib.sha256(canonical([note_id, token]).encode()).hexdigest()
 
-    def save(
+    def save(self, operation_id: str, **arguments) -> dict:
+        """Preserve the historical full-revision contract for saved v1 calls."""
+        return self._write(operation_id, **arguments)
+
+    def create(self, operation_id: str, **arguments) -> dict:
+        """Create only; a different operation cannot overwrite an existing plan."""
+        SavePlanInput.model_validate({
+            "plan": arguments["plan"], "expected_version": arguments.get("expected_version", 0),
+        })
+        return self._write(operation_id, create_only=True, **arguments)
+
+    def modify(self, operation_id: str, *, changes: dict, expected_version: int,
+               revision_reason: str, **scope) -> dict:
+        modification = ModifyPlanInput.model_validate({
+            "changes": changes, "expected_version": expected_version,
+            "revision_reason": revision_reason,
+        })
+        return self._write(operation_id, plan=None, expected_version=expected_version,
+                           modification=modification, **scope)
+
+    @staticmethod
+    def _modified_document(previous: dict, modification: ModifyPlanInput) -> dict:
+        document = json.loads(previous["body"]["text"])
+        changes = modification.changes.model_dump(mode="json", exclude_unset=True)
+        steps = {step["id"]: step for step in document["steps"]}
+        for step_id in changes.pop("remove_step_ids", []):
+            if step_id not in steps:
+                raise PlanningError("Cannot remove an unknown plan step")
+            del steps[step_id]
+        for patch in changes.pop("update_steps", []):
+            step_id = patch["id"]
+            if step_id not in steps:
+                raise PlanningError("Cannot update an unknown plan step")
+            steps[step_id].update(patch)
+        for step in changes.pop("add_steps", []):
+            if step["id"] in steps:
+                raise PlanningError("Cannot add an existing plan step")
+            steps[step["id"]] = step
+        document.update(changes)
+        document["steps"] = list(steps.values())
+        document["revision_reason"] = modification.revision_reason
+        return RuntimePlan.model_validate(document).model_dump(mode="json")
+
+    def _write(
         self, operation_id: str, *, mission_id: str, actor_id: str,
         task_ref: dict, run_ref: dict, control_ref: dict,
-        plan: dict | RuntimePlan, expected_version: int = 0,
-        input_refs: list[dict] | None = None,
+        plan: dict | RuntimePlan | None, expected_version: int = 0,
+        input_refs: list[dict] | None = None, create_only: bool = False,
+        modification: ModifyPlanInput | None = None,
     ) -> dict:
-        validated = SavePlanInput.model_validate({
+        document = (LegacySavePlanInput.model_validate({
             "plan": plan, "expected_version": expected_version,
-        })
-        document = validated.plan.model_dump(mode="json")
-        text = canonical(document)
-        if len(text.encode()) > MAX_PLAN_BYTES:
-            raise PlanningError("Plan exceeds the 64000-byte working-memory payload bound")
+        }).plan.model_dump(mode="json") if modification is None else None)
         for pointer, kind in ((run_ref, "mission_run"), (control_ref, "mission_task_control")):
             if (type(pointer) is not dict or set(pointer) != {"kind", "id", "version"}
                     or pointer.get("kind") != kind or type(pointer.get("id")) is not str
@@ -240,6 +286,12 @@ class RuntimePlans:
             "expected_version": expected_version, "input_refs": input_refs or [],
         }
 
+        if create_only:
+            request["planning_operation"] = "create"
+        if modification is not None:
+            request.pop("plan")
+            request["modification"] = modification.model_dump(mode="json", exclude_unset=True)
+
         def accept(tx: Transaction) -> dict:
             selected_task = require_ref(tx, mission_id, task_ref)
             if selected_task["kind"] != "board_proposal":
@@ -254,22 +306,42 @@ class RuntimePlans:
                 raise PlanningError("Task or run is closed; no new planning mutation is allowed")
             note_id = planning_note_id(mission_id, actor_id, task["id"])
             previous = tx.get("working_note", note_id)
+            if create_only and previous is not None:
+                raise PlanningError("Plan already exists; use modify_plan with its current revision")
+            if modification is not None and previous is None:
+                raise PlanningError("Plan is absent; use save_plan to create it first")
             if (previous["version"] if previous else 0) != expected_version:
                 raise StateConflict("Saved plan version changed; read_plan before revising")
             if previous and previous["body"].get("planning", {}).get("run_id") != run["id"]:
                 raise PlanningError("Saved plan belongs to another run")
-            links = _plan_links(document)
+            retained_inputs = []
+            candidate = document
+            if modification is not None:
+                from .context import WorkingContext
+
+                # Resolve the previous plan's entire source ancestry in this
+                # same transaction before preserving any of its prose.
+                access = WorkingContext(tx).working_note_text_access(previous)
+                if access["status"] != "available":
+                    raise PlanningError("Plan text is unavailable under current source-use permissions")
+                retained_inputs = previous["body"]["input_refs"]
+                candidate = self._modified_document(previous, modification)
+            text = canonical(candidate)
+            if len(text.encode()) > MAX_PLAN_BYTES:
+                raise PlanningError("Plan exceeds the 64000-byte working-memory payload bound")
+            links = _plan_links(candidate)
             # Structural links are checked without exposing their text. Source
             # links also use the existing checked task-source note path below.
             for pointer in links:
                 if pointer["kind"] not in SOURCE_KINDS:
                     require_ref(tx, mission_id, pointer)
             sources = _unique_refs([
-                *(input_refs or []), *(p for p in links if p["kind"] in SOURCE_KINDS),
+                *(input_refs or []), *retained_inputs,
+                *(p for p in links if p["kind"] in SOURCE_KINDS),
             ])
             # Revision prose alone is not a substantive new plan. Its original
             # receipt remains exact, including its original source dependencies.
-            substantive = {k: v for k, v in document.items() if k != "revision_reason"}
+            substantive = {k: v for k, v in candidate.items() if k != "revision_reason"}
             content_hash = hashlib.sha256(canonical(substantive).encode()).hexdigest()
             prior_metadata = previous["body"].get("planning", {}) if previous else {}
             if prior_metadata.get("content_hash") == content_hash:
@@ -311,7 +383,7 @@ class RuntimePlans:
             tx.emit(mission_id, "runtime_plan_saved", {
                 "plan_ref": pointer, "prior_ref": ref(previous) if previous else None,
                 "actor_id": actor_id, "task_id": task["id"],
-                "plan_status": document["status"], "writes_without_progress": writes + 1,
+                "plan_status": candidate["status"], "writes_without_progress": writes + 1,
                 "subjects": [{"kind": "task", "id": task["id"]}],
             })
             return {

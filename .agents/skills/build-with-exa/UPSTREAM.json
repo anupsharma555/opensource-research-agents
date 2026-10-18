@@ -1,0 +1,31 @@
+{
+  "repository": "https://github.com/exa-labs/agent-skills",
+  "revision": "5c3fd25c258a34cfaad196fecb1b135a2dc7fa87",
+  "path": "skills/build-with-exa",
+  "version": "0.3.0",
+  "license": "MIT",
+  "reviewed_on": "2026-10-15",
+  "upstream_files_sha256": {
+    "SKILL.md": "fc5bacd84f1d14234525c211ee070f481174389288d53353fc7e037de3d47969",
+    "references/agent.md": "1c401bd1a941d57050015143e7cdb70f85d4bb7dff63739350ddcee05b3829f5",
+    "references/search.md": "150606d9b144863ea8b780fa06bc0f491a29b783f5869451901af50e4f553a7a",
+    "references/openai-compat.md": "844e2e19e69546e49a87cbf3cbeba8671e942dffd405568bff6f0e8037820250",
+    "references/migrate-websets-to-agent.md": "e56a0e1f5f27dc992516371d10bf77f9d2d333e767eba5d8d22dc798416f7daf",
+    "references/models-and-modes.md": "edbf797b6338d1a62d40617d341fe6dac4cd65a399ce710223bfbdc3c3a6edba",
+    "references/snapshot.md": "51482cfdd908a63d58001daf72aaf33e09d8bf4b17f6afcead11875facc8bf63",
+    "references/monitors.md": "8a1ee6eb854ff61b03e487627bdb14fe817ecb50e34765a30d3423169c017b81",
+    "references/common-mistakes.md": "7fabdb7cc4d2ee8ef90ddc96577c75b2d908eec417afdec08f6aaf2556bdfb56",
+    "references/answer.md": "16f342a9387df99cbc0043c8bcad6a4ec88b877989195736b8431d29b6c4a342",
+    "references/sdks.md": "826216129dd2d8d20510008e9cd5ac375770d54cd86b03b3a33650cd054c7b58",
+    "references/contents.md": "e440606663bc2751941feed774a407c6cc2d545c4f2040a909b1acf95f9b8e16",
+    "references/http-requests.md": "11a0300f3b6a9073dabcb91e118432916d9de74c760082bcca72c1b7e806ab6f",
+    "references/prompting-and-patterns.md": "33269016f9fc626023cd3ba5cbf031956d402f2c9ceea382c793b1408eb6310d"
+  },
+  "local_additions": [
+    "OSRA integration link in SKILL.md",
+    "references/osra.md",
+    "agents/openai.yaml",
+    "LICENSE copied from upstream root",
+    "UPSTREAM.json"
+  ]
+}

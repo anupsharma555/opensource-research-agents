@@ -7,7 +7,6 @@ import json
 import pytest
 
 from ora.coordination.board import ref
-from ora.mission.context import ContextOverflow
 from ora.mission.source_context import plan_source_turn, save_working_sources
 from tests.mission.test_selected_window_admission import (
     _ready_selected_window,
@@ -51,9 +50,9 @@ def test_latest_requested_window_is_in_next_request_with_other_copy_recoverable(
         control = host._control(run.run_id, actor)
         proposal = host.store.get("board_proposal", control["body"]["task_id"])
         target = None
-        # Planning instructions add fixed overhead; allow room around the
+        # The full planning/search catalog adds fixed overhead; allow room around the
         # one-copy boundary for generated record IDs and timestamps to vary.
-        for allowance in range(5300, 6801, 100):
+        for allowance in range(5300, 9001, 100):
             all_sources = plan_source_turn(
                 host.store, ref(control), source_input_allowance_tokens=allowance
             )
@@ -98,7 +97,7 @@ def test_latest_requested_window_is_in_next_request_with_other_copy_recoverable(
         expected_tools = {
             "activate_skill", "board_read", "discover_capabilities", "peer_request",
             "publish_result", "read_context_page", "read_context_record",
-            "read_source_window", "release_skill", "request_capability",
+            "read_source_window", "search_saved_passages", "release_skill", "request_capability",
             "review_peer_answer", "search_scholarly",
         }
         assert len(request["tools"]) == len(expected_tools)
@@ -205,9 +204,9 @@ def test_realistic_completion_reservation_delivers_requested_window(
         host.close()
 
 
-@pytest.mark.parametrize("completion_tokens,expect_overflow", [(1210, False), (3500, True)])
-def test_larger_completion_keeps_unfittable_read_as_local_diagnostic(
-    tmp_path, monkeypatch, completion_tokens, expect_overflow,
+@pytest.mark.parametrize("completion_tokens", [1210, 4500])
+def test_larger_completion_retains_selected_read_for_provider_feedback(
+    tmp_path, monkeypatch, completion_tokens,
 ):
     host, run, actor, early, late, window, _response = _two_copy_read(
         tmp_path, monkeypatch, window_chars=1000,
@@ -218,56 +217,71 @@ def test_larger_completion_keeps_unfittable_read_as_local_diagnostic(
         host._update_control(control, input_budget={
             "observed_limit_tokens": 8000, "target_fraction": .70,
         })
-        intents_before = len(host.store.records("model_request_intent"))
         dispatches_before = len(host.store.records("model_dispatch_attempt"))
-        if not expect_overflow:
-            assert host._schedule_model(host._control(run.run_id, actor))
-            prepared = host._control(run.run_id, actor)
-            call = host.store.get(**prepared["body"]["call_ref"])
-            budget = host.store.get("mission_call_budget", call["id"])["body"]
-            intent = host.store.get(
-                "model_request_intent", f"model-intent:{call['id']}:{call['version']}"
-            )
-            request = json.loads(host.store.read_blob(intent["body"]["blob"]["sha256"]))
-            assert budget["source_turn_mode"] in {
-                "all_allowed_sources_fit", "requested_window_recovery",
-            }
-            assert budget["prior_completion_reservation"] == completion_tokens
-            assert budget["observed_account_limit"] == 8000
-            assert budget["exact_complete_request_estimate_tokens"] + completion_tokens <= 8000
-            # Descriptions change fixed overhead, not the reading contract:
-            # deliver the selected window and keep the other copy recoverable.
-            packets = [packet for message in request["messages"] if message["role"] == "user"
-                       for packet in json.loads(message["content"]).get("source_packets", [])]
-            selected_text = host.store.get(**window["passage_refs"][0])["body"]["text"]
-            assert any(selected_text in packet["text"] for packet in packets)
-            assert early in intent["body"]["source_refs"]
-            assert budget["retained_source_refs"] == prepared["body"]["source_refs"] == [early, late]
-            if late not in intent["body"]["source_refs"]:
-                omitted = [pointer for message in request["messages"] if message["role"] == "user"
-                           for pointer in json.loads(message["content"]).get("omitted_source_refs", [])]
-                assert late in omitted
-                assert "read_source_window" in call["body"]["exposed_tools"]
-                assert host._source_policy_decisions([late]) == ([late], [])
-            assert host.store.get(**window["window_ref"])["body"]["copy_ref"] == early
-            assert "SELECTED_MARKER" in json.dumps(request)
-            assert len(host.store.records("model_dispatch_attempt")) == dispatches_before
-            return
-        with pytest.raises(ContextOverflow, match="Required source inventory"):
-            host._schedule_model(host._control(run.run_id, actor))
-        assert len(host.store.records("model_request_intent")) == intents_before
+        assert host._schedule_model(host._control(run.run_id, actor))
+        prepared = host._control(run.run_id, actor)
+        call = host.store.get(**prepared["body"]["call_ref"])
+        budget = host.store.get("mission_call_budget", call["id"])["body"]
+        intent = host.store.get(
+            "model_request_intent", f"model-intent:{call['id']}:{call['version']}"
+        )
+        request = json.loads(host.store.read_blob(intent["body"]["blob"]["sha256"]))
+        assert budget["source_turn_mode"] in {
+            "all_allowed_sources_fit", "requested_window_recovery",
+        }
+        assert budget["prior_completion_reservation"] == completion_tokens
+        assert budget["observed_account_limit"] == 8000
+        demand = budget["exact_complete_request_estimate_tokens"] + completion_tokens
+        if completion_tokens == 4500:
+            assert demand > 8000
+            assert budget["rate_admission_policy"] == "provider_feedback_probe"
+            assert request["max_completion_tokens"] == 8192
+            assert budget["exact_complete_request_estimate_tokens"] + 8192 <= budget["model_context_limit"]
+        else:
+            assert demand <= 8000
+        # Descriptions change fixed overhead, not the reading contract:
+        # deliver the selected window and keep the other copy recoverable.
+        packets = [packet for message in request["messages"] if message["role"] == "user"
+                   for packet in json.loads(message["content"]).get("source_packets", [])]
+        selected_text = host.store.get(**window["passage_refs"][0])["body"]["text"]
+        assert any(selected_text in packet["text"] for packet in packets)
+        assert early in intent["body"]["source_refs"]
+        assert budget["retained_source_refs"] == prepared["body"]["source_refs"] == [early, late]
+        if late not in intent["body"]["source_refs"]:
+            omitted = [pointer for message in request["messages"] if message["role"] == "user"
+                       for pointer in json.loads(message["content"]).get("omitted_source_refs", [])]
+            assert late in omitted
+            assert "read_source_window" in call["body"]["exposed_tools"]
+            assert host._source_policy_decisions([late]) == ([late], [])
+        assert host.store.get(**window["window_ref"])["body"]["copy_ref"] == early
+        assert "SELECTED_MARKER" in json.dumps(request)
         assert len(host.store.records("model_dispatch_attempt")) == dispatches_before
-        assert host._control(run.run_id, actor)["body"]["source_refs"] == [early, late]
-        assert host.store.get(**window["window_ref"])
-        diagnostic = [item for item in host.store.records("mission_host_diagnostic")
-                      if item["body"].get("run_id") == run.run_id]
-        assert len(diagnostic) == 1
-        assert diagnostic[0]["body"]["reason"] == "required_context_not_admitted"
-        failed_attempt = host.store.get(**diagnostic[0]["body"]["attempt_ref"])
-        assert failed_attempt["body"]["status"] == "failed"
-        blocked_budget = host.store.get(**diagnostic[0]["body"]["budget_ref"])["body"]
-        assert blocked_budget["prior_completion_reservation"] == completion_tokens
-        assert blocked_budget["observed_account_limit"] == 8000
+    finally:
+        host.close()
+
+
+def test_rate_forecast_probe_preserves_explicit_source_free_recovery(tmp_path, monkeypatch):
+    host, run, actor, early, late, _window, _response = _two_copy_read(
+        tmp_path, monkeypatch, completion_tokens=8000, crowded=False,
+    )
+    try:
+        control = host._control(run.run_id, actor)
+        host._update_control(control, input_budget={
+            "observed_limit_tokens": 8000, "target_fraction": .70,
+        })
+        assert host._schedule_model(host._control(run.run_id, actor), force_soft_recovery=True)
+        prepared = host._control(run.run_id, actor)
+        call = host.store.get(**prepared["body"]["call_ref"])
+        budget = host.store.get("mission_call_budget", call["id"])["body"]
+        intent = host.store.get("model_request_intent", f"model-intent:{call['id']}:1")
+        request = json.loads(host.store.read_blob(intent["body"]["blob"]["sha256"]))
+        assert budget["rate_admission_policy"] == "provider_feedback_probe"
+        assert budget["source_turn_mode"] == "source_free_recovery"
+        assert intent["body"]["source_refs"] == []
+        assert prepared["body"]["source_refs"] == [early, late]
+        assert "SELECTED_MARKER" not in json.dumps(request)
+        assert "SECOND_COPY_MARKER" not in json.dumps(request)
+        assert host.store.records("model_dispatch_attempt") == []
     finally:
         host.close()
 

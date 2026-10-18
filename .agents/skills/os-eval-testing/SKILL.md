@@ -2,7 +2,7 @@
 name: os-eval-testing
 description: Design and progressively execute realistic research-agent evaluations in OpenSource Research Agents, using natural-language tasks across selected context, evidence, tool, recovery and collaboration conditions. Use to create or compare eval cases, select the next useful test, or diagnose an evaluation; not for routine unit checks alone or claiming scientific validity from a harness pass.
 metadata:
-  version: 0.1.1
+  version: 0.1.4
 ---
 
 # Progressive research-agent evaluations
@@ -36,6 +36,20 @@ execution. Read only the matching subsystem documentation and tests from
 `docs/development/modules.md`. Reuse the existing runtime rather than inventing
 an eval-only agent path. Consult [case design](references/case-design.md) when
 creating a task, comparison or withheld rubric; it includes adaptable examples.
+
+## Explain the test to the user
+
+Before executing a case, give a short plain-language brief: the task and supplied
+material; any later update or condition; the specific behavior or uncertainty
+being tested; what observable outcome would support it; and the call/token ceiling.
+Name the exact behavior, its trigger, and the saved evidence that would establish
+it. For a small set of checks, use a compact Behavior / Evidence table. Explain
+why the task gives that capability a useful job. Distinguish task success
+from exercising the target capability, and state the main proof limit. Adapt this
+to the case rather than reciting a fixed checklist. Put this explanation in chat
+for the user; keep withheld review criteria and future events out of worker input. A single
+capability-use case can establish observed use and task quality; claims that the
+capability improves quality or efficiency require an appropriate comparison.
 
 ## Design the task and conditions
 
@@ -82,6 +96,13 @@ a green result. Revise an uninformative case without leaking its answer.
    before spending on another case. Diagnose the failing layer and prefer offline
    fixes/replay. Expand only to answer a named unresolved question within the
    remaining authorization. A batch ceiling ends the test, not the research scope.
+   Expected minute-capacity waits are normal scheduling: preserve the pending
+   request and let the runtime wait until its saved reset/wake time, then recheck
+   capacity and the remaining batch allowance. Do not fail or repeat a test merely
+   because the current minute is nearly full. Read the
+   [token counter and wait procedure](references/runtime-and-receipts.md#token-counter-and-minute-waits)
+   before changing a runner; distinguish a replenishable shortage, an uncertain
+   over-limit forecast, and an actual provider size rejection.
 5. Distinguish an agent failure from a harness defect, invalid comparison,
    capability not exercised, external quota limit, or inconclusive observation.
    Do not penalize useful alternative behavior solely for differing from a script.

@@ -1,5 +1,9 @@
 # Stage 4 source intake and extraction
 
+For public PDF/XML/plain-text intake, selected-page OCR and optional Groq figure
+interpretation, read [document readers](document-readers.md). That guide owns
+their tool choices, dependencies, source-use checks and separate proof limits.
+
 `ora.evidence.intake.IntakeService` inspects actual source bytes before a caller
 uses them as evidence. The caller supplies an exact publication reference and
 an explicit source-use basis. A discovery hit can supply provenance through

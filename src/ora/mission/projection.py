@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from ora.contracts.models import ResearchSnapshot
 from ora.coordination.board import ref
-from ora.evidence.intake import extract_blocks
+from ora.evidence.intake import extract_copy_blocks
 from ora.state import StateConflict, StateStore
 from ora.state.inspection import load_snapshot, save_snapshot
 from ora.state.store import StateError, canonical
@@ -400,11 +400,7 @@ def _source(store: StateStore, pointer: dict, window_refs: list[dict]) -> tuple[
         digest = hashlib.sha256(content).hexdigest()
         if digest != body.get("content_sha256"):
             raise StateError("Saved source window differs from its source-copy hash")
-        blocks, parser = extract_blocks(
-            content,
-            body["mime_type"],
-            allow_partial_xml=(body.get("mapping_version") or "").endswith("partial_xml=True"),
-        )
+        blocks, parser = extract_copy_blocks(content, body)
         by_locator: dict[str, list[str]] = {}
         for block in blocks:
             by_locator.setdefault(block.locator, []).append(block.text)

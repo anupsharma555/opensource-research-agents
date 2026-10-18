@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "limit": {
+      "default": 10,
+      "description": "Maximum figure candidates returned in one tool result.",
+      "maximum": 20,
+      "minimum": 1,
+      "title": "Limit",
+      "type": "integer"
+    },
+    "offset": {
+      "default": 0,
+      "description": "Zero-based offset in saved figure candidates.",
+      "minimum": 0,
+      "title": "Offset",
+      "type": "integer"
+    },
+    "sourceId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Sourceid",
+      "type": "string"
+    },
+    "sourceVersion": {
+      "minimum": 1,
+      "title": "Sourceversion",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "sourceId",
+    "sourceVersion"
+  ],
+  "title": "ListSourceAssetsInput",
+  "type": "object"
+}

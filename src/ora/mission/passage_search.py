@@ -11,7 +11,7 @@ import re
 from collections import deque
 
 from ora.coordination.board import ref
-from ora.evidence.intake import extract_blocks
+from ora.evidence.intake import MAX_COPY_BYTES, extract_copy_blocks
 from ora.state import StateConflict, StateError
 from ora.state.store import canonical
 
@@ -29,6 +29,12 @@ _RANK_WINDOW_CHARS = 320
 
 class SavedPassageSearchError(StateError):
     """A saved-source search request or continuation is no longer valid."""
+
+
+def _copy_byte_limit(copy: dict) -> int:
+    """PDFs use the reader's retained-byte limit; other text keeps its smaller guard."""
+    mime = copy["body"].get("mime_type", "").split(";", 1)[0].lower().strip()
+    return MAX_COPY_BYTES if mime == "application/pdf" else _MAX_COPY_BYTES
 
 
 def _best_match(text: str, terms: set[str]) -> tuple[int, int, int] | None:
@@ -81,9 +87,45 @@ def _permitted_copy(context: WorkingContext, pointer: dict) -> tuple[dict, dict]
     quality = store.get(**quality_ref) if isinstance(quality_ref, dict) else None
     if (quality is None or quality["kind"] != "intake_quality"
             or quality["body"].get("classification")
-            not in {"abstract", "passage", "partial", "full_text"}):
+            not in {"abstract", "passage", "partial", "full_text", "web_document"}):
         return None
     return copy, use
+
+
+def task_text_tool_availability(
+    context: WorkingContext, control: dict,
+) -> tuple[bool, bool]:
+    """Use saved task permission/quality metadata to decide tool attachment.
+
+    Search's byte bound is stricter than reading one window. Neither decision
+    parses the retained document; both tools recheck exact use when called.
+    """
+    task_refs = control.get("body", {}).get("source_refs", [])
+    if not isinstance(task_refs, list):
+        return False, False
+    readable = searchable = False
+    for pointer in task_refs:
+        if not isinstance(pointer, dict):
+            continue
+        try:
+            eligible = _permitted_copy(context, pointer)
+        except SavedPassageSearchError:
+            continue
+        if eligible is None:
+            continue
+        copy, use = eligible
+        blob = copy["body"].get("blob")
+        size = blob.get("size") if isinstance(blob, dict) else None
+        quality = context.store.get(**use["body"]["quality_ref"])
+        length = quality["body"].get("inspected_text_length") if quality else None
+        if (type(size) is not int or size <= 0 or type(length) is not int
+                or length <= 0):
+            continue
+        readable = True
+        searchable |= size <= _copy_byte_limit(copy) and length <= _MAX_TOTAL_BYTES
+        if readable and searchable:
+            break
+    return readable, searchable
 
 
 def search_saved_passages(
@@ -139,13 +181,17 @@ def search_saved_passages(
     searched = []
     omitted = []
     scanned_bytes = 0
+    ordinary_scanned_bytes = 0
+    scanned_text_bytes = 0
     for pointer, copy, use in authorized:
         blob = copy["body"].get("blob")
         size = blob.get("size") if isinstance(blob, dict) else None
-        if not isinstance(size, int) or size < 0:
+        if type(size) is not int or size < 0:
             omitted.append({"copy_ref": pointer, "reason": "retained_bytes_unavailable"})
             continue
-        if size > _MAX_COPY_BYTES or scanned_bytes + size > _MAX_TOTAL_BYTES:
+        is_pdf = _copy_byte_limit(copy) == MAX_COPY_BYTES
+        if (size > _copy_byte_limit(copy) or scanned_bytes + size > MAX_COPY_BYTES
+                or not is_pdf and ordinary_scanned_bytes + size > _MAX_TOTAL_BYTES):
             omitted.append({"copy_ref": pointer, "reason": "search_byte_budget"})
             continue
         content = store.read_blob(blob["sha256"])
@@ -156,14 +202,15 @@ def search_saved_passages(
                 or digest != use["body"].get("source_sha256")
                 or digest != quality["body"].get("source_sha256")):
             raise SavedPassageSearchError("Retained source and checked-use hashes disagree")
-        blocks, parser = extract_blocks(
-            content,
-            copy["body"]["mime_type"],
-            allow_partial_xml=(copy["body"].get("mapping_version") or "").endswith(
-                "partial_xml=True"
-            ),
-        )
+        blocks, parser = extract_copy_blocks(content, copy["body"])
+        text_bytes = sum(len(block.text.encode("utf-8")) for block in blocks)
+        if scanned_text_bytes + text_bytes > _MAX_TOTAL_BYTES:
+            omitted.append({"copy_ref": pointer, "reason": "search_byte_budget"})
+            continue
         scanned_bytes += size
+        scanned_text_bytes += text_bytes
+        if not is_pdf:
+            ordinary_scanned_bytes += size
         searched.append({
             "copy_ref": pointer, "source_use_ref": ref(use),
             "content_sha256": digest, "parser": parser,
@@ -192,7 +239,7 @@ def search_saved_passages(
                     "tool": "read_source_window", "source_id": pointer["id"],
                     "source_version": pointer["version"], "block_offset": index,
                     "char_offset": start, "char_limit": 1200,
-                    "selection_mode": "replace",
+                    "selection_mode": "append",
                 },
             })
     hits.sort(key=lambda item: (

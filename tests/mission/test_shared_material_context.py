@@ -616,6 +616,9 @@ def test_attached_tool_notice_matches_local_and_native_manifests(tmp_path, monke
                 assert "inspect_hit" not in notices[0]["request_first_local_functions"]
                 assert notices[0]["not_ready_local_functions"] == {
                     "inspect_hit": "Get an eligible saved search result first.",
+                    "modify_plan": "Create a plan with save_plan before modifying it.",
+                    "inspect_figure": "Vision is not authorized for this run. Use local text/OCR; "
+                    "a new run can explicitly set allowVision=true.",
                 }
                 assert not ({"claim_work", "subscribe"} & set(
                     notices[0]["request_first_local_functions"]

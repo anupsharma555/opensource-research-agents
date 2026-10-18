@@ -160,6 +160,20 @@
           "default": null,
           "title": "Contentunretainedreason"
         },
+        "discoveryExcerpt": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Bounded search-provider teaser for discovery only; not an inspected passage or a source-use grant.",
+          "title": "Discoveryexcerpt"
+        },
         "itemId": {
           "minLength": 1,
           "title": "Itemid",

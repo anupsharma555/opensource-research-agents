@@ -1,0 +1,45 @@
+{
+  "$defs": {
+    "SourceAssetRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "source_asset",
+          "title": "Kind",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "version"
+      ],
+      "title": "SourceAssetRef",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "assetRef": {
+      "$ref": "#/$defs/SourceAssetRef",
+      "description": "Exact figure asset returned by list_source_assets; no arbitrary URL is accepted."
+    }
+  },
+  "required": [
+    "assetRef"
+  ],
+  "title": "FetchSourceAssetInput",
+  "type": "object"
+}

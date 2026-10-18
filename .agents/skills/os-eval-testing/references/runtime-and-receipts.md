@@ -87,9 +87,75 @@ Exercise this path through the runner entrypoint, including captured-response
 settlement and exact profile restoration.
 
 Stop to inspect unexpected failures, unauthorized effects, missing capture or
-provider quota pressure. A deliberate denied-source condition is expected, not
-automatically a failure. If a natural agent chooses a valid alternate action,
-judge the task outcome rather than treating script deviation as a defect.
+unclassified provider quota pressure. Expected minute waits follow the procedure
+below. A deliberate denied-source condition is expected, not automatically a
+failure. If a natural agent chooses a valid alternate action, judge the task
+outcome rather than treating script deviation as a defect.
+
+## Token counter and minute waits
+
+Use the runtime's existing tokenizer and durable capacity ledger, not a second
+in-memory counter in the evaluation script. `estimate_request_tokens` in
+`src/ora/models/token_estimate.py` estimates the complete serialized request,
+including instructions, tools and history. `MissionService._prepare_model`
+adds its next-completion prediction before submitting work. `CapacityScheduler`
+in `src/ora/coordination/capacity.py` owns shared reservations, rolling-window
+charges, provider reset observations and atomic dispatch admission.
+
+1. Compare the next request's estimated demand with both the full window limit
+   and currently available capacity. Count recent settled usage plus outstanding
+   reservations across the selected shared quota domain. Tokenizer estimates are
+   not exact provider counts; replace settled reservations with reported usage.
+   Preserve unknown-use holds. Do not count a settled request's estimate and
+   actual usage twice, or assume separate keys have independent quotas.
+2. If the request fits a fresh window but not the current remainder, keep it
+   pending with a saved `wake_at`. Use the scheduler's earliest admissible time,
+   respecting applicable `retry-after`, token reset and local charge-expiry times.
+   Do not assume a reset at the next wall-clock minute or dispatch immediately
+   after an unconditional 60-second sleep. Recheck all relevant limits on wake;
+   concurrent work may have consumed the available capacity.
+3. Let the existing host/driver continue scheduling while the evaluation observes
+   it. Waiting and local status polling make no model calls. Preserve request
+   identity and context; revalidate permissions before eventual dispatch. Save
+   the wait reason, wake time, estimate and actual dispatch time. Report expected
+   waiting as waiting, not failed model behavior.
+4. A captured temporary minute-limit refusal can follow the runtime's retry path
+   only within existing authorization and reconciled accounting. Count every
+   HTTP attempt, including rejected retries; missing usage remains unknown and
+   may prevent another dispatch under the controller's budget policy. Daily quota
+   exhaustion, an unexplained refusal or an unknown transport outcome is not a
+   reason to retry every minute. Never reset the batch ledger or switch profiles.
+5. If only the next request's forecast exceeds an observed full window, do not
+   treat that prediction as a provider rejection or silently lower its output
+   cap. The current backend can preserve the required packet and admit one
+   exclusive provider-feedback attempt after recent charges and provider waits
+   clear. This still requires the user's remaining batch allowance and the model
+   context-window check. Keep the original forecast for audit; do not relabel it
+   as a smaller actual request. A previous completion used to predict the next
+   one is not expired usage. A real provider size rejection requires inspecting
+   and correcting that exact request rather than repeating it unchanged. Preserve
+   selected evidence and tool results when reducing overhead.
+
+Set the evaluation's wall-clock observation window to accommodate expected waits.
+If it ends first, record the run as waiting/incomplete and preserve the pending
+state and allowance; do not silently extend an explicitly bounded deadline or
+turn a review timeout into mission cancellation.
+
+For runner changes, use a controlled clock to verify: no dispatch before reset;
+exactly one eligible dispatch after reset and rechecking; restart and concurrent
+reservations retain the counter; an over-limit forecast gets one exclusive
+attempt rather than a permanent local rejection; actual size refusals do not
+repeat unchanged; and the aggregate test allowance is unchanged. Reuse
+`tests/coordination/test_capacity.py` and
+`tests/coordination/test_changed_request_headroom.py` and
+`tests/coordination/test_rate_forecast_probe.py`; run the relevant focused
+cases rather than repeating the full suite for a guidance-only change.
+
+Provider semantics: [Groq rate-limit documentation](https://console.groq.com/docs/rate-limits)
+describes token reset headers and `retry-after`. Read it when changing header
+interpretation; use the selected account's observed limits rather than a fixed
+8,000-token default. The runtime uses a conservative local window; its counter
+cannot observe all usage from other applications.
 
 ## Minimum private evidence
 

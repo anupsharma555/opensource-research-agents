@@ -1,4 +1,4 @@
 interface:
   display_name: "OS · Run details"
   short_description: "Explain exact research runs from saved evidence"
-  default_prompt: "Use $os-run-details to explain the selected research run end to end in chat, including its input, agent actions, plain-language tool and term explanations, final output, evidence, usage, timing and current state."
+  default_prompt: "Use $os-run-details to explain the selected saved run with a readable summary, labelled input and metadata, numbered actions, actual output, diagnostics and usage; for a saved report, link the detailed technical evidence separately."

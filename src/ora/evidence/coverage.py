@@ -16,14 +16,15 @@ from ora.state import IntegrityFault, StateStore
 from .intake import (
     EXACT_SUBMISSION_PARSER_VERSION,
     EXACT_SUBMISSION_VALIDATION,
+    PARSER_VERSION,
     _exact_submitted_text,
     _is_exact_submitted_passage,
-    extract_blocks,
+    extract_copy_blocks,
 )
 from .library import EvidenceError
 from .windows import _window_slices
 
-_COPY_CLASSES = frozenset({"abstract", "passage", "partial", "full_text"})
+_COPY_CLASSES = frozenset({"abstract", "passage", "partial", "full_text", "web_document"})
 _DISPLAY_INTERVALS = 6
 
 
@@ -162,16 +163,43 @@ def extracted_text_coverage(
             or quality_body["classification"] in {"passage", "partial"}
             or quality_body.get("document_structure") in {"jats_partial_body", "html_partial_body"}
         )
-        blocks, parser = extract_blocks(
-            content, body["mime_type"],
-            allow_partial_xml=(body.get("mapping_version") or "").endswith("partial_xml=True"),
-        )
+        blocks, parser = extract_copy_blocks(content, body)
         inspected_mapping = (
             quality_body.get("parser") == parser
+            and quality_body.get("inspected_text_length_basis") in {
+                None, "sum_of_extracted_blocks_v1",
+            }
             and quality_body.get("inspected_blocks") == len(blocks)
             and quality_body.get("inspected_text_length")
             == sum(len(block.text) for block in blocks)
         )
+        # Older public-document intake measured the joined display text,
+        # including one separator between blocks. Accept only that exact
+        # historical mapping with its original document lineage intact.
+        if not inspected_mapping and quality_body.get("inspected_text_length_basis") is None:
+            document_ref = body.get("document_ref")
+            if _pointer(document_ref, "public_document_fetch"):
+                document = _record(store, document_ref, "public_document_fetch")
+                origin = document["body"]
+                source_version = f"public_document:{document['id']}:{document['version']}"
+                inspected_mapping = (
+                    quality_body.get("parser_version") == PARSER_VERSION
+                    and quality_body.get("parser") == parser
+                    and quality_body.get("inspected_blocks") == len(blocks)
+                    and quality_body.get("inspected_text_length")
+                    == len("\n".join(block.text for block in blocks))
+                    and quality_body.get("document_ref") == document_ref
+                    and use["body"].get("document_ref") == document_ref
+                    and quality_body.get("retrieval_hit_ref") == origin.get("hit_ref")
+                    and quality_body.get("response_ref") == origin.get("response_ref")
+                    and origin.get("content_sha256") == digest
+                    and origin.get("byte_length") == len(content)
+                    and origin.get("detected_content_type") == body.get("mime_type")
+                    and quality_body.get("detected_content_type") == body.get("mime_type")
+                    and quality_body.get("source_version") == source_version
+                    and body.get("source_version") == source_version
+                    and body.get("reference") == origin.get("final_url")
+                )
         supplied_without_mapping = False
         if not inspected_mapping and body.get("mime_type") == "text/plain":
             encounter = _record(store, body.get("encounter"), "source_encounter")

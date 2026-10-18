@@ -24,8 +24,23 @@ from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Requ
 from xml.etree import ElementTree as ET
 
 from .hit_use import hit_allows_reinspection
+from .html_content import HTML_PARSER_VERSION as HTML_V2_PARSER_VERSION
+from .html_content import HTMLExtractionError
+from .html_content import extract_html_blocks as extract_html_blocks_v2
+from .html_content_v3 import HTML_PARSER_VERSION as HTML_V3_PARSER_VERSION
+from .html_content_v3 import extract_html_blocks as extract_html_blocks_v3
+from .html_content_v4 import HTML_PARSER_VERSION as HTML_V4_PARSER_VERSION
+from .html_content_v4 import extract_html_blocks as extract_html_blocks_v4
+from .html_content_v5 import HTML_PARSER_VERSION, extract_html_blocks
 from .identity import normalize_identifier
 from .library import EvidenceError, EvidenceLibrary
+from .pdf_content import PDF_PARSER_VERSION, PDFExtractionError, extract_pdf_blocks
+from .xml_content import (
+    XML_PARSER_VERSION,
+    XMLExtractionError,
+    XMLStructureLimitError,
+    extract_xml_blocks,
+)
 
 PARSER_VERSION = "ora-intake-v1"
 EXACT_SUBMISSION_VALIDATION = "exact-user-submission"
@@ -284,18 +299,41 @@ def _pdf_blocks(content: bytes) -> tuple[list[Block], str]:
 
 
 def extract_blocks(
-    content: bytes, content_type: str, *, allow_partial_xml: bool = False
+    content: bytes, content_type: str, *, allow_partial_xml: bool = False,
+    html_parser_version: str = HTML_PARSER_VERSION,
+    xml_parser_version: str = XML_PARSER_VERSION,
+    pdf_parser_version: str = PDF_PARSER_VERSION,
 ) -> tuple[list[Block], str]:
     """Return uncorrected source text and locators; no scientific interpretation."""
     mime = content_type.split(";", 1)[0].lower().strip()
     if mime == "application/pdf":
-        return _pdf_blocks(content)
-    if mime in {"application/xml", "text/xml", "application/jats+xml"}:
+        if pdf_parser_version == "poppler-pdftotext-layout":
+            return _pdf_blocks(content)
+        if pdf_parser_version != PDF_PARSER_VERSION:
+            raise EvidenceError("Unsupported retained PDF extraction version")
         try:
+            blocks = extract_pdf_blocks(content)
+        except PDFExtractionError as exc:
+            raise EvidenceError(str(exc)) from exc
+        return [Block(item.text, item.locator) for item in blocks], PDF_PARSER_VERSION
+    if mime in {"application/xml", "text/xml", "application/jats+xml"}:
+        if xml_parser_version == "stdlib-elementtree-partial":
+            recovered = _partial_xml_blocks(content)
+            return recovered, xml_parser_version
+        if xml_parser_version not in {
+            XML_PARSER_VERSION, "stdlib-elementtree", "stdlib-htmlparser-partial-xml",
+        }:
+            raise EvidenceError("Unsupported retained XML extraction version")
+        try:
+            if xml_parser_version == XML_PARSER_VERSION:
+                blocks = extract_xml_blocks(content)
+                return [Block(item.text, item.locator) for item in blocks], XML_PARSER_VERSION
             return _xml_blocks(content), "stdlib-elementtree"
-        except EvidenceError:
+        except XMLStructureLimitError as exc:
+            raise EvidenceError(str(exc)) from exc
+        except (EvidenceError, XMLExtractionError) as exc:
             if not allow_partial_xml:
-                raise
+                raise EvidenceError("XML parser rejected source bytes") from exc
             recovered = _partial_xml_blocks(content)
             if recovered:
                 return recovered, "stdlib-elementtree-partial"
@@ -308,6 +346,23 @@ def extract_blocks(
     except UnicodeDecodeError as exc:
         raise EvidenceError("Text bytes are not UTF-8") from exc
     if mime == "text/html":
+        if html_parser_version in {
+            HTML_PARSER_VERSION, HTML_V4_PARSER_VERSION,
+            HTML_V3_PARSER_VERSION, HTML_V2_PARSER_VERSION,
+        }:
+            try:
+                extractor = {
+                    HTML_PARSER_VERSION: extract_html_blocks,
+                    HTML_V4_PARSER_VERSION: extract_html_blocks_v4,
+                    HTML_V3_PARSER_VERSION: extract_html_blocks_v3,
+                    HTML_V2_PARSER_VERSION: extract_html_blocks_v2,
+                }[html_parser_version]
+                blocks = extractor(decoded)
+            except HTMLExtractionError as exc:
+                raise EvidenceError(str(exc)) from exc
+            return [Block(item.text, item.locator) for item in blocks], html_parser_version
+        if html_parser_version != "stdlib-htmlparser":
+            raise EvidenceError("Unsupported retained HTML extraction version")
         parser = _HTMLBlocks()
         parser.feed(decoded)
         parser._flush()
@@ -315,6 +370,27 @@ def extract_blocks(
     if mime in {"text/plain", "application/abstract+text"}:
         return [Block(decoded, "text; chars=0:" + str(len(decoded)))], "utf8-text"
     raise EvidenceError("Unsupported content type")
+
+
+def extract_copy_blocks(content: bytes, copy_body: dict[str, Any]) -> tuple[list[Block], str]:
+    """Replay a retained copy's extraction coordinates, including legacy HTML.
+
+    New intake selects the current parser. Existing copies keep their original
+    mapping so a parser improvement never changes the text behind a citation.
+    """
+    mapping = copy_body.get("mapping_version") or ""
+    mime = copy_body["mime_type"].split(";", 1)[0].lower().strip()
+    parser = "poppler-pdftotext-layout" if mime == "application/pdf" else "stdlib-htmlparser"
+    if mapping.startswith(f"{PARSER_VERSION}:"):
+        parser = mapping.split(":", 2)[1]
+    parser_name = "xml_parser_version" if mime in {
+        "application/xml", "text/xml", "application/jats+xml"
+    } else "pdf_parser_version" if mime == "application/pdf" else "html_parser_version"
+    return extract_blocks(
+        content, copy_body["mime_type"],
+        allow_partial_xml=mapping.endswith("partial_xml=True"),
+        **{parser_name: parser},
+    )
 
 
 def _document_structure(content: bytes, content_type: str, blocks: list[Block]) -> str | None:
@@ -376,6 +452,10 @@ def detected_content_type(content: bytes, reported_type: str) -> str:
     beginning = content[:256].removeprefix(b"\xef\xbb\xbf").lstrip().lower()
     if beginning.startswith(b"%pdf-"):
         return "application/pdf"
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if content.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
     if beginning.startswith(b"<?xml") or re.match(rb"<(?:[a-z0-9_.-]+:)?article\b", beginning):
         return "application/xml"
     if beginning.startswith((b"<!doctype html", b"<html", b"<head", b"<body")):
@@ -470,7 +550,10 @@ def _public_fetch_use_policy(
         )
         for block in blocks
     )
-    allowed_surface = classification in {"abstract", "passage", "full_text", "navigation_document", "web_document"}
+    allowed_surface = classification in {
+        "abstract", "passage", "full_text", "navigation_document",
+        "web_document", "image_document",
+    }
     grant = bool(
         matching
         and identity_checked
@@ -1329,31 +1412,44 @@ class IntakeService:
         fetched: dict[str, Any],
     ) -> dict[str, Any]:
         """Retain an exact public fetch behind a same-task browser URL lead."""
-        if not operation_id or hit_ref.get("kind") != "retrieval_hit" or response_ref.get("kind") != "model_response_receipt":
+        if not operation_id or hit_ref.get("kind") != "retrieval_hit" or response_ref.get("kind") not in {"model_response_receipt", "retrieval_delivery"}:
             raise EvidenceError("Public document fetch needs exact hit and response references")
         hit = self.store.get(**hit_ref)
         response = self.store.get(**response_ref)
-        call_ref = response["body"].get("call_ref") if response else None
-        call = self.store.get(**call_ref) if isinstance(call_ref, dict) else None
-        attempt = self.store.get("agent_attempt", response["body"].get("attempt_id")) if response else None
-        if (
-            hit is None or response is None or call is None or attempt is None
-            or attempt["body"].get("run_id") != run_id
-            or attempt["body"].get("call_ref") != call_ref
-            or hit["body"].get("route") != "groq.browser_search.url_leads"
-            or hit["body"].get("source", {}).get("origin") != "original_source"
-            or hit["body"].get("source", {}).get("access_surface") != "metadata"
-            or hit["body"].get("source", {}).get("content") is not None
-            or any(hit["body"].get(key) != value for key, value in (
-                ("mission_id", mission_id), ("task_id", task_id),
-                ("agent_instance_id", actor_id)))
-            or any(call["body"].get(key) != value for key, value in (
-                ("mission_id", mission_id), ("task_id", task_id),
-                ("instance_id", actor_id)))
-            or not any(link["relation"] == "derived_from" and link["target"] == response_ref
-                       for link in self.store.links(hit))
-        ):
-            raise EvidenceError("Public document lead is outside the original peer task")
+        if response_ref.get("kind") == "retrieval_delivery":
+            actor = self.store.get("agent_instance", actor_id, 1)
+            if (hit is None or response is None or actor is None
+                    or actor["body"].get("run_id") != run_id
+                    or hit["body"].get("route") not in {"exa.search", "tavily.search", "searxng.search"}
+                    or hit["body"].get("source", {}).get("origin") != "original_source"
+                    or hit["body"].get("delivery_ref") != response_ref
+                    or any(hit["body"].get(key) != value for key, value in (
+                        ("mission_id", mission_id), ("task_id", task_id), ("agent_instance_id", actor_id)))
+                    or not any(link["relation"] == "derived_from" and link["target"] == response_ref
+                               for link in self.store.links(hit))):
+                raise EvidenceError("Public document lead is outside the original peer task")
+        else:
+            call_ref = response["body"].get("call_ref") if response else None
+            call = self.store.get(**call_ref) if isinstance(call_ref, dict) else None
+            attempt = self.store.get("agent_attempt", response["body"].get("attempt_id")) if response else None
+            if (
+                hit is None or response is None or call is None or attempt is None
+                or attempt["body"].get("run_id") != run_id
+                or attempt["body"].get("call_ref") != call_ref
+                or hit["body"].get("route") != "groq.browser_search.url_leads"
+                or hit["body"].get("source", {}).get("origin") != "original_source"
+                or hit["body"].get("source", {}).get("access_surface") != "metadata"
+                or hit["body"].get("source", {}).get("content") is not None
+                or any(hit["body"].get(key) != value for key, value in (
+                    ("mission_id", mission_id), ("task_id", task_id),
+                    ("agent_instance_id", actor_id)))
+                or any(call["body"].get(key) != value for key, value in (
+                    ("mission_id", mission_id), ("task_id", task_id),
+                    ("instance_id", actor_id)))
+                or not any(link["relation"] == "derived_from" and link["target"] == response_ref
+                           for link in self.store.links(hit))
+            ):
+                raise EvidenceError("Public document lead is outside the original peer task")
         content = fetched.get("content")
         requested_url = hit["body"]["source"].get("original_url")
         if (
@@ -1384,6 +1480,8 @@ class IntakeService:
             "access_basis": fetched.get("access_basis"),
             "authenticated": fetched.get("authenticated"),
             "hit_rights_status": hit["body"]["source"].get("rights_status"),
+            "representation": fetched.get("representation", "ordinary_html"),
+            "ordinary_document_ref": fetched.get("ordinary_document_ref"),
             "blob": blob,
         }
         record_id = f"public-document-fetch:{operation_id}"
@@ -1402,7 +1500,7 @@ class IntakeService:
         self, operation_id: str, document_ref: dict[str, Any], *,
         mission_id: str, run_id: str, actor_id: str, task_id: str,
     ) -> dict[str, Any]:
-        """Qualify saved browser-fetched HTML without asserting publication identity."""
+        """Qualify exact public text bytes without inferring publication identity."""
         document = self.store.get(**document_ref)
         if document is None or document_ref.get("kind") != "public_document_fetch":
             raise EvidenceError("Exact saved public document fetch is missing")
@@ -1412,13 +1510,31 @@ class IntakeService:
             ("actor_id", actor_id), ("task_id", task_id),
         )):
             raise EvidenceError("Public document belongs to another research peer or task")
-        hit = self.store.get(**body["hit_ref"])
-        if (
-            hit is None or hit["body"].get("source", {}).get("original_url") != body["requested_url"]
-            or not any(link["relation"] == "derived_from" and link["target"] == body["response_ref"]
-                       for link in self.store.links(hit))
-        ):
-            raise EvidenceError("Public document lost its exact browser lead")
+        asset_origin = body.get("origin_kind") == "parent_source_asset"
+        if asset_origin:
+            from .source_assets import current_asset_use
+
+            asset, _parent = current_asset_use(self.store, body["parent_asset_ref"], scope={
+                "mission_id": mission_id, "run_id": run_id,
+                "actor_id": actor_id, "task_id": task_id,
+            })
+            if (asset["body"].get("image_url") != body.get("requested_url")
+                    or asset["body"].get("parent_copy_ref") != body.get("parent_copy_ref")
+                    or asset["body"].get("parent_sha256") != body.get("parent_sha256")
+                    or asset["body"].get("caption_sha256") != body.get("caption_sha256")):
+                raise EvidenceError("Figure image no longer matches its parent source")
+            hit = None
+        else:
+            hit = self.store.get(**body["hit_ref"])
+            if (
+                hit is None or hit != self.store.get("retrieval_hit", hit["id"])
+                or not hit_allows_reinspection(self.store, hit)
+                or hit["body"].get("source", {}).get("original_url") != body["requested_url"]
+                or not any(link["relation"] == "derived_from" and link["target"] == body["response_ref"]
+                           for link in self.store.links(hit))
+            ):
+                raise EvidenceError("Public document lost its exact browser lead")
+        display_url = body["requested_url"] if asset_origin else body["final_url"]
         content = self.store.read_blob(body["blob"]["sha256"])
         digest = hashlib.sha256(content).hexdigest()
         if digest != body["content_sha256"] or len(content) != body["byte_length"]:
@@ -1426,17 +1542,37 @@ class IntakeService:
         actual_type = detected_content_type(content, body["content_type"])
         if actual_type != body.get("detected_content_type"):
             raise EvidenceError("Public document type disagrees with saved bytes")
-        if actual_type != "text/html":
-            raise EvidenceError("Public document inspection currently supports HTML only")
-        blocks, parser = extract_blocks(content, actual_type)
+        text_types = {"text/html", "application/pdf", "application/xml", "text/xml",
+                      "application/jats+xml", "text/plain"}
+        image_types = {"image/png", "image/jpeg"}
+        if actual_type not in text_types | image_types:
+            raise EvidenceError("Unsupported public document content type")
+        blocks: list[Block] = []
+        parser = "local-ocr-required" if actual_type in image_types else "unavailable"
+        parse_failure = None
+        if actual_type in text_types:
+            try:
+                blocks, parser = extract_blocks(content, actual_type)
+            except EvidenceError as exc:
+                parse_failure = str(exc)
         visible_text = "\n".join(item.text for item in blocks)
         classification = (
+            "parser_failure" if parse_failure else
+            "image_document" if actual_type in image_types else
+            "image_document" if actual_type == "application/pdf" and not visible_text.strip() else
             "empty" if not visible_text.strip() else
             "access_page" if _LOGIN.search(visible_text[:3000]) else
             "web_document"
         )
-        full_page_text = html.unescape(re.sub(r"<[^>]*>", " ", content.decode("utf-8", errors="ignore")))
-        page_restriction = bool(_EXPLICIT_USE_PROHIBITION.search(full_page_text))
+        if actual_type in {"text/html", "application/xml", "text/xml", "application/jats+xml"}:
+            restriction_text = html.unescape(re.sub(
+                r"<[^>]*>", " ", content.decode("utf-8", errors="ignore"),
+            ))
+        elif actual_type == "text/plain":
+            restriction_text = visible_text
+        else:
+            restriction_text = visible_text
+        page_restriction = bool(_EXPLICIT_USE_PROHIBITION.search(restriction_text))
         hit_restriction = body.get("hit_rights_status") in {"restricted", "not_retained"}
         identity_basis = (
             f"verified_source:public_document:{document['id']}:{document['version']}:"
@@ -1458,24 +1594,37 @@ class IntakeService:
             caller_rights_status="restricted" if page_restriction or hit_restriction else "unknown",
         )
         permitted = policy["decision"] == "private_research_use"
+        if classification == "web_document":
+            classification_reason = (
+                "Saved public document text; publication or study identity not inferred"
+            )
+        elif classification == "parser_failure":
+            classification_reason = parse_failure or "Public document parser failed"
+        elif classification == "image_document":
+            classification_reason = (
+                "Exact public image or scanned PDF retained; text inspection is incomplete "
+                "until selected-page OCR is checked"
+            )
+        else:
+            classification_reason = "Public fetch supplied no usable document text"
         quality_body = {
             "schema": "ora.evidence.intake_quality.v1", "document_ref": document_ref,
-            "retrieval_hit_ref": body["hit_ref"], "response_ref": body["response_ref"],
-            "source_url": body["final_url"], "requested_url": body["requested_url"],
+            "retrieval_hit_ref": body.get("hit_ref"), "response_ref": body.get("response_ref"),
+            "parent_asset_ref": body.get("parent_asset_ref"),
+            "source_url": display_url, "requested_url": body["requested_url"],
             "redirect_chain": body["redirect_chain"], "source_sha256": digest,
             "byte_length": len(content), "returned_content_type": body["content_type"],
             "detected_content_type": actual_type, "retrieved_at": body["checked_at"],
             "source_version": f"public_document:{document['id']}:{document['version']}",
             "parser": parser, "parser_version": PARSER_VERSION,
             "classification": classification,
-            "classification_reason": (
-                "Saved HTML document text; publication or study identity not inferred"
-                if classification == "web_document" else
-                "Public fetch supplied no usable HTML document text"
-            ),
+            "classification_reason": classification_reason,
             "rights_status": "permitted" if permitted else "restricted" if page_restriction or hit_restriction else "unknown",
             "rights_basis": policy["basis"], "identity_basis": identity_basis,
-            "inspected_blocks": len(blocks), "inspected_text_length": len(visible_text),
+            "inspected_blocks": len(blocks),
+            "inspected_text_length": sum(len(item.text) for item in blocks),
+            "inspected_text_length_basis": "sum_of_extracted_blocks_v1",
+            "text_inspection_incomplete": classification == "image_document",
             "truncated": False, "selected_locators": [],
             "direct_source_use_policy": policy, "page_restriction": page_restriction,
             "hit_restriction": hit_restriction,
@@ -1504,7 +1653,7 @@ class IntakeService:
             if (
                 prior_copy["body"].get("document_ref") != document_ref
                 or prior_copy["body"].get("content_sha256") != digest
-                or prior_copy["body"].get("reference") != body["final_url"]
+                or prior_copy["body"].get("reference") != display_url
             ):
                 raise EvidenceError("Existing public-document copy disagrees with its saved origin")
             prior_ref = {key: prior_copy[key] for key in ("kind", "id", "version")}
@@ -1540,7 +1689,7 @@ class IntakeService:
                 content=content, content_sha256=digest, mime_type=actual_type,
                 source_version=quality_body["source_version"], access_surface="passage",
                 retrieved_at=body["checked_at"], rights_basis=policy["basis"],
-                retain_bytes=True, reference=body["final_url"], passages=[],
+                retain_bytes=True, reference=display_url, passages=[],
                 inspection_state="checked",
                 validation_record=f"{PARSER_VERSION}:{parser}:source-sha256={digest}",
                 mapping_version=f"{PARSER_VERSION}:{parser}",
@@ -1552,18 +1701,48 @@ class IntakeService:
             "rights_status": "permitted", "rights_basis": policy["basis"],
             "allowed_uses": policy["allowed_uses"], "export_allowed": False,
             "policy_status": "granted", "quality_ref": quality_ref,
-            "source_url": body["final_url"], "direct_source_use_policy": policy,
+            "source_url": display_url, "direct_source_use_policy": policy,
+            "parent_copy_ref": body.get("parent_copy_ref"),
+            "parent_asset_ref": body.get("parent_asset_ref"),
         }
 
         def save_use(tx: Any) -> dict[str, Any]:
             exact_copy = tx.get(**copy_ref)
+            if asset_origin:
+                from .source_assets import current_asset_use
+
+                current_asset_use(tx, body["parent_asset_ref"], scope={
+                    "mission_id": mission_id, "run_id": run_id,
+                    "actor_id": actor_id, "task_id": task_id,
+                })
+                lead_ok = True
+            else:
+                current_hit = tx.get(**body["hit_ref"])
+                lead_link = tx.db.execute(
+                    "SELECT 1 FROM links WHERE source_kind='retrieval_hit' "
+                    "AND source_id=? AND source_version=? AND target_kind=? "
+                    "AND target_id=? AND target_version=? AND relation='derived_from' LIMIT 1",
+                    (body["hit_ref"]["id"], body["hit_ref"]["version"],
+                     body["response_ref"]["kind"], body["response_ref"]["id"],
+                     body["response_ref"]["version"]),
+                ).fetchone()
+                lead_ok = bool(
+                    current_hit is not None
+                    and tx.get("retrieval_hit", current_hit["id"]) == current_hit
+                    and current_hit["body"].get("source", {}).get("original_url")
+                    == body["requested_url"]
+                    and current_hit["body"].get("source", {}).get("rights_status")
+                    not in {"restricted", "not_retained"}
+                    and lead_link and hit_allows_reinspection(tx, current_hit)
+                )
             if (
                 exact_copy is None or tx.get(**document_ref) != document
                 or exact_copy["body"].get("document_ref") != document_ref
                 or exact_copy["body"].get("intake_operation_id") != operation_id
                 or tx.resolve("source_use.copy", f"{copy_ref['id']}:{copy_ref['version']}")
+                or not lead_ok
             ):
-                raise EvidenceError("Public-document copy changed before source-use commit")
+                raise EvidenceError("Public-document origin or copy changed before source-use commit")
             saved_use = tx.put("source_use", f"source-use-{uuid.uuid4().hex}", use_body)
             tx.link(saved_use, exact_copy, "depends_on")
             tx.link(saved_use, document, "depends_on")
@@ -1661,13 +1840,7 @@ class IntakeService:
         content = self.store.read_blob(blob["sha256"])
         if hashlib.sha256(content).hexdigest() != copy["body"]["content_sha256"]:
             raise EvidenceError("Source-copy checksum differs from retained bytes")
-        blocks, _ = extract_blocks(
-            content,
-            copy["body"]["mime_type"],
-            allow_partial_xml=(copy["body"].get("mapping_version") or "").endswith(
-                "partial_xml=True"
-            ),
-        )
+        blocks, _ = extract_copy_blocks(content, copy["body"])
         indexed: dict[str, list[str]] = {}
         for block in blocks:
             indexed.setdefault(block.locator, []).append(block.text)

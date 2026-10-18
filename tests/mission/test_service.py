@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import subprocess
 import threading
 import time
 import urllib.error
@@ -20,7 +19,11 @@ from ora.coordination.executor import WorkSpec
 from ora.evidence.intake import extract_blocks
 from ora.mission import MissionService
 from ora.mission.context import PACKER_VERSION, ContextOverflow
-from ora.mission.service import ESTIMATOR_VERSION, _visible_title_identity
+from ora.mission.service import (
+    ESTIMATOR_VERSION,
+    _shrinks_confirmed_413,
+    _visible_title_identity,
+)
 from ora.models import GroqSelectedAdapter, ModelSession
 from ora.models.token_estimate import TOKENIZER_BASIS, estimate_request_tokens
 from ora.retrieval.providers import HTTPResult
@@ -1275,8 +1278,10 @@ def test_search_inspect_and_cited_publish_use_checked_copy(tmp_path, monkeypatch
     search_tool = next(
         item for item in requests[0]["tools"] if item["function"]["name"] == "search_scholarly"
     )
-    assert "Choose route and limit" in search_tool["function"]["description"]
-    assert "search routes use query" in search_tool["function"]["description"]
+    search_description = search_tool["function"]["description"].casefold()
+    assert "route/limit" in search_description
+    assert "search uses query" in search_description
+    assert "selected_id" in search_description
     assert len(snapshot.sources) == 1
     assert snapshot.artifacts[0].citations[0].source_id == snapshot.sources[0].id
     assert len(host.store.records("source_use")) == 1
@@ -1417,6 +1422,12 @@ def test_source_window_is_model_selected_and_citable(tmp_path, monkeypatch, sele
 
 
 def test_large_supplied_source_recovers_with_exact_window(tmp_path, monkeypatch):
+    import ora.mission.service as service_module
+
+    # The full repeated source fits the current large model context. A smaller
+    # test-only context exercises the recovery path while preserving the exact
+    # serialized source and tool schemas used by this service test.
+    monkeypatch.setattr(service_module, "SELECTED_CONTEXT_TOKENS", 18_000)
     calls = []
     source_ref = None
 
@@ -2022,6 +2033,11 @@ def test_source_free_turn_does_not_replay_prior_source_window_text(tmp_path, mon
 def test_source_free_inventory_result_reaches_next_call_only_with_current_use(
     tmp_path, monkeypatch, revoke_before_next_call, extra_copy
 ):
+    import ora.mission.service as service_module
+
+    # This source's complete request is about 20k estimated input tokens;
+    # reserving completion room under 24k triggers a real source-free inventory.
+    monkeypatch.setattr(service_module, "SELECTED_CONTEXT_TOKENS", 24_000)
     requests = []
 
     def transport(request, *, timeout):
@@ -2427,8 +2443,9 @@ def test_fetched_title_basis_requires_title_visible_in_actual_source_bytes():
 
 def test_mislabeled_pdf_fetch_reaches_intake_byte_detection(tmp_path, monkeypatch):
     import ora.mission.service as service_module
+    from tests.evidence.test_source_format_walkthroughs import _pdf
 
-    pdf_bytes = b"%PDF-1.4\nsynthetic-pdf"
+    pdf_bytes = _pdf([["DOI: 10.1234/pdf.", "Results", "The difference was -2.5 points."]])
     hit_id = None
     calls = []
 
@@ -2503,13 +2520,7 @@ def test_mislabeled_pdf_fetch_reaches_intake_byte_detection(tmp_path, monkeypatc
             "retrieved_at": "2026-10-09T00:00:00Z",
         }
 
-    def fake_pdf_run(*args, **kwargs):
-        return subprocess.CompletedProcess(
-            args[0], 0, b"DOI: 10.1234/pdf.\nResults\nThe difference was -2.5 points.\f", b""
-        )
-
     monkeypatch.setattr(service_module, "fetch_public_source", fake_fetch)
-    monkeypatch.setattr("ora.evidence.intake.subprocess.run", fake_pdf_run)
     monkeypatch.setenv("GROQ_API_KEY", "synthetic-token")
     store = StateStore(tmp_path)
     session = ModelSession(
@@ -3442,6 +3453,9 @@ def test_413_soft_target_escalation_needs_a_smaller_exact_request(
         assert repaired["body"]["input_budget"]["request_bytes"] == (
             failed_intent["body"]["blob"]["size"]
         )
+        rejected_input = host.store.read_blob(failed_intent["body"]["blob"]["sha256"])
+        rejected_tokens = estimate_request_tokens(rejected_input).tokens
+        assert 3200 < rejected_tokens < 8000
         # Force an above-soft retry while retaining the exact 413 receipt.
         host._update_control(
             repaired, phase="ready_model", retry_at=None,
@@ -3451,22 +3465,59 @@ def test_413_soft_target_escalation_needs_a_smaller_exact_request(
             host._schedule_model(host._control(receipt.run_id, "agent-synthesis"))
         assert len(sent) == 1
         assert len(host.store.records("model_request_intent")) == 1
+        assert host._control(receipt.run_id, "agent-synthesis")["body"][
+            "input_budget"
+        ]["target_fraction"] == .4
     finally:
         host.close()
 
 
-def test_prior_completion_at_observed_rate_limit_stays_local(tmp_path, monkeypatch):
+def test_confirmed_413_requires_soft_fit_and_smaller_serialized_input():
+    rejected = {
+        "rejected_sha256": "old",
+        "rejected_bytes": 21_398,
+        "rejected_tokens": 4_378,
+    }
+    candidate = {
+        "candidate_sha256": "new",
+        "candidate_bytes": 21_380,
+        "candidate_tokens": 4_336,
+    }
+    assert not _shrinks_confirmed_413(**rejected, **candidate, above_soft_target=True)
+    assert _shrinks_confirmed_413(**rejected, **candidate, above_soft_target=False)
+    assert not _shrinks_confirmed_413(
+        **rejected, **{**candidate, "candidate_tokens": 4_378}, above_soft_target=False
+    )
+    assert not _shrinks_confirmed_413(
+        **rejected, **{**candidate, "candidate_bytes": 21_398}, above_soft_target=False
+    )
+    assert not _shrinks_confirmed_413(
+        **rejected, **{**candidate, "candidate_sha256": "old"}, above_soft_target=False
+    )
+
+
+def test_prior_completion_forecast_does_not_reject_an_untried_request(tmp_path, monkeypatch):
     sent = []
 
     def transport(request, *, timeout):
         sent.append(json.loads(request.data))
+        if len(sent) == 2:
+            return answer("The provider accepted the forecasted request.", 2)
         response = tool("discover_capabilities", {}, 1)
         response.payload["usage"] = {
             "prompt_tokens": 5, "completion_tokens": 8000, "total_tokens": 8005,
         }
+        response.headers = {
+            "x-ratelimit-limit-tokens": "8000",
+            "x-ratelimit-remaining-tokens": "0",
+            "x-ratelimit-reset-tokens": "60s",
+        }
         return response
 
     host = service(tmp_path, monkeypatch, transport)
+    clock = [time.time()]
+    monkeypatch.setattr(host.store, "clock", lambda: clock[0])
+    monkeypatch.setattr(time, "time", lambda: clock[0])
     try:
         receipt = host.start(LiveStartRequest(
             request_id="no-rate-reservation", question="Inspect a synthetic capability",
@@ -3483,15 +3534,29 @@ def test_prior_completion_at_observed_rate_limit_stays_local(tmp_path, monkeypat
         host._update_control(control, input_budget={
             "observed_limit_tokens": 8000, "target_fraction": .70,
         })
-        with pytest.raises(ContextOverflow, match="request reservation"):
-            host._schedule_model(host._control(receipt.run_id, "agent-synthesis"))
-        diagnostics = [item for item in host.store.records("mission_host_diagnostic")
-                       if item["body"].get("category") == "local_token_rate_reservation"]
-        assert len(diagnostics) == 1
-        assert diagnostics[0]["body"]["prior_completion_reservation"] == 8000
-        assert len(sent) == 1
-        assert len(host.store.records("model_request_intent")) == 1
-        assert len(host.store.records("capacity_operation")) == 2  # Model and tool only.
+        assert host._schedule_model(host._control(receipt.run_id, "agent-synthesis"))
+        prepared = host._control(receipt.run_id, "agent-synthesis")
+        call = host.store.get(**prepared["body"]["call_ref"])
+        budget = host.store.get("mission_call_budget", call["id"])["body"]
+        intent = host.store.get("model_request_intent", f"model-intent:{call['id']}:1")
+        packet = json.loads(host.store.read_blob(intent["body"]["blob"]["sha256"]))
+        assert budget["rate_admission_policy"] == "provider_feedback_probe"
+        assert budget["estimated_tokens_with_completion_reservation"] > 8000
+        assert packet["max_completion_tokens"] == 8192
+        assert packet["reasoning_effort"] == "high"
+        assert any(m.get("name") == "discover_capabilities" for m in packet["messages"])
+        assert not any(item["body"].get("category") == "local_token_rate_reservation"
+                       for item in host.store.records("mission_host_diagnostic"))
+        assert len(sent) == 1  # Prepared only; dispatch still belongs to capacity.
+        assert len(host.store.records("model_request_intent")) == 2
+        drain(host, receipt.run_id, limit=1)
+        assert len(sent) == 1  # No provider call while the previous window is full.
+        clock[0] += 65
+        drain(host, receipt.run_id)
+        assert len(sent) == 2
+        assert host._run(receipt.run_id)["body"]["status"] == "completed"
+        assert sent[1]["max_completion_tokens"] == 8192
+        assert len(host.store.records("report")) == 1
     finally:
         host.close()
 

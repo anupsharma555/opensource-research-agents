@@ -30,5 +30,14 @@
     "decision": "Retain the dissent and report an association with the design limitation; make further causal appraisal an explicit follow-up if useful.",
     "completion": "A qualified answer distinguishes the observed change from the unsupported causal claim."
   },
-  "execution_boundary": "save_plan/read_plan preserve structured intent and exact revisions; propose_work/revise_work/peer_request/wait_for_dependencies own execution and communication."
+  "execution_boundary": "save_plan creates, modify_plan makes revision-checked targeted edits, and read_plan recovers checkpoints; existing work, peer and wait tools own execution.",
+  "optional_template": {
+    "use": "Adapt only useful fields; simple tasks may skip planning.",
+    "goal": "State the requested decision and scope.",
+    "completion_criteria": "Name observable deliverables and evidence limits.",
+    "uncertainties": "Keep assumptions, counterevidence and unknowns visible.",
+    "steps": "Use stable IDs and real dependencies.",
+    "revision_trigger": "Update only affected parts after evidence, feedback or constraints change.",
+    "pause": "Name what remains and the condition for useful continuation."
+  }
 }

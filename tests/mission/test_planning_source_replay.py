@@ -7,6 +7,7 @@ import json
 import pytest
 
 from ora.contracts.models import LiveStartRequest
+from ora.coordination.board import ref
 from tests.mission.test_planning_integration import _drive_until, _plan, _scripted
 from tests.mission.test_service import answer, drain, service, tool, two_supplied_sources
 
@@ -179,5 +180,42 @@ def test_prepared_read_plan_assistant_prose_rechecks_transitive_use_before_dispa
         assert result.payload["copy_refs"] == [transitive]
         assert len(packets) == 2
         assert not transport.failures
+    finally:
+        host.close()
+
+
+def test_modify_plan_arguments_and_retained_prose_are_masked_after_source_revocation(tmp_path, monkeypatch):
+    secret = "SYNTHETIC_REVOKED_MODIFICATION_481"
+    packets = []
+
+    def transport(request, *, timeout):
+        packet = json.loads(request.data)
+        packets.append(packet)
+        step = len(packets)
+        if step == 1:
+            return tool("activate_skill", {"skill_id": "task-planning"}, step)
+        if step == 2:
+            return tool("save_plan", {"plan": _plan(goal=secret)}, step)
+        if step == 3:
+            return tool("modify_plan", {"expected_version": 1, "revision_reason": secret,
+                                       "changes": {"uncertainties": [secret]}}, step)
+        assert step == 4 and secret not in request.data.decode()
+        return answer("The source-derived plan remains unavailable.", step)
+
+    transport = _scripted(transport)
+    host = service(tmp_path, monkeypatch, transport)
+    try:
+        run = host.start(LiveStartRequest(request_id="modified-plan-revocation",
+            question="Keep a synthetic checkpoint", evidence_text="Independent permitted context.",
+            agent_ids=["agent-synthesis"]))
+        _transitive_basis(host, run.run_id, secret)
+        _drive_until(host, run.run_id, lambda: len(packets) == 3
+                     and host._control(run.run_id, "agent-synthesis")["body"]["phase"] == "ready_model")
+        plan = next(n for n in host.store.records("working_note") if "planning" in n["body"])
+        assert plan["version"] == 2
+        _revoke_transitive(host, host._control(run.run_id, "agent-synthesis")["body"]["mission_id"])
+        drain(host, run.run_id, limit=10)
+        assert not transport.failures and len(packets) == 4
+        assert host.store.get(**ref(plan)) == plan
     finally:
         host.close()

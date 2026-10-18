@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 
 from ora.agents.capabilities import content_hash
 from ora.skills import load_registry
+from ora.skills.registry import SkillDefinition, _checked_file, _read
 from ora.state import StateError
 
 LIFECYCLE_TOOLS = frozenset({"activate_skill", "release_skill", "release_capability"})
@@ -20,22 +22,17 @@ LIFECYCLE_TOOLS = frozenset({"activate_skill", "release_skill", "release_capabil
 # Appraisal uses notes to preserve preliminary assessments and disagreements.
 SKILL_TOOLS = {
     "study-appraisal": ("write_note", "read_note", "search_notes"),
-    "task-planning": ("save_plan", "read_plan"),
+    "task-planning": ("save_plan", "modify_plan", "read_plan"),
 }
 
 CALLABILITY_GUIDANCE = (
-    "CALL NOW: Call an attached local function directly; do not request it just to use it. "
-    "The catalog lists grants, while attached schemas show what is callable now. "
-    "REQUEST FIRST: For a tool in request_first_local_functions, call "
-    "request_capability with the exact tool_id. NEXT TURN: Wait for "
-    "selected_for_next_turn and the tool's attached schema. "
-    "DATA FIRST: Follow the specific explanation in not_ready_local_functions. "
-    "For example, inspect_hit needs an eligible saved search result; requesting access "
-    "does not create that result. "
-    "For browser_search, request_capability selects a native provider turn; never call "
-    "browser_search as a local function. "
-    "Choose tools for the task's needs; a supported direct answer is valid when no "
-    "additional information or action is needed."
+    "Call attached local functions directly; do not request them again. "
+    "Catalog grants without attached schemas "
+    "are not callable: for request_first_local_functions, call request_capability "
+    "with exact tool_id, then "
+    "wait for selected_for_next_turn and an attached schema. Resolve "
+    "not_ready_local_functions data prerequisites first. Requesting browser_search "
+    "selects a native provider turn, never a local function. Answer when sufficient."
 )
 
 
@@ -49,7 +46,9 @@ def _pin(skill, optional: bool) -> dict:
                           if skill.helper is not None else None),
         "purpose": skill.manifest["purpose"],
         "optional": optional,
-        "tool_ids": list(SKILL_TOOLS.get(skill.skill_id, ())),
+        "tool_ids": (["save_plan", "read_plan"]
+                     if skill.skill_id == "task-planning" and skill.version == "1.0.0"
+                     else list(SKILL_TOOLS.get(skill.skill_id, ()))),
     }
 
 
@@ -73,12 +72,48 @@ def selected_ids(pins: dict, body: dict) -> list[str]:
     return sorted(active | {name for name, pin in pins.items() if not pin["optional"]})
 
 
+def legacy_planning_skill(root):
+    """Retain exact v1 bytes for saved pins; never upgrade an active old run."""
+    directory = "runtime_skills/task_planning/v1/"
+    manifest = _read(root / directory / "manifest.json")
+    if (manifest.get("skill_id") != "task-planning" or manifest.get("version") != "1.0.0"
+            or manifest.get("instruction_only") is not True or "helper" in manifest):
+        raise StateError("Archived planning package is invalid")
+
+    def archived(spec, filename):
+        return _checked_file(root, {**spec, "path": directory + filename}, "Archived planning")
+
+    return SkillDefinition(
+        "task-planning", "1.0.0", manifest,
+        {name: archived(manifest["instruction_variants"][name], filename)
+         for name, filename in (("concise", "CONCISE.md"), ("rich", "RICH.md"))},
+        archived(manifest["example"], "example.json"), None,
+    )
+
+
 def checked_registry(root, role_id: str, pins: dict, selected: list[str]):
     registry = load_registry(root, {"source_read_by_id", "study_appraisal"})
     allowed = {item["skill_id"]: item["version"] for item in registry.roles[role_id]["skill_refs"]}
     for name in selected:
         pin = pins.get(name)
         skill = registry.skills.get(name)
+        if (name == "general-web-discovery" and name in allowed and pin
+                and pin.get("version") == "1.0.0"):
+            directory = "runtime_skills/general_web_discovery/v1/"
+            manifest = _read(root / directory / "manifest.json")
+            if manifest.get("skill_id") != name or manifest.get("version") != "1.0.0":
+                raise StateError("Archived web-discovery package is invalid")
+            skill = SkillDefinition(name, "1.0.0", manifest, {
+                variant: _checked_file(root, {**shape, "path": directory + Path(shape["path"]).name}, "Archived web discovery")
+                for variant, shape in manifest["instruction_variants"].items()
+            }, _checked_file(root, {**manifest["example"], "path": directory + "example.json"}, "Archived web example"), skill.helper)
+            registry.skills[name] = skill
+            allowed[name] = skill.version
+        if (name == "task-planning" and name in allowed and pin
+                and pin.get("version") == "1.0.0"):
+            skill = legacy_planning_skill(root)
+            registry.skills[name] = skill
+            allowed[name] = skill.version
         if (pin is None or skill is None or allowed.get(name) != pin["version"]
                 or _pin(skill, pin["optional"]) != pin):
             raise StateError(f"Pinned skill package changed or is unavailable: {name}")
@@ -94,22 +129,18 @@ def catalog_prompt(pins: dict, active: list[str], tools: dict[str, str], *, life
         for name, pin in sorted(pins.items())
     }
     guidance = (
-        "Skills provide reusable workflow guidance; tools perform individual operations. "
-        "Use active guidance when relevant. Activate a listed optional skill when its "
-        "purpose would help with the task, not merely to call an already available tool. "
-        "Optional skills load next turn via activate_skill with the exact skill_id, "
-        "persist across restarts, and "
-        "unload via release_skill. Local tool requests persist across skill release until "
-        "release_capability. Release optional selections when no longer useful, not "
-        "between every step. After selection changes, use the next turn's tool-availability "
-        "notice and attached schemas; activation never overrides permission or missing data. "
+        "Skills guide workflows; tools act. activate_skill loads guidance and selected "
+        "tools next turn; release_skill unloads them. Separately requested tools persist "
+        "until release_capability. Changes apply next turn and grant no new permissions "
+        "or data. "
         if lifecycle else "Listed skills are already active. "
     )
     return (
         "Role capability catalog: "
         + json.dumps({"skills": skills, "tools": dict(sorted(tools.items()))}, separators=(",", ":"))
         + ". " + guidance
-        + "discover_capabilities optionally refreshes this catalog."
+        + "discover_capabilities refreshes access status; request read_skill_resource "
+        "for paged active-skill detail."
     )
 
 

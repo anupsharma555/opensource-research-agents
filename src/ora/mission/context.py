@@ -19,6 +19,7 @@ from typing import Callable, Iterable
 from ora.agents.capabilities import content_hash
 from ora.coordination.board import ref, require_ref
 from ora.evidence.coverage import extracted_text_coverage
+from ora.evidence.windows import reading_progress
 from ora.mission.browser_search import project_browser_search
 from ora.mission.latency import read_due_review, read_review_delivery_response
 from ora.mission.output_recovery import OutputRecoveryError, read_partial_output_window
@@ -29,11 +30,23 @@ from ora.mission.shared_materials import (
     shared_material_view,
 )
 from ora.mission.tool_results import (
+    ASSET_PAGEABLE_TOOLS,
     MAX_RESULT_PAGE_CHARS,
     PAGEABLE_TOOLS,
     RESULT_PAGE_SCHEMA,
+    SAVED_PASSAGE_PAGEABLE_TOOLS,
+    SCHOLARLY_PAGEABLE_TOOLS,
+    WEB_PAGEABLE_TOOLS,
     ResultProjectionChanged,
     result_window,
+)
+from ora.mission.web_context import (
+    archived_search_navigation,
+    compact_scholarly_result,
+    compact_search_result,
+    permitted_scholarly_result,
+    permitted_search_result,
+    require_search_operation,
 )
 from ora.models.groq import ModelPreflightError, _messages
 from ora.models.session import _explicit_prohibition
@@ -41,7 +54,10 @@ from ora.state import StateError, StateStore, Transaction
 from ora.state.source_lineage import inherited_public_source, scoped_note_source_input
 from ora.state.store import canonical, identifier
 
-PACKER_VERSION = "ora.working_context.packer.v44"
+from .document_context import ocr_model_view, source_copy_url
+from .document_tools import document_tool_result, image_reader_handoff
+
+PACKER_VERSION = "ora.working_context.packer.v51"
 
 
 def _shared_material_overview(entry: dict, inclusion_id: str | None = None) -> dict:
@@ -84,6 +100,7 @@ MAX_RECENT_SEARCH_RECAP = 4
 MAX_SEARCH_RECAP_SCAN = 12
 MAX_RECENT_INSPECTION_RECAP = 4
 MAX_SCOPE_PREVIEW_CHARS = 1200
+MAX_QUESTION_PREVIEW_CHARS = 2048
 MAX_PARENT_PREVIEW_CHARS = 700
 MAX_PARTIAL_OUTPUT_PREVIEW_CHARS = 600
 MAX_SHARED_MATERIAL_PREVIEWS = 6
@@ -321,6 +338,35 @@ class WorkingContext:
             status = "restricted"
         else:
             status = selected_status
+        parent_asset_ref = selected["body"].get("document_ref")
+        asset_document = (
+            self.store.get(**parent_asset_ref)
+            if isinstance(parent_asset_ref, dict)
+            and parent_asset_ref.get("kind") == "public_document_fetch"
+            else None
+        )
+        if asset_document and asset_document["body"].get("origin_kind") == "parent_source_asset":
+            from ora.evidence.library import EvidenceError
+            from ora.evidence.source_assets import current_asset_use
+
+            asset_body = asset_document["body"]
+            parent_ref = asset_body.get("parent_copy_ref")
+            parent = self.store.get(**parent_ref) if isinstance(parent_ref, dict) else None
+            try:
+                if (parent is None or parent_ref == ref(selected)
+                        or parent["body"].get("mime_type") not in {
+                            "text/html", "application/xml", "text/xml", "application/jats+xml",
+                        }
+                        or parent["body"].get("content_sha256") != asset_body.get("parent_sha256")
+                        or selected["body"].get("content_sha256") != asset_body.get("content_sha256")
+                        or not isinstance(asset_body.get("parent_asset_ref"), dict)):
+                    raise EvidenceError("Figure child lost its exact parent")
+                current_asset_use(self.store, asset_body["parent_asset_ref"], scope={
+                    key: asset_body[key] for key in
+                    ("mission_id", "run_id", "actor_id", "task_id")
+                })
+            except (EvidenceError, KeyError, TypeError, ValueError):
+                selected_status = current_status = status = "restricted"
         return {
             "selected_ref": ref(selected),
             "current_ref": ref(current) if current else None,
@@ -735,6 +781,85 @@ class WorkingContext:
             raise ContextError("Assembled context index is invalid") from exc
         if not isinstance(index, dict):
             raise ContextError("Assembled context index is invalid")
+        asset_navigation = index.get("source_asset_navigation")
+        if asset_navigation is not None:
+            config = self.store.get(**pack.configuration_ref)
+            controls = [item for item in _heads(self.store, "mission_task_control")
+                        if item["body"].get("mission_id") == config["body"]["mission_id"]
+                        and item["body"].get("actor_id") == config["body"]["instance_id"]
+                        and item["body"].get("task_id") == pack.task_ref["id"]
+                        and item["body"].get("run_id") == pack.run_ref["id"]]
+            if (len(controls) != 1 or self._asset_navigation(
+                    controls[0], mission_id=config["body"]["mission_id"],
+                    actor_id=config["body"]["instance_id"], task_id=pack.task_ref["id"],
+                    current_call_ref=pack.call_ref,
+            ) != asset_navigation):
+                raise ContextError("Visible asset navigation changed before preparation")
+            pointers = []
+            for item in asset_navigation["recent_fetched_images"]:
+                asset = self.store.get(**item["asset_ref"])
+                document = self.store.get(**item["document_ref"])
+                child = self.store.resolve("source_copy.public_document",
+                    f"{item['document_ref']['id']}:{item['document_ref']['version']}")
+                if (asset is None or document is None or child is None
+                        or document["body"].get("parent_asset_ref") != item["asset_ref"]
+                        or self._source_status(child)["model_input_status"] != "permitted"):
+                    raise ContextError("Visible image handle lost its exact source use")
+                pointers.extend((asset["body"]["parent_copy_ref"], ref(child)))
+            listing = asset_navigation.get("listing_read")
+            if listing:
+                _result, payload = self._saved_result_scope(
+                    listing["result_id"], mission_id=config["body"]["mission_id"],
+                    actor_id=config["body"]["instance_id"], task_id=pack.task_ref["id"],
+                )
+                checked = self._checked_asset_listing(json.loads(payload["content"]),
+                    mission_id=config["body"]["mission_id"],
+                    actor_id=config["body"]["instance_id"], task_id=pack.task_ref["id"])
+                if (payload["name"] != "list_source_assets"
+                        or checked.get("status") == "data_unavailable_due_source_use"):
+                    raise ContextError("Visible figure listing lost its source use")
+                pointers.append(checked["parent_copy_ref"])
+            for pointer in pointers:
+                dependencies[(pointer["kind"], pointer["id"], pointer["version"])] = pointer
+        saved_passage_navigation = index.get("latest_saved_passage_navigation")
+        if saved_passage_navigation is not None:
+            config = self.store.get(**pack.configuration_ref)
+            controls = [item for item in _heads(self.store, "mission_task_control")
+                        if item["body"].get("mission_id") == config["body"]["mission_id"]
+                        and item["body"].get("actor_id") == config["body"]["instance_id"]
+                        and item["body"].get("task_id") == pack.task_ref["id"]
+                        and item["body"].get("run_id") == pack.run_ref["id"]]
+            if (len(controls) != 1 or self._saved_passage_navigation(
+                    controls[0], mission_id=config["body"]["mission_id"],
+                    actor_id=config["body"]["instance_id"], task_id=pack.task_ref["id"],
+            ) != saved_passage_navigation):
+                raise ContextError("Saved-passage navigation changed before preparation")
+            result = self.store.get(**saved_passage_navigation["saved_result_ref"])
+            payload = json.loads(self.store.read_blob(result["body"]["blob"]["sha256"]))
+            producing = self.response_source_dependencies(
+                result["body"]["response_ref"], require_permitted=False,
+            )
+            for pointer in [*producing, *json.loads(payload["content"])["source_dependency_refs"]]:
+                dependencies[(pointer["kind"], pointer["id"], pointer["version"])] = pointer
+        wrong_reader_navigation = index.get("wrong_image_reader_navigation")
+        if wrong_reader_navigation is not None:
+            config = self.store.get(**pack.configuration_ref)
+            controls = [item for item in _heads(self.store, "mission_task_control")
+                        if item["body"].get("mission_id") == config["body"]["mission_id"]
+                        and item["body"].get("actor_id") == config["body"]["instance_id"]
+                        and item["body"].get("task_id") == pack.task_ref["id"]
+                        and item["body"].get("run_id") == pack.run_ref["id"]]
+            if (len(controls) != 1 or self._wrong_image_reader_navigation(
+                    controls[0], mission_id=config["body"]["mission_id"],
+                    actor_id=config["body"]["instance_id"], task_id=pack.task_ref["id"],
+            ) != wrong_reader_navigation):
+                raise ContextError("Wrong-reader image navigation changed before preparation")
+            result = self.store.get(**wrong_reader_navigation["saved_result_ref"])
+            producing = self.response_source_dependencies(
+                result["body"]["response_ref"], require_permitted=False,
+            )
+            for pointer in [*producing, *wrong_reader_navigation["source_dependency_refs"]]:
+                dependencies[(pointer["kind"], pointer["id"], pointer["version"])] = pointer
         browser_view = index.get("browser_search")
         if isinstance(browser_view, dict) and browser_view.get("kind") == "browser_search_discovery":
             for pointer in self.response_source_dependencies(browser_view["response_receipt_ref"]):
@@ -747,6 +872,10 @@ class WorkingContext:
         navigation = index.get("latest_search_navigation")
         if isinstance(navigation, dict) and navigation.get("first_hit_ids"):
             for pointer in self.response_source_dependencies(navigation["response_ref"]):
+                dependencies[(pointer["kind"], pointer["id"], pointer["version"])] = pointer
+        web_navigation = index.get("latest_web_search_navigation")
+        if isinstance(web_navigation, dict) and isinstance(web_navigation.get("response_ref"), dict):
+            for pointer in self.response_source_dependencies(web_navigation["response_ref"]):
                 dependencies[(pointer["kind"], pointer["id"], pointer["version"])] = pointer
         summary_view = index.get("summary")
         if isinstance(summary_view, dict) and summary_view.get("authority") == "model_authored_continuation_aid_not_verified_evidence":
@@ -831,6 +960,7 @@ class WorkingContext:
         for position, message in enumerate(pack.messages):
             if message.get("role") == "tool" and message.get("name") in {
                 "calculate", "search_saved_passages", "read_browser_search_result",
+                "read_document_ocr", "inspect_figure",
             }:
                 try:
                     result = json.loads(message["content"])
@@ -1133,7 +1263,7 @@ class WorkingContext:
             result_id, mission_id=mission_id, actor_id=actor_id, task_id=task_id,
         )
         name = payload.get("name")
-        if name not in PAGEABLE_TOOLS:
+        if name not in PAGEABLE_TOOLS | WEB_PAGEABLE_TOOLS | SCHOLARLY_PAGEABLE_TOOLS | ASSET_PAGEABLE_TOOLS | SAVED_PASSAGE_PAGEABLE_TOOLS:
             raise ContextError("This saved tool result has no authorized pageable projection")
         try:
             content = json.loads(payload["content"])
@@ -1196,7 +1326,77 @@ class WorkingContext:
                 output.append(entry)
             return output
 
-        if name == "read_plan":
+        if name in ASSET_PAGEABLE_TOOLS:
+            projection = self._checked_asset_listing(
+                content, mission_id=mission_id, actor_id=actor_id, task_id=task_id,
+            )
+        elif name in SAVED_PASSAGE_PAGEABLE_TOOLS:
+            dependencies = [
+                *self.response_source_dependencies(
+                    result["body"]["response_ref"], require_permitted=False,
+                ), *content.get("source_dependency_refs", []),
+            ]
+            if any(not isinstance(pointer, dict)
+                   or (copy := self.store.get(**pointer)) is None
+                   or self._source_status(copy)["model_input_status"] != "permitted"
+                   for pointer in dependencies):
+                projection = {"status": "data_unavailable_due_source_use",
+                              "saved_tool_result_ref": ref(result)}
+            elif (content.get("schema") != "ora.saved_passage_search.v1"
+                  or not isinstance(content.get("results"), list)
+                  or not isinstance(content.get("source_dependency_refs"), list)):
+                raise ContextError("Saved passage search result is malformed")
+            else:
+                projection = {**content,
+                              "result_status": "lexical_navigation_not_checked_claim_evidence"}
+        elif name in WEB_PAGEABLE_TOOLS:
+            response_ref = result["body"]["response_ref"]
+            if "operation_ref" in content:
+                require_search_operation(
+                    self.store, content,
+                    {"mission_id": mission_id, "actor_id": actor_id,
+                     "task_id": task_id},
+                )
+            dependencies = self.response_source_dependencies(
+                response_ref, require_permitted=False,
+            )
+            dependencies = [*dependencies, *content.get("source_dependency_refs", [])]
+            if any(
+                not isinstance(pointer, dict)
+                or (copy := self.store.get(**pointer)) is None
+                or self._source_status(copy)["model_input_status"] != "permitted"
+                for pointer in dependencies
+            ):
+                projection = {"status": "data_unavailable_due_source_use",
+                              "saved_tool_result_ref": ref(result)}
+            else:
+                projection = permitted_search_result(
+                    self.store, content,
+                    {"mission_id": mission_id, "actor_id": actor_id,
+                     "task_id": task_id},
+                )
+                projection["result_status"] = (
+                    "uninspected_discovery_leads_not_source_evidence"
+                )
+        elif name == "search_scholarly":
+            dependencies = self.response_source_dependencies(
+                result["body"]["response_ref"], require_permitted=False,
+            )
+            if any((copy := self.store.get(**pointer)) is None
+                   or self._source_status(copy)["model_input_status"] != "permitted"
+                   for pointer in dependencies):
+                projection = {"status": "data_unavailable_due_source_use",
+                              "saved_tool_result_ref": ref(result)}
+            else:
+                projection = permitted_scholarly_result(
+                    self.store, content,
+                    {"mission_id": mission_id, "actor_id": actor_id,
+                     "task_id": task_id},
+                )
+                projection["result_status"] = (
+                    "uninspected_discovery_leads_not_source_evidence"
+                )
+        elif name == "read_plan":
             # Plan annotations contain only host status and exact references;
             # all agent-authored text lives in the permission-checked note.
             projection = dict(content)
@@ -1222,6 +1422,231 @@ class WorkingContext:
             original_content_sha256=hashlib.sha256(payload["content"].encode()).hexdigest(),
             offset=offset, limit=limit, projection_sha256=projection_sha256, note_records=notes,
         )
+
+    def _checked_asset_listing(self, content: dict, *, mission_id: str,
+                               actor_id: str, task_id: str) -> dict:
+        """Reauthorize the saved listing without discovering or fetching again."""
+        from ora.evidence.source_assets import current_asset_use, current_parent_use
+
+        parent_ref = content.get("parent_copy_ref")
+        controls = [item for item in _heads(self.store, "mission_task_control")
+                    if all(item["body"].get(key) == value for key, value in (
+                        ("mission_id", mission_id), ("actor_id", actor_id),
+                        ("task_id", task_id)))]
+        scope = {"mission_id": mission_id, "actor_id": actor_id,
+                 "task_id": task_id,
+                 "run_id": controls[0]["body"]["run_id"] if len(controls) == 1 else None}
+        try:
+            if (scope["run_id"] is None or not isinstance(parent_ref, dict)
+                    or not isinstance(content.get("assets"), list)
+                    or len(content["assets"]) > 20):
+                raise ContextError("Saved figure listing is malformed")
+            current_parent_use(self.store, parent_ref, scope=scope)
+            for item in content["assets"]:
+                asset, _ = current_asset_use(self.store, item["asset_ref"], scope=scope)
+                if any(item.get(key) != asset["body"].get(key) for key in (
+                        "locator", "figure_id", "caption", "caption_truncated",
+                        "caption_source_length", "caption_source_sha256",
+                        "link_state", "image_url")):
+                    raise ContextError("Saved figure listing differs from its source")
+        except (StateError, ValueError, KeyError, TypeError, AttributeError):
+            return {"status": "data_unavailable_due_source_use"}
+        return content
+
+    def _asset_navigation(self, control: dict, *, mission_id: str,
+                          actor_id: str, task_id: str,
+                          current_call_ref: dict | None = None) -> dict | None:
+        """Keep exact image handles across capability selection and history compaction."""
+        from ora.evidence.document_ocr import current_document_page_use
+        from ora.evidence.source_assets import current_asset_use
+
+        listed = None
+        fetched = []
+        seen_assets = set()
+        run = self.store.get("mission_run", control["body"].get("run_id"))
+        allow_vision = bool(run and run["body"].get("profile", {}).get("allowVision") is True)
+        call_ref = current_call_ref or control["body"].get("call_ref")
+        call = self.store.get(**call_ref) if isinstance(call_ref, dict) else None
+        attached = set(call["body"].get("exposed_tools", [])) if call else set()
+        for pointer in reversed(control["body"].get("tool_turn_refs", [])):
+            try:
+                result, payload = self._saved_result_scope(
+                    f"tool-result:{pointer['id']}", mission_id=mission_id,
+                    actor_id=actor_id, task_id=task_id,
+                )
+                content = json.loads(payload["content"])
+                if payload["name"] == "list_source_assets" and listed is None:
+                    checked = self._checked_asset_listing(
+                        content, mission_id=mission_id, actor_id=actor_id,
+                        task_id=task_id,
+                    )
+                    if checked.get("status") != "data_unavailable_due_source_use":
+                        listed = {"tool": "read_tool_result", "result_id": result["id"],
+                                  "offset": 0, "limit": 1800, "projection_sha256": ""}
+                if payload["name"] == "fetch_source_asset" and len(fetched) < 2:
+                    document_ref = content["document_ref"]
+                    document = self.store.get(**document_ref)
+                    if document is None:
+                        continue
+                    scope = {"mission_id": mission_id, "actor_id": actor_id,
+                             "task_id": task_id, "run_id": document["body"].get("run_id")}
+                    asset, _ = current_asset_use(self.store, content["asset_ref"], scope=scope)
+                    current_document_page_use(self.store, document_ref, **scope)
+                    if (document["body"].get("parent_asset_ref") != content["asset_ref"]
+                            or document["body"].get("parent_copy_ref") != content.get("parent_copy_ref")
+                            or content.get("parent_copy_ref") != asset["body"]["parent_copy_ref"]):
+                        continue
+                    copy_ref = content.get("copy_ref")
+                    copy = self.store.get(**copy_ref) if isinstance(copy_ref, dict) else None
+                    if (copy is None or copy["body"].get("document_ref") != document_ref
+                            or self._source_status(copy)["model_input_status"] != "permitted"):
+                        continue
+                    identity = canonical(content["asset_ref"])
+                    if identity in seen_assets:
+                        continue
+                    seen_assets.add(identity)
+                    handoff = image_reader_handoff(self.store, scope=scope,
+                        document_ref=document_ref,
+                        allow_vision=allow_vision)
+                    if handoff is None:
+                        continue
+                    fetched.append({"asset_ref": content["asset_ref"],
+                                    "document_ref": document_ref,
+                                    "figure_id": asset["body"]["figure_id"],
+                                    "caption_sha256": asset["body"]["caption_sha256"],
+                                    "source_caption": handoff["source_caption"],
+                                    "source_caption_status": (
+                                        "truncated_authored_caption" if asset["body"].get("caption_truncated")
+                                        else "complete_authored_caption"),
+                                    "caption_source_length": asset["body"].get("caption_source_length"),
+                                    "caption_source_sha256": asset["body"].get("caption_source_sha256"),
+                                    "caption_authority": "untrusted_source_material_not_host_instruction_or_generated_conclusion",
+                                    **({"caption_limit": "Retained caption is partial; inspect the exact parent source for the rest."}
+                                       if asset["body"].get("caption_truncated") else {}),
+                                    "ocr_action": {**handoff["ocr_action"],
+                                        "availability": "callable_now" if "read_document_ocr" in attached
+                                        else "request_capability_first"},
+                                    **({"vision_action": {**handoff["vision_action"],
+                                        "availability": "callable_now" if "inspect_figure" in attached
+                                        else "request_capability_first"}}
+                                       if "vision_action" in handoff else {})})
+            except (StateError, ValueError, KeyError, TypeError, AttributeError):
+                continue
+            if listed is not None and len(fetched) >= 2:
+                break
+        return {"recent_fetched_images": fetched, "fetched_preview_limit": 2,
+                "listing_read": listed,
+                "status": "permitted_navigation_only"} if fetched or listed else None
+
+    def _saved_passage_navigation(self, control: dict, *, mission_id: str,
+                                  actor_id: str, task_id: str) -> dict | None:
+        """Retain the latest peer-selected saved-text route, not its snippets as evidence."""
+        for pointer in reversed(control["body"].get("tool_turn_refs", [])):
+            try:
+                result, payload = self._saved_result_scope(
+                    f"tool-result:{pointer['id']}", mission_id=mission_id,
+                    actor_id=actor_id, task_id=task_id,
+                )
+                if payload["name"] != "search_saved_passages":
+                    continue
+                content = json.loads(payload["content"])
+                if (content.get("schema") != "ora.saved_passage_search.v1"
+                        or content.get("control_ref", {}).get("id") != control["id"]
+                        or not isinstance(content.get("query"), str)
+                        or not isinstance(content.get("results"), list)
+                        or not isinstance(content.get("source_dependency_refs"), list)):
+                    return None
+                if (type(content.get("result_count")) is not int
+                        or content["result_count"] < 0
+                        or type(content.get("cursor")) is not int
+                        or content["cursor"] < 0):
+                    return None
+                dependencies = [
+                    *self.response_source_dependencies(
+                        result["body"]["response_ref"], require_permitted=False,
+                    ), *content["source_dependency_refs"],
+                ]
+                if any(not isinstance(source_ref, dict)
+                       or (copy := self.store.get(**source_ref)) is None
+                       or self._source_status(copy)["model_input_status"] != "permitted"
+                       for source_ref in dependencies):
+                    return None
+                reads = []
+                for hit in content["results"][:2]:
+                    action = hit.get("next_request") if isinstance(hit, dict) else None
+                    source_ref = hit.get("copy_ref") if isinstance(hit, dict) else None
+                    if (not isinstance(action, dict)
+                            or action.get("tool") != "read_source_window"
+                            or source_ref not in content["source_dependency_refs"]
+                            or action.get("source_id") != source_ref["id"]
+                            or action.get("source_version") != source_ref["version"]):
+                        return None
+                    reads.append({"source_ref": source_ref,
+                                  "block_locator": hit.get("block_locator"),
+                                  "read": action})
+                return {
+                    "status": "saved_lexical_navigation_not_checked_claim_evidence",
+                    "saved_result_ref": ref(result),
+                    "query": content["query"],
+                    "total_query_matches": content["result_count"],
+                    "saved_page_matches": len(content["results"]),
+                    "previewed_saved_page_matches": len(reads),
+                    "coverage": content.get("coverage"),
+                    "read_choices_from_saved_result": reads,
+                    "additional_saved_page_matches": len(content["results"]) - len(reads),
+                    "additional_query_matches_outside_saved_page": max(
+                        0, content["result_count"] - content["cursor"] - len(content["results"])),
+                    "next_search_page_request": content.get("next_request"),
+                    "read_full_saved_listing": {
+                        "tool": "read_tool_result", "result_id": result["id"],
+                        "offset": 0, "limit": 1800, "projection_sha256": "",
+                    },
+                    "read_requires_current_source_use": True,
+                }
+            except (StateError, ValueError, KeyError, TypeError, AttributeError):
+                return None
+        return None
+
+    def _wrong_image_reader_navigation(self, control: dict, *, mission_id: str,
+                                       actor_id: str, task_id: str) -> dict | None:
+        """Keep a checked image route when a text-reader rejection was archived."""
+        for pointer in reversed(control["body"].get("tool_turn_refs", [])):
+            try:
+                result, payload = self._saved_result_scope(
+                    f"tool-result:{pointer['id']}", mission_id=mission_id,
+                    actor_id=actor_id, task_id=task_id,
+                )
+                if payload["name"] != "read_source_window":
+                    continue
+                content = json.loads(payload["content"])
+                saved = content.get("image_reader_handoff")
+                if content.get("status") != "rejected" or not isinstance(saved, dict):
+                    return None
+                source_ref = saved.get("copy_ref")
+                document_ref = saved.get("document_ref")
+                document = self.store.get(**document_ref)
+                if document is None:
+                    return None
+                scope = {"mission_id": mission_id, "actor_id": actor_id,
+                         "task_id": task_id, "run_id": document["body"].get("run_id")}
+                run = self.store.get("mission_run", scope["run_id"])
+                checked = image_reader_handoff(self.store, scope=scope,
+                    copy_ref=source_ref, document_ref=document_ref,
+                    allow_vision=bool(run and run["body"].get("profile", {}).get("allowVision") is True))
+                if checked != saved:
+                    return None
+                producing = self.response_source_dependencies(
+                    result["body"]["response_ref"], require_permitted=False,
+                )
+                if any((copy := self.store.get(**source_ref)) is None
+                       or self._source_status(copy)["model_input_status"] != "permitted"
+                       for source_ref in producing):
+                    return None
+                return {"status": "current_image_navigation_after_wrong_text_reader",
+                        "saved_result_ref": ref(result), **checked}
+            except (StateError, ValueError, KeyError, TypeError, AttributeError):
+                return None
+        return None
 
     def response_source_dependencies(self, response_ref: dict, *, require_permitted: bool = True) -> tuple[dict, ...]:
         """Bind model-authored text and arguments to their exact producing input."""
@@ -1294,7 +1719,8 @@ class WorkingContext:
         return pointer
 
     def _tool_exchange(self, response_ref: dict, *, scope: dict | None = None,
-                       active_skill_ids: set[str] | None = None) -> tuple[list[dict], dict | None]:
+                       active_skill_ids: set[str] | None = None,
+                       web_result_max_chars: int | None = None) -> tuple[list[dict], dict | None]:
         response = self.store.get(**response_ref)
         if (
             response is None
@@ -1337,7 +1763,10 @@ class WorkingContext:
                 assistant["content"] = None
         if (payload.get("name") in {
                 "calculate", "search_saved_passages", "read_browser_search_result",
-                "search_scholarly", "save_plan",
+                "search_scholarly", "save_plan", "modify_plan",
+                "search_web", "read_search_results", "render_source",
+                "read_document_ocr", "inspect_figure",
+                "list_source_assets", "fetch_source_asset",
             }
                 or origin_call and "browser_search" in origin_call["body"].get("exposed_tools", [])):
             dependencies = list(self.response_source_dependencies(response_ref, require_permitted=False))
@@ -1357,6 +1786,105 @@ class WorkingContext:
                     {"role": "tool", "tool_call_id": calls[0]["id"], "name": payload["name"],
                      "content": canonical({"status": "data_unavailable_due_source_use"})},
                 ], {"status": "tool_argument_withheld_due_source_use", "saved_tool_result_ref": ref(result)}
+        if payload.get("name") == "read_source_window":
+            saved_content = json.loads(payload["content"])
+            if isinstance(saved_content, dict) and "image_reader_handoff" in saved_content:
+                dependencies = saved_content.get("source_dependency_refs", [])
+                if isinstance(dependencies, list):
+                    dependencies = [
+                        *self.response_source_dependencies(
+                            response_ref, require_permitted=False,
+                        ), *dependencies,
+                    ]
+                if (not isinstance(dependencies, list) or any(
+                    not isinstance(pointer, dict)
+                    or (copy := self.store.get(**pointer)) is None
+                    or self._source_status(copy)["model_input_status"] != "permitted"
+                    for pointer in dependencies
+                )):
+                    return [
+                        {"role": "assistant", "content": None, "tool_calls": [{
+                            **calls[0], "function": {**calls[0]["function"], "arguments": "{}"},
+                        }]},
+                        {"role": "tool", "tool_call_id": calls[0]["id"],
+                         "name": payload["name"], "content": canonical({
+                             "status": "data_unavailable_due_source_use",
+                         })},
+                    ], {"status": "tool_argument_withheld_due_source_use",
+                        "saved_tool_result_ref": ref(result)}
+        if payload.get("name") in {"read_document_ocr", "inspect_figure"}:
+            current_scope = scope or {
+                "mission_id": response["body"]["mission_id"],
+                "actor_id": origin_call["body"]["instance_id"],
+                "task_id": origin_call["body"]["task_id"],
+            }
+            checked = document_tool_result(self.store, payload["name"],
+                json.loads(payload["content"]), **current_scope)
+            if payload["name"] == "read_document_ocr":
+                checked = ocr_model_view(self.store, checked)
+            payload = {**payload, "content": canonical(checked)}
+        if payload.get("name") == "list_source_assets":
+            current_scope = scope or {
+                "mission_id": response["body"]["mission_id"],
+                "actor_id": origin_call["body"]["instance_id"],
+                "task_id": origin_call["body"]["task_id"],
+            }
+            checked = self._checked_asset_listing(
+                json.loads(payload["content"]), **current_scope,
+            )
+            if checked.get("status") == "data_unavailable_due_source_use":
+                payload = {**payload, "content": canonical(checked)}
+            elif len(payload["content"]) > MAX_RESULT_PAGE_CHARS:
+                preview = {
+                    "status": "listed_page_saved",
+                    "parent_copy_ref": checked["parent_copy_ref"],
+                    "total_retained_candidates": checked["total_retained_candidates"],
+                    "assets_on_saved_page": len(checked["assets"]),
+                    "saved_tool_result_ref": ref(result),
+                    "asset_handles": [
+                        {"asset_ref": item["asset_ref"], "figure_id": item["figure_id"]}
+                        for item in checked["assets"]
+                    ],
+                    "read_request": {"tool": "read_tool_result", "result_id": result["id"],
+                                     "offset": 0, "limit": 1800, "projection_sha256": ""},
+                    "next_request": checked.get("next_request"),
+                    "caption_status": "exact captions in saved paged result",
+                }
+                if len(canonical(preview)) > MAX_RESULT_PAGE_CHARS:
+                    preview.pop("asset_handles")
+                    preview["handle_status"] = "read_saved_page_for_all_exact_handles"
+                payload = {**payload, "content": canonical(preview)}
+        if payload.get("name") in {"search_web", "read_search_results", "cancel_search"}:
+            current_scope = scope or {
+                "mission_id": response["body"]["mission_id"],
+                "actor_id": origin_call["body"]["instance_id"],
+                "task_id": origin_call["body"]["task_id"],
+            }
+            self._saved_result_scope(result["id"], **current_scope)
+            original_web = json.loads(payload["content"])
+            if "operation_ref" in original_web:
+                require_search_operation(self.store, original_web, current_scope)
+                permitted = permitted_search_result(self.store, original_web, current_scope)
+                payload = {**payload, "content": canonical(compact_search_result(
+                    permitted, result_ref=ref(result),
+                    **({"max_chars": web_result_max_chars} if web_result_max_chars else {}),
+                ))}
+        if payload.get("name") == "search_scholarly":
+            scholarly_scope = scope or {
+                "mission_id": response["body"]["mission_id"],
+                "actor_id": origin_call["body"]["instance_id"],
+                "task_id": origin_call["body"]["task_id"],
+            }
+            self._saved_result_scope(result["id"], **scholarly_scope)
+            permitted = permitted_scholarly_result(
+                self.store, json.loads(payload["content"]), scholarly_scope,
+            )
+            if len(canonical(permitted)) > MAX_RESULT_PAGE_CHARS:
+                permitted = compact_scholarly_result(
+                    permitted, result_ref=ref(result),
+                    **({"max_chars": web_result_max_chars} if web_result_max_chars else {}),
+                )
+            payload = {**payload, "content": canonical(permitted)}
         if payload.get("name") == "read_skill_resource" and active_skill_ids is not None:
             saved_content = json.loads(payload["content"])
             if (saved_content.get("schema") == "ora.skill_resource_page.v1"
@@ -1604,7 +2132,13 @@ class WorkingContext:
             if checked != original_window:
                 payload = {**payload, "content": canonical(checked)}
                 note_continuation_rechecked = True
-        if payload.get("name") in PAGEABLE_TOOLS and len(payload.get("content", "")) > MAX_RESULT_PAGE_CHARS:
+        if (payload.get("name") in PAGEABLE_TOOLS | SAVED_PASSAGE_PAGEABLE_TOOLS
+                and len(payload.get("content", "")) > MAX_RESULT_PAGE_CHARS):
+            result_scope = scope or {
+                "mission_id": response["body"]["mission_id"],
+                "actor_id": origin_call["body"]["instance_id"],
+                "task_id": origin_call["body"]["task_id"],
+            }
             window = self.read_tool_result(
                 **result_scope, result_id=result["id"], offset=0, limit=1000, projection_sha256="",
             )
@@ -1835,6 +2369,16 @@ class WorkingContext:
                      and item.get("reason") == "remaining_characters_in_block"),
                     None,
                 )
+            progress = reading_progress(
+                passages, window_result["next_cursor"],
+                mime_type=saved_copy["body"].get("mime_type"),
+                total_blocks=window_result.get(
+                    "total_blocks", saved_window["body"].get("total_blocks")
+                ),
+            )
+            if (window_result.get("reading_progress", progress) != progress
+                    or saved_window["body"].get("reading_progress", progress) != progress):
+                return None
             compacted = {
                 "schema": "ora.selected_checked_window_tool_result.v1",
                 "status": "saved_window_text_in_selected_source_packet",
@@ -1864,7 +2408,17 @@ class WorkingContext:
                 ),
                 "next_cursor_scope": "retained_extracted_text_only",
                 "source_text_status": "exact_checked_passages_in_this_model_input",
+                "reading_progress": progress,
             }
+            source_url = source_copy_url(self.store, saved_copy)
+            if source_url is not None:
+                compacted["source_url"] = source_url
+            # The latest reader result owns verified navigation and repeat
+            # feedback. Keep them once when checked text is carried separately
+            # by the selected source packet.
+            for key in ("navigation", "progress_feedback"):
+                if isinstance(window_result.get(key), dict):
+                    compacted[key] = window_result[key]
             if window_result.get("source_selection_omissions"):
                 compacted["source_selection_omissions_count"] = len(
                     window_result["source_selection_omissions"]
@@ -1908,6 +2462,56 @@ class WorkingContext:
             return {**payload, "content": canonical(compacted)}, receipt
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
             return None
+
+    def _defer_selected_source_web_leads(self, index: dict) -> bool:
+        """Page repeated lead cards when a selected passage has its own input."""
+        navigation = index.get("latest_web_search_navigation")
+        if not (isinstance(navigation, dict)
+                and isinstance(navigation.get("first_candidates"), list)
+                and navigation["first_candidates"]):
+            return False
+        response_ref = navigation.get("response_ref")
+        result_ref = navigation.get("result_ref")
+        detail = navigation.get("detail_request")
+        next_request = navigation.get("next_request")
+        saved_result = (
+            self.store.get(**result_ref)
+            if isinstance(result_ref, dict) and set(result_ref) == {
+                "kind", "id", "version"
+            } else None
+        )
+        if (
+            saved_result is None
+            or saved_result["kind"] != "context_tool_result"
+            or saved_result["body"].get("response_ref") != response_ref
+            or not isinstance(detail, dict)
+            or detail.get("tool") != "read_tool_result"
+            or detail.get("result_id") != result_ref["id"]
+            or not isinstance(detail.get("projection_sha256"), str)
+            or not isinstance(next_request, dict)
+            or next_request.get("operation_id") != navigation.get("operation_id")
+        ):
+            return False
+        navigation["first_candidates_deferred_for_selected_source"] = len(
+            navigation.pop("first_candidates")
+        )
+        return True
+
+    @staticmethod
+    def _compact_selected_fetch_result(
+        fetched: dict, selected_refs: tuple[dict, ...], *, mime_type: str | None,
+    ) -> dict | None:
+        """Remove only aliases and generic advice for a selected fetched copy."""
+        if (not isinstance(fetched, dict) or fetched.get("status") != "inspected"
+                or mime_type != "text/html"):
+            return None
+        copy_ref = fetched.get("copy_ref")
+        if (not isinstance(copy_ref, dict) or copy_ref not in selected_refs
+                or fetched.get("source_id") != copy_ref.get("id")
+                or fetched.get("source_version") != copy_ref.get("version")):
+            return None
+        return {key: value for key, value in fetched.items()
+                if key not in {"source_id", "source_version", "next_action"}}
 
     def _compact_selected_inspection_preview(
         self, response_ref: dict, payload: dict, *, call: dict, control: dict,
@@ -2113,6 +2717,40 @@ class WorkingContext:
                 else:
                     inspection["current_model_input_status"] = "unavailable"
             observation["inspection"] = inspection
+            return observation
+        if name in {"search_web", "read_search_results", "cancel_search"}:
+            try:
+                result_message = json.loads(self.store.read_blob(result["body"]["blob"]["sha256"]))
+                if (result_message.get("tool_call_id") != tool["id"]
+                        or result_message.get("name") != name):
+                    raise ValueError("tool result mismatch")
+                outcome = json.loads(result_message["content"])
+                origin = self.store.get(**response["body"]["call_ref"])
+                scope = {"mission_id": response["body"]["mission_id"],
+                         "actor_id": origin["body"]["instance_id"],
+                         "task_id": origin["body"]["task_id"]}
+                self._saved_result_scope(result["id"], **scope)
+                if "operation_ref" not in outcome:
+                    observation["web_search_status"] = "saved_non_operation_diagnostic"
+                    return observation
+                require_search_operation(self.store, outcome, scope)
+                dependencies = self.response_source_dependencies(
+                    response_ref, require_permitted=False,
+                )
+                if any((copy := self.store.get(**pointer)) is None
+                       or self._source_status(copy)["model_input_status"] != "permitted"
+                       for pointer in dependencies):
+                    observation["web_search_status"] = "data_unavailable_due_source_use"
+                    return observation
+                permitted = permitted_search_result(self.store, outcome, scope)
+                navigation = archived_search_navigation(
+                    permitted, tool_name=name, result_ref=ref(result),
+                    response_ref=response_ref,
+                )
+                if navigation is not None:
+                    observation["web_search"] = navigation
+            except (KeyError, TypeError, ValueError, ContextError, AttributeError):
+                observation["web_search_status"] = "saved_result_has_no_safe_web_search_projection"
             return observation
         if name != "search_scholarly":
             return observation
@@ -2547,6 +3185,9 @@ class WorkingContext:
             "authority": "saved_user_scope_not_source_instruction",
             "run_ref": run_ref,
             "question_ref": run_ref,
+            "question": question[:MAX_QUESTION_PREVIEW_CHARS],
+            "question_chars": len(question),
+            "question_truncated": len(question) > MAX_QUESTION_PREVIEW_CHARS,
             "scope_preview": scope[:MAX_SCOPE_PREVIEW_CHARS],
             "scope_chars": len(scope),
             "scope_truncated": len(scope) > MAX_SCOPE_PREVIEW_CHARS,
@@ -2556,7 +3197,7 @@ class WorkingContext:
         if inherited:
             scope_view["inherited_source_refs"] = inherited[:4]
             scope_view["additional_inherited_sources"] = max(0, len(inherited) - 4)
-        if scope_view["scope_truncated"] or len(inherited) > 4:
+        if scope_view["question_truncated"] or scope_view["scope_truncated"] or len(inherited) > 4:
             scope_view["fetch_full_scope_and_source_refs"] = fetch(run_ref)
             omissions.append({"type": "run_scope_detail", "ref": run_ref,
                               "reason": "bounded_scope_or_source_index", "fetch": run_ref})
@@ -3277,6 +3918,11 @@ class WorkingContext:
                 control, inclusion_id, (ref(item) for item in sources)
             )
             index.update(scope_view)
+            if (index.get("task", {}).get("objective")
+                    == index.get("run_scope", {}).get("question")
+                    and not index["run_scope"].get("question_truncated")):
+                index["run_scope"].pop("question")
+                index["run_scope"]["question_in_task_objective"] = True
             browser_refs = control["body"].get("browser_search_response_refs", [])
             if browser_refs:
                 try:
@@ -3370,6 +4016,12 @@ class WorkingContext:
         recent_searches = [
             observation for observation in recent_observations if observation.get("search")
         ]
+        recent_web_searches = [
+            observation["web_search"] for observation in recent_observations
+            if observation.get("web_search")
+        ]
+        if recent_web_searches:
+            index["latest_web_search_navigation"] = recent_web_searches[-1]
         if recent_searches:
             index["recent_scholarly_searches"] = recent_searches[-MAX_RECENT_SEARCH_RECAP:]
             for observation in index["recent_scholarly_searches"]:
@@ -3482,6 +4134,23 @@ class WorkingContext:
             index["contribution_refs"] = [ref(item) for item in contributions[:2]]
         if notes:
             index["note_refs"] = [ref(item) for item in notes[:2]]
+        if control:
+            asset_navigation = self._asset_navigation(
+                control, mission_id=mission_id, actor_id=actor_id, task_id=task["id"],
+                current_call_ref=ref(call),
+            )
+            if asset_navigation:
+                index["source_asset_navigation"] = asset_navigation
+            saved_navigation = self._saved_passage_navigation(
+                control, mission_id=mission_id, actor_id=actor_id, task_id=task["id"],
+            )
+            if saved_navigation:
+                index["latest_saved_passage_navigation"] = saved_navigation
+            wrong_reader_navigation = self._wrong_image_reader_navigation(
+                control, mission_id=mission_id, actor_id=actor_id, task_id=task["id"],
+            )
+            if wrong_reader_navigation:
+                index["wrong_image_reader_navigation"] = wrong_reader_navigation
         past = self._model_history(history, control, mission_id, actor_id, task["id"])
         if any(
             not isinstance(item, dict)
@@ -3553,9 +4222,60 @@ class WorkingContext:
             function = exchange[0].get("tool_calls", [{}])[0].get("function", {})
             origin_response = self.store.get(**pointer)
             origin_call = self.store.get(**origin_response["body"]["call_ref"])
+            if (function.get("name") == "search_saved_passages"
+                    and (compaction or {}).get("status")
+                    != "tool_argument_withheld_due_source_use"):
+                search_result = self.store.get("context_tool_result", f"tool-result:{pointer['id']}")
+                if search_result is not None:
+                    search_payload = json.loads(self.store.read_blob(
+                        search_result["body"]["blob"]["sha256"]))
+                    search_content = json.loads(search_payload["content"])
+                    if isinstance(search_content, dict):
+                        conversation_dependencies.extend(search_content.get(
+                            "source_dependency_refs", []))
+            if function.get("name") == "read_source_window":
+                image_result = self.store.get("context_tool_result", f"tool-result:{pointer['id']}")
+                if image_result is not None:
+                    image_payload = json.loads(self.store.read_blob(
+                        image_result["body"]["blob"]["sha256"]))
+                    image_content = json.loads(image_payload["content"])
+                    if (isinstance(image_content, dict)
+                            and isinstance(image_content.get("image_reader_handoff"), dict)
+                            and (compaction or {}).get("status")
+                            != "tool_argument_withheld_due_source_use"):
+                        conversation_dependencies.extend(self.response_source_dependencies(pointer))
+                        conversation_dependencies.extend(
+                            image_content["image_reader_handoff"]["source_dependency_refs"])
+            if function.get("name") == "read_tool_result":
+                arguments = json.loads(function.get("arguments", "{}"))
+                result_id = arguments.get("result_id")
+                if isinstance(result_id, str):
+                    saved_result, saved_payload = self._saved_result_scope(
+                        result_id, mission_id=mission_id, actor_id=actor_id,
+                        task_id=task["id"],
+                    )
+                    if saved_payload.get("name") in WEB_PAGEABLE_TOOLS | SCHOLARLY_PAGEABLE_TOOLS:
+                        conversation_dependencies.extend(self.response_source_dependencies(
+                            saved_result["body"]["response_ref"],
+                        ))
+                    if saved_payload.get("name") in ASSET_PAGEABLE_TOOLS:
+                        listing = self._checked_asset_listing(
+                            json.loads(saved_payload["content"]), mission_id=mission_id,
+                            actor_id=actor_id, task_id=task["id"],
+                        )
+                        if listing.get("status") != "data_unavailable_due_source_use":
+                            conversation_dependencies.append(listing["parent_copy_ref"])
+                    if saved_payload.get("name") in SAVED_PASSAGE_PAGEABLE_TOOLS:
+                        content = json.loads(saved_payload["content"])
+                        conversation_dependencies.extend(content.get("source_dependency_refs", []))
+                        conversation_dependencies.extend(self.response_source_dependencies(
+                            saved_result["body"]["response_ref"],
+                        ))
             if ((function.get("name") in {
                     "compact_conversation", "calculate", "search_saved_passages",
-                    "read_browser_search_result", "search_scholarly", "save_plan",
+                    "read_browser_search_result", "search_scholarly", "save_plan", "modify_plan",
+                    "search_web", "read_search_results", "cancel_search", "render_source",
+                    "list_source_assets", "fetch_source_asset",
                 }
                  or function.get("name") == "read_plan" and exchange[0].get("content") is not None
                  or "browser_search" in origin_call["body"].get("exposed_tools", []))
@@ -3749,6 +4469,84 @@ class WorkingContext:
                         index = without_routine
                         break
         required = measure(index)
+        if sources and (compact_selected_window or (
+            allowance is not None and required is not None and required > allowance
+        )):
+            # Earlier web lead cards remain retrievable through the scoped
+            # saved-result reader. Once an exact source is selected, page those
+            # cards under pressure while keeping operation and result handles.
+            if self._defer_selected_source_web_leads(index):
+                required = measure(index)
+        if allowance is not None and required is not None and required > allowance:
+            run_scope = index.get("run_scope")
+            if isinstance(run_scope, dict):
+                if run_scope.get("question_ref") == run_scope.get("run_ref"):
+                    run_scope.pop("question_ref", None)
+                if run_scope.get("scope_truncated") is False:
+                    run_scope.pop("scope_truncated", None)
+                required = measure(index)
+        if (sources and allowance is not None and required is not None
+                and required > allowance and tool_positions):
+            pointer, position = tool_positions[-1]
+            latest = past[position + 1]
+            if latest.get("name") == "fetch_source":
+                try:
+                    fetched = json.loads(latest["content"])
+                except (KeyError, TypeError, ValueError):
+                    fetched = None
+                fetched_copy = fetched.get("copy_ref") if isinstance(fetched, dict) else None
+                mime_type = next(
+                    (item["body"].get("mime_type") for item in sources
+                     if ref(item) == fetched_copy), None
+                )
+                slim = self._compact_selected_fetch_result(
+                    fetched, tuple(ref(item) for item in sources), mime_type=mime_type,
+                )
+                if slim is not None:
+                    # The selected packet repeats the copy identity. Keep the
+                    # fetched URL/document and any factual reuse feedback; the
+                    # generic reader advice is already in the attached tool.
+                    past[position + 1] = {**latest, "content": canonical(slim)}
+                    tool_compactions.append({
+                        "kind": "selected_fetch_redundancy_removed",
+                        "saved_tool_result_ref": ref(self.store.get(
+                            "context_tool_result", f"tool-result:{pointer['id']}"
+                        )),
+                        "original_content_sha256": hashlib.sha256(
+                            latest["content"].encode()
+                        ).hexdigest(),
+                        "omitted_item_refs": [],
+                    })
+                    required = measure(index)
+            routine = index.get("routine_own_outcomes")
+            if isinstance(routine, dict) and routine.get("recent_refs") and routine.get("fetch"):
+                # These exact refs also occur in the pageable omission list.
+                routine["recent_refs_deferred_for_selected_source"] = len(
+                    routine.pop("recent_refs")
+                )
+                required = measure(index)
+        if (allowance is not None and required is not None and required > allowance
+                and tool_positions):
+            pointer, position = tool_positions[-1]
+            if past[position + 1].get("name") in {
+                "search_web", "read_search_results", "cancel_search", "search_scholarly",
+            }:
+                # Fit a saved discovery preview to this turn's actual context
+                # allowance. Checked source windows follow their own path.
+                for max_chars in (3000, 2400, 1800, 1200):
+                    exchange, compaction = self._tool_exchange(
+                        pointer,
+                        scope={"mission_id": mission_id, "actor_id": actor_id,
+                               "task_id": task["id"]},
+                        active_skill_ids=set(config["body"].get("skills", {})),
+                        web_result_max_chars=max_chars,
+                    )
+                    past[position:position + 2] = exchange
+                    if compaction:
+                        tool_compactions.append(compaction)
+                    required = measure(index)
+                    if required <= allowance:
+                        break
         browser_budget_hits = []
         if (allowance is not None and required is not None and required > allowance
                 and (browser := index.get("browser_search"))
@@ -3895,7 +4693,13 @@ class WorkingContext:
                     target["target_body_preview"] = target["target_body_preview"][:160]
                     target["preview_truncated_for_budget"] = True
                     required = measure(index)
-        if allowance is not None and required is not None and required > allowance:
+        confirmed_413_headroom = (
+            200 if control is not None and str(
+                (control["body"].get("input_budget") or {}).get("basis", "")
+            ).startswith("provider_413_") else 0
+        )
+        if (allowance is not None and required is not None
+                and required > allowance - confirmed_413_headroom):
             # Equal selected/current source views repeat the same copy and
             # permission state. Keep the exact copy and current use references;
             # retain the full form whenever either identity or status diverges.
@@ -3924,7 +4728,13 @@ class WorkingContext:
             if compact_sources != index.get("source_retrieval", []):
                 index["source_retrieval"] = compact_sources
                 required = measure(index)
-        if allowance is not None and required is not None and required > allowance:
+            if confirmed_413_headroom:
+                index["record_counts"] = {
+                    key: count for key, count in index["record_counts"].items() if count
+                }
+                required = measure(index)
+        if (allowance is not None and required is not None
+                and required > allowance - confirmed_413_headroom):
             # The field name already scopes this to checked passages in this
             # call. Retain the first omitted cursor and saved-read distinction
             # while shortening repeated prose, only under pressure.
@@ -4184,15 +4994,17 @@ class WorkingContext:
                 ):
                     scope_ref = scope["run_ref"]
                     index["run_scope"] = {
-                        "authority": scope["authority"],
-                        "run_ref": scope_ref,
-                        "scope_chars": scope["scope_chars"],
-                        "fetch_full_scope_and_source_refs": {
+                        key: scope[key] for key in (
+                            "authority", "run_ref", "question", "question_chars",
+                            "question_truncated", "scope_preview", "scope_chars",
+                            "scope_truncated",
+                        ) if key in scope
+                    }
+                    index["run_scope"]["fetch_full_scope_and_source_refs"] = {
                             "tool": "read_context_record", "inclusion_id": inclusion_id,
                             **scope_ref, "offset": 0,
                             "limit": MAX_CONTEXT_RECORD_WINDOW_CHARS,
-                        },
-                    }
+                        }
                     if not any(item.get("type") == "run_scope_detail" for item in scope_omissions):
                         scope_omissions.append({
                             "type": "run_scope_detail", "ref": scope_ref,
@@ -4247,11 +5059,13 @@ class WorkingContext:
                 index["last_checked_window"] = {
                     "window_ref": last_window["window_ref"],
                     "next_cursor": last_window["next_cursor"],
+                    "source_text_status": last_window["source_text_status"],
                     "read_event_page": "older_records",
                 }
                 index["followup_target"] = {
                     key: target[key] for key in (
                         "target_ref", "parent_run_ref", "target_body_preview",
+                        "target_text_status",
                         "source_dependency_refs", "dependency_lineage_complete", "status",
                     ) if key in target
                 }
@@ -4270,6 +5084,56 @@ class WorkingContext:
                     ):
                         if run_scope.get(key) == value:
                             run_scope.pop(key)
+                required = measure(index)
+        if (allowance is not None and required is not None and required > allowance
+                and index.get("source_asset_navigation") and not sources):
+            # A selected image handle is more useful for this source-free turn
+            # than repeating a parent report preview. The exact parent report
+            # and run scope remain available through their saved readers.
+            target = index.get("followup_target")
+            if isinstance(target, dict) and target.get("target_ref"):
+                index["followup_target"] = {
+                    key: target[key] for key in (
+                        "target_ref", "parent_run_ref", "status",
+                        "dependency_lineage_complete", "source_dependency_refs",
+                        "fetch_exact_parent_target", "parent_details_page",
+                    ) if key in target
+                }
+                index["followup_target"]["preview_status"] = "deferred_for_selected_image"
+                required = measure(index)
+            run_scope = index.get("run_scope")
+            if (required is not None and required > allowance
+                    and isinstance(run_scope, dict)):
+                for key in ("question_ref", "scope_sha256", "scope_chars", "scope_truncated",
+                            "additional_inherited_sources"):
+                    if (key != "question_ref" or run_scope.get(key) == run_scope.get("run_ref")) \
+                            and (key != "scope_truncated" or run_scope.get(key) is False):
+                        run_scope.pop(key, None)
+                required = measure(index)
+            navigation = index.get("source_free_reading_navigation")
+            if (required is not None and required > allowance
+                    and isinstance(navigation, list)):
+                index["source_free_reading_navigation"] = [{
+                    "copy_ref": item["copy_ref"],
+                    "fetch_first_uncovered": item["fetch_first_uncovered"],
+                    "source_text_in_this_call": False,
+                } for item in navigation]
+                required = measure(index)
+            if (required is not None and required > allowance
+                    and isinstance(run_scope, dict)
+                    and isinstance(index.get("source_free_reading_navigation"), list)
+                    and run_scope.get("inherited_source_refs") == [
+                        item["copy_ref"] for item in index["source_free_reading_navigation"]
+                    ]):
+                run_scope.pop("inherited_source_refs")
+                required = measure(index)
+            if (required is not None and required > allowance
+                    and isinstance(index.get("source_free_reading_navigation"), list)):
+                # The source-free inventory already carries each retained copy
+                # and its read_source_window route. Avoid a second cursor card
+                # when the selected image needs the remaining input room.
+                index.pop("source_free_reading_navigation")
+                index["source_reading_navigation"] = "source_inventory"
                 required = measure(index)
         if allowance is not None and required is not None and required > allowance:
             required = compact_reference_index()

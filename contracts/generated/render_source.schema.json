@@ -1,0 +1,53 @@
+{
+  "$defs": {
+    "PublicDocumentRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "public_document_fetch",
+          "title": "Kind",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "version"
+      ],
+      "title": "PublicDocumentRef",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "ordinaryDocumentRef": {
+      "$ref": "#/$defs/PublicDocumentRef",
+      "description": "Exact kind/id/version of this task's saved ordinary public_document_fetch."
+    },
+    "reason": {
+      "description": "What JavaScript-dependent content is missing from ordinary extraction.",
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Reason",
+      "type": "string"
+    }
+  },
+  "required": [
+    "ordinaryDocumentRef",
+    "reason"
+  ],
+  "title": "RenderSourceInput",
+  "type": "object"
+}

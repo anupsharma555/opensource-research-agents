@@ -15,6 +15,7 @@ from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue, model_validator
 from pydantic.alias_generators import to_camel
+from pydantic.json_schema import SkipJsonSchema
 
 Identifier = Annotated[str, Field(min_length=1, max_length=160)]
 Text = Annotated[str, Field(min_length=1)]
@@ -29,6 +30,111 @@ AttemptStatus = Literal[
 
 class WireModel(BaseModel):
     model_config = ConfigDict(extra="forbid", alias_generator=to_camel, populate_by_name=True)
+
+
+class SearchWebInput(WireModel):
+    """One explicitly chosen round; this is not a lifetime research budget."""
+
+    mode: Literal["quick", "research"] = Field(description="Quick web lookup: one targeted information gap. Research web search: complementary questions, comparison or counterevidence.")
+    information_need: str = Field(min_length=1, max_length=1000, description="Brief information need, not private reasoning.")
+    queries: list[Annotated[str, Field(min_length=1, max_length=1000)]] = Field(min_length=1, max_length=10)
+    provider: Literal["exa", "tavily", "searxng"] = Field(default="exa", description="Optional agent selection for an identified research gap. Default Exa; quick uses the configured fallback.")
+    limit: int = Field(default=10, ge=1, le=10)
+    refresh: bool = Field(default=False, description="Reuse an identical saved search in this peer task by default. Set true to intentionally start fresh retrieval; different queries or options remain separate searches.")
+
+    @model_validator(mode="after")
+    def distinct_queries(self):
+        keys = [" ".join(query.split()).casefold() for query in self.queries]
+        if not self.information_need.strip() or any(not key for key in keys):
+            raise ValueError("Search needs a nonempty purpose and queries")
+        if len(keys) != len(set(keys)) or (self.mode == "quick" and len(keys) != 1):
+            raise ValueError("Quick uses one query; research uses up to ten distinct queries")
+        if self.mode == "quick" and self.provider != "exa":
+            raise ValueError("Quick starts with Exa; configured Tavily fallback is automatic")
+        return self
+
+
+class ReadSearchResultsInput(WireModel):
+    operation_id: Identifier
+    cursor: int = Field(default=0, ge=0, description="Saved candidate sequence; never a provider pagination offset.")
+    limit: int = Field(default=10, ge=1, le=20)
+    wait: bool = Field(default=False, description="Wait for new saved results without model polling when none are available.")
+
+
+class CancelSearchInput(WireModel):
+    operation_id: Identifier
+
+
+class PublicDocumentRef(WireModel):
+    kind: Literal["public_document_fetch"]
+    id: Identifier
+    version: Version
+
+
+class SourceAssetRef(WireModel):
+    kind: Literal["source_asset"]
+    id: Identifier
+    version: Version
+
+
+class ListSourceAssetsInput(WireModel):
+    source_id: Identifier
+    source_version: Version
+    offset: int = Field(default=0, ge=0, description="Zero-based offset in saved figure candidates.")
+    limit: int = Field(default=10, ge=1, le=20, description="Maximum figure candidates returned in one tool result.")
+
+
+class FetchSourceAssetInput(WireModel):
+    asset_ref: SourceAssetRef = Field(description="Exact figure asset returned by list_source_assets; no arbitrary URL is accepted.")
+
+
+class RenderSourceInput(WireModel):
+    ordinary_document_ref: PublicDocumentRef = Field(description="Exact kind/id/version of this task's saved ordinary public_document_fetch.")
+    reason: str = Field(min_length=1, max_length=500, description="What JavaScript-dependent content is missing from ordinary extraction.")
+
+
+class OCRRegion(WireModel):
+    """Selected rectangle on the rendered PDF page or EXIF-oriented image."""
+
+    x: float = Field(ge=0, le=1, allow_inf_nan=False)
+    y: float = Field(ge=0, le=1, allow_inf_nan=False)
+    width: float = Field(ge=0, le=1, allow_inf_nan=False)
+    height: float = Field(ge=0, le=1, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def within_page(self):
+        if (self.width <= 0 or self.height <= 0
+                or self.x + self.width > 1 or self.y + self.height > 1):
+            raise ValueError("OCR region must have positive size within the selected page")
+        return self
+
+
+class ReadDocumentOCRInput(WireModel):
+    document_ref: PublicDocumentRef
+    page_number: int = Field(ge=1, le=200, description="One selected PDF page, or 1 for a saved PNG/JPEG. Local OCR; no model API call.")
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=3000, ge=1, le=4000, description="Maximum OCR characters returned; use next_request to read more.")
+    region: OCRRegion | None = Field(default=None, description="Optional rectangle x/y/width/height in 0–1 fractions from top-left of the rendered PDF page or EXIF-oriented image. Use known coordinates to isolate text; omitted reads the page.")
+    layout: Literal["auto", "block", "sparse"] = Field(default="auto", description="Auto: whole-page layout, or one block for a region. Block: one text block. Sparse: separated labels, without reliable reading order. OCR is unverified transcription, not figure interpretation.")
+
+
+class InspectFigureInput(WireModel):
+    document_ref: PublicDocumentRef
+    page_number: int = Field(ge=1, le=200)
+    question: str = Field(min_length=1, max_length=1000, description="Specific visual question about this page or figure. Returns an unverified model interpretation, not a checked source passage.")
+
+
+class SearchOperationResult(WireModel):
+    schema_version: Literal["ora.web_search.result.v1"] = "ora.web_search.result.v1"
+    operation_ref: dict[str, JsonValue]
+    status: Literal["pending", "completed", "failed", "cancelled", "uncertain"]
+    available_results: list[dict[str, JsonValue]]
+    continuation_cursor: int = Field(ge=0)
+    has_more: bool = Field(default=False, description="More results are already saved after this cursor; pending work may still add results later.")
+    pending: int = Field(ge=0)
+    failed: int = Field(ge=0)
+    wait_requested: bool = False
+    reuse_status: Literal["new", "reused", "refreshed"] | None = Field(default=None, description="For a search start, whether it created an operation, reused saved work, or explicitly refreshed it. The operation_ref identifies that work.")
 
 
 class Actor(WireModel):
@@ -533,6 +639,7 @@ class LiveStartRequest(WireModel):
     agent_ids: list[Identifier] = Field(min_length=1)
     required_agent_ids: list[Identifier] = Field(default_factory=list)
     credential_profile: Literal["primary", "backup"] | None = None
+    allow_vision: bool = Field(default=False, description="Explicitly permit auxiliary Groq Qwen figure-reading calls using this run's selected credential profile.")
 
     @model_validator(mode="after")
     def required_agents_are_selected(self):
@@ -554,6 +661,7 @@ class LiveFollowupRequest(WireModel):
     agent_ids: list[Identifier] = Field(min_length=1)
     required_agent_ids: list[Identifier] = Field(default_factory=list)
     credential_profile: Literal["primary", "backup"] | None = None
+    allow_vision: bool = Field(default=False, description="Explicitly permit auxiliary Groq Qwen figure-reading calls for this follow-up; permission is not inherited.")
 
     @model_validator(mode="after")
     def required_agents_are_selected(self):
@@ -670,6 +778,10 @@ class RetrievalItem(WireModel):
     url_redacted: bool
     title: str | None = None
     content: str | None = None  # Only retained if rights_status == permitted.
+    discovery_excerpt: str | None = Field(
+        default=None, max_length=300,
+        description="Bounded search-provider teaser for discovery only; not an inspected passage or a source-use grant.",
+    )
     content_sha256: Sha256 | None = None
     content_retained: bool
     content_unretained_reason: str | None = None
@@ -686,6 +798,11 @@ class RetrievalItem(WireModel):
 
     @model_validator(mode="after")
     def finite_scientific_content(self):
+        if self.discovery_excerpt is not None and (
+            self.access_surface != "teaser" or self.origin != "original_source"
+            or self.rights_status in {"restricted", "not_retained"}
+        ):
+            raise ValueError("Discovery excerpts require an unrestricted search teaser")
         json.dumps([self.scientific_metadata, self.structured_content], allow_nan=False)
         return self
 
@@ -831,9 +948,67 @@ class RuntimePlan(PlanModel):
         return self
 
 
-class SavePlanInput(PlanModel):
+class LegacySavePlanInput(PlanModel):
+    """Historical create-or-replace contract retained for pinned v1 calls."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, title="SavePlanInput")
+
     plan: RuntimePlan
     expected_version: Annotated[int, Field(ge=0)] = 0
+
+
+class SavePlanInput(PlanModel):
+    """Create a checkpoint; later changes belong to modify_plan."""
+
+    plan: RuntimePlan
+    expected_version: Literal[0] = 0
+
+
+class PlanStepUpdate(PlanModel):
+    id: PlanLocalId
+    description: PlanText | SkipJsonSchema[None] = None
+    status: Literal["todo", "in_progress", "done", "blocked", "deferred"] | SkipJsonSchema[None] = None
+    depends_on: Annotated[list[PlanLocalId], Field(max_length=24)] | SkipJsonSchema[None] = None
+    linked_refs: Annotated[list[PlanReference], Field(max_length=24)] | SkipJsonSchema[None] = None
+
+    @model_validator(mode="after")
+    def explicit_changes(self):
+        fields = self.model_fields_set - {"id"}
+        if not fields or any(getattr(self, name) is None for name in fields):
+            raise ValueError("A step update needs non-null changed fields; use [] to clear a list")
+        return self
+
+
+class PlanChanges(PlanModel):
+    goal: Annotated[str, Field(min_length=1, max_length=4000, pattern=r"\S")] | SkipJsonSchema[None] = None
+    completion_criteria: Annotated[list[PlanText], Field(min_length=1, max_length=24)] | SkipJsonSchema[None] = None
+    uncertainties: Annotated[list[PlanText], Field(max_length=24)] | SkipJsonSchema[None] = None
+    status: Literal["active", "paused", "completed", "cancelled"] | SkipJsonSchema[None] = None
+    linked_refs: Annotated[list[PlanReference], Field(max_length=64)] | SkipJsonSchema[None] = None
+    update_steps: list[PlanStepUpdate] = Field(default_factory=list, max_length=24)
+    add_steps: list[PlanStep] = Field(default_factory=list, max_length=24)
+    remove_step_ids: list[PlanLocalId] = Field(default_factory=list, max_length=24)
+
+    @model_validator(mode="after")
+    def unambiguous_changes(self):
+        fields = self.model_fields_set
+        if not fields or any(getattr(self, name) is None for name in fields):
+            raise ValueError("Plan changes need explicit non-null fields; use [] to clear a list")
+        step_fields = {"update_steps", "add_steps", "remove_step_ids"}
+        if not fields - step_fields and not any(getattr(self, name) for name in step_fields):
+            raise ValueError("Plan changes cannot be empty")
+        ids = [step.id for step in self.update_steps + self.add_steps] + self.remove_step_ids
+        if len(ids) != len(set(ids)):
+            raise ValueError("Each step ID may occur in only one modification")
+        return self
+
+
+class ModifyPlanInput(PlanModel):
+    """Apply a targeted edit to an exact existing plan revision."""
+
+    expected_version: Annotated[int, Field(ge=1)]
+    revision_reason: PlanText
+    changes: PlanChanges
 
 
 class ReadPlanInput(PlanModel):

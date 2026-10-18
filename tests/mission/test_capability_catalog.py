@@ -108,8 +108,11 @@ def test_every_available_tool_has_a_label_and_serialized_description(tmp_path, m
     host = service(tmp_path, monkeypatch, lambda *_args, **_kwargs: pytest.fail(
         "Catalog inspection does not call a provider"))
     try:
-        expected = (COMMON_TOOL_IDS | TOOL_SCHEMAS.keys()) - UNHANDLED_COMMON_TOOLS
-        for catalog in (host.catalog, host.legacy_catalog):
+        complete = (COMMON_TOOL_IDS | TOOL_SCHEMAS.keys()) - UNHANDLED_COMMON_TOOLS
+        for catalog in (host.catalog, host.planning_v1_catalog, host.legacy_catalog):
+            expected = complete if catalog is host.catalog else complete - {"modify_plan"}
+            assert expected <= catalog.tools.keys()
+            assert ("modify_plan" in catalog.tools) is (catalog is host.catalog)
             descriptors = {name: catalog.tools[name].descriptor() for name in expected}
             assert all(TOOL_PURPOSES[name].strip() for name in expected)
             assert all(descriptors[name].get("description", "").strip() for name in expected)
@@ -191,7 +194,10 @@ def test_source_reader_schema_follows_selected_evidence_or_explicit_request(tmp_
         if mode == "memo":
             config = host.store.get("agent_configuration", call["body"]["configuration_id"], 1)
             recovering, _ = host._exposed_tools(control, config, source_recovery=True)
-            assert "read_source_window" in recovering
+            # Recovery first exposes inventory and source selection. A source-free
+            # memo does not make the window reader automatically callable.
+            assert {"read_source_inventory", "select_working_sources"} <= set(recovering)
+            assert "read_source_window" not in recovering
     finally:
         host.close()
 
@@ -250,23 +256,20 @@ def test_critic_can_request_granted_note_tool_without_discovery(tmp_path, monkey
         instructions = packet["messages"][0]["content"]
         paragraphs = instructions.split("\n\n")
         assert paragraphs[0].startswith("You are ")
-        assert paragraphs[1].startswith("CALL NOW: ")
-        assert "REQUEST FIRST: " in paragraphs[1]
-        assert "NEXT TURN: " in paragraphs[1]
-        assert "DATA FIRST: " in paragraphs[1]
+        assert paragraphs[1].startswith("Call attached local functions directly;")
         assert "request_first_local_functions" in paragraphs[1]
-        assert "requesting access does not create that result" in paragraphs[1]
-        assert instructions.count("CALL NOW: ") == 1
-        assert instructions.index("NEXT TURN: ") < instructions.index(
-            "Work on the saved question"
+        assert "request_capability" in paragraphs[1]
+        assert "selected_for_next_turn and an attached schema" in paragraphs[1]
+        assert "not_ready_local_functions data prerequisites" in paragraphs[1]
+        assert instructions.count("Call attached local functions directly;") == 1
+        assert instructions.index("selected_for_next_turn and an attached schema") < instructions.index(
+            "Choose research and completion"
         ) < instructions.index("Role capability catalog: ")
-        assert "call request_capability with the exact tool_id" in paragraphs[1]
-        assert "Call an attached local function directly; do not request it just to use it" in paragraphs[1]
-        assert "attached schemas show what is callable now" in paragraphs[1]
-        assert "Wait for selected_for_next_turn and the tool's attached schema" in paragraphs[1]
-        assert "browser_search, request_capability selects a native provider turn" in paragraphs[1]
-        assert "never call browser_search as a local function" in instructions
-        assert "Local tool requests persist across skill release until release_capability" in instructions
+        assert "request_capability" in paragraphs[1] and "exact tool_id" in paragraphs[1]
+        assert "without attached schemas are not callable" in paragraphs[1]
+        assert "do not request them again" in paragraphs[1]
+        assert "native provider turn, never a local function" in paragraphs[1]
+        assert "Separately requested tools persist until release_capability" in instructions
         index = _index(instructions)
         tools = index["tools"]
         skills = index["skills"]
@@ -281,8 +284,8 @@ def test_critic_can_request_granted_note_tool_without_discovery(tmp_path, monkey
         assert set(skills["study-appraisal"]["tools_on_activation"]) == {
             "write_note", "read_note", "search_notes",
         }
-        assert "Skills provide reusable workflow guidance; tools perform individual operations" in instructions
-        assert "not merely to call an already available tool" in instructions
+        assert "Skills guide workflows; tools act" in instructions
+        assert "activate_skill loads guidance and selected tools next turn" in instructions
         assert skills["evidence-linking"]["state"] == "active"
         assert "# Study appraisal" not in instructions
         assert "properties" not in json.dumps(index)
@@ -439,6 +442,20 @@ def test_role_catalog_lists_active_mandatory_skill_and_supported_tools(tmp_path,
         names = list(index["tools"])
         assert names == sorted(names)
         assert "fetch_source" in names and "claim_work" not in names
+        # Search choices must reach the first real request before attachment;
+        # registering schemas alone cannot help a peer select a suitable lane.
+        purposes = index["tools"]
+        assert "retained permitted sources" in purposes["search_saved_passages"]
+        assert "Scholarly" in purposes["search_scholarly"]
+        assert "one targeted lookup" in purposes["search_web"]
+        assert "multiple complementary queries" in purposes["search_web"]
+        assert "Groq browsing" in purposes["browser_search"]
+        assert "not a local function" in purposes["browser_search"]
+        assert "Quick web lookup" in instructions and "Research web search" in instructions
+        assert "Choose the lane by information need" in instructions
+        assert {"read_search_results", "cancel_search", "render_source"} <= purposes.keys()
+        attached = {item["function"]["name"] for item in seen[0]["tools"]}
+        assert not {"search_web", "read_search_results", "cancel_search", "render_source"} & attached
     finally:
         host.close()
 

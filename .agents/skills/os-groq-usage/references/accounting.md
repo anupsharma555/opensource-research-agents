@@ -27,7 +27,9 @@ newer scan that loses previously reported token fields leaves the more complete
 daily entry intact; the status reports that decision.
 
 Exact configuration references supply provider, requested model and profile when
-the receipt omits them. Reported model takes precedence. Excluded models are
+the receipt omits them. Figure response receipts require an exact matching figure
+intent; its saved model and credential profile determine a separate vision-model
+usage lane. Reported model takes precedence. Excluded models are
 counted in coverage. Missing profile remains unknown unless an explicitly supplied
 historical cutoff establishes inferred primary. Profile labels track configuration,
 not physical key identity across rotations. Key rotations need a dated local record.
@@ -39,6 +41,8 @@ Prepared requests, dispatch markers and captured responses are different facts;
 only captured provider usage is added to token totals. A failed response with no
 usage is unknown consumption, not a zero-token call. Uncaptured dispatches need
 investigation through `os-qualify-run` and are not added as estimated tokens.
+The collector counts uncaptured figure dispatch attempts in source coverage so
+they remain visible without assigning invented usage.
 
 The helper reads only small, hash-verified objects attached to HTTP 429 receipts
 to extract daily quota numbers. It returns neither raw error text nor organization

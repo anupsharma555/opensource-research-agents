@@ -1,26 +1,26 @@
 {
   "schema": "ora.runtime_skill.v1",
   "skill_id": "task-planning",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "instruction_only": true,
-  "purpose": "Guide optional task-proportionate planning and evidence-driven revisions with durable host checkpoints.",
+  "purpose": "Keep goals, evidence and next actions aligned during complex work using an optional plan template and focused revisions.",
   "trigger": "Use when uncertainty, multiple next actions, or coordination makes a saved plan useful; simple questions may finish directly.",
   "input_contract": "Assigned host task context, inspected evidence, peer feedback, and current checkpoint; attached plan tools own the canonical content schema.",
-  "output_contract": "Optional planning guidance and intent; save_plan/read_plan validate and persist canonical host checkpoints.",
+  "output_contract": "Optional planning template and intent; save_plan creates, modify_plan edits, and read_plan retrieves canonical versioned checkpoints.",
   "failure_handling": "Preserve useful findings and limitations if planning is unavailable; inspect current revisions after stale rejection, respect ownership, and use existing work and dependency tools.",
   "required_capabilities": [],
   "instruction_variants": {
     "concise": {
       "path": "runtime_skills/task_planning/CONCISE.md",
-      "sha256": "a76a50d93e46d79765f70f31f9af89134096b27cd992686f7ffb8aef4ec7e82c"
+      "sha256": "4700a84ddaae8ca210add9313379c0d2a8bcf1882e05c4d3c4ee25878113b50a"
     },
     "rich": {
       "path": "runtime_skills/task_planning/RICH.md",
-      "sha256": "85a46321ecaa2705429ab5ceb8c85f6e3a69e613999d84200d9134b13ab70e01"
+      "sha256": "6251b899acdd9d46ba146ea5edd108619acf7360f03d04c95aed015438392bd6"
     }
   },
   "example": {
     "path": "runtime_skills/task_planning/example.json",
-    "sha256": "ea98c932ae8a51dd8d3f3017c5f18592b09e8027409afe67fa0594c131da6daf"
+    "sha256": "7b97aff62b809badb19a1a536d8aee6d6cc9174330860843fafde9b44f0e760d"
   }
 }

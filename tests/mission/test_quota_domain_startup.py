@@ -145,7 +145,9 @@ def test_fresh_split_and_unchanged_shared_workspace_need_no_migration(tmp_path, 
     try:
         config = fresh.store.get("capacity_config", "default")
         assert config["version"] == 1
-        assert set(config["body"]["quotas"]) == {"groq-selected", "groq-verified-backup"}
+        assert {
+            scope for scope in config["body"]["quotas"] if scope.startswith("groq-")
+        } == {"groq-selected", "groq-verified-backup"}
         assert fresh.store.get("capacity_quota_bridge", "groq-verified-backup") is None
     finally:
         fresh.close()

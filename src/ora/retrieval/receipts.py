@@ -65,6 +65,8 @@ def _hit_fingerprint(envelope: dict, item: dict, notice: dict | None = None) -> 
             "rights_status": item["rights_status"],
             "access_status": item["access_status"],
             "content_sha256": item["content_sha256"],
+            **({"discovery_excerpt_sha256": sha256(item["discovery_excerpt"])}
+               if item.get("discovery_excerpt") is not None else {}),
             "scientific_metadata": item["scientific_metadata"],
             "structured_content": item["structured_content"],
             "omitted_fields": item["omitted_fields"],
@@ -136,6 +138,11 @@ def record_delivery(
             and item["rights_status"] == "permitted"
         ):
             raise ValueError("Explicit source prohibition conflicts with retained abstract text")
+        if notice and notice.get("explicit_prohibition_detected") and item.get("discovery_excerpt"):
+            item["discovery_excerpt"] = None
+            for projected in envelope["raw_projection"].get("accepted_items", []):
+                if projected.get("provider_item_id") == item["provider_item_id"] and projected.get("original_url") == item["original_url"]:
+                    projected["discovery_excerpt"] = None
         item["item_id"] = _id("retrieval-hit", _hit_fingerprint(envelope, item, notice))
     raw_projection = {
         "schema": "ora.retrieval.retained_projection.v1",

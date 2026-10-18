@@ -221,8 +221,70 @@ cache hit. They remain estimates: other account consumers and unexpectedly long
 output can still cause a refusal. The selected model, reasoning effort and output
 allowance stay pinned. Known account input limits also inform context packing
 before another oversized request is sent.
+An observed token-rate limit is a pacing signal, not proof that the next
+estimated input plus predicted completion will be rejected. If normal packing
+cannot fit that forecast, preparation preserves the required current packet
+and permits a provider-feedback attempt within the model context window. It
+does not lower the configured output cap. The exact forecast remains recorded
+in `mission_call_budget`, including `rate_admission_policy`.
+
+Runtime request assembly also records `request_stage_token_estimate` in that
+budget record before work is enqueued. It measures cumulative canonical variants
+using the final request's pinned estimate basis: envelope, pinned instructions,
+attached schemas, source packets, and each context or tool message. Marginal
+counts sum to the final input estimate; they are not separate usage charges.
+The receipt binds the final intent and request hash, active input target,
+observed provider limit, prior-completion reservation and configured output cap.
+The complete final estimate drives packing and the submitted capacity demand;
+staged accounting is not a post-run substitute for admission.
+When a complete preview fails local admission, its preparation diagnostic saves
+`preview_stage_token_estimate`, including the candidate hash, stage totals and
+`complete_request_not_dispatched` status. This describes an unsent preview, not
+a saved final intent or provider usage. If assembly never produced a complete
+preview, the host records the failure without inventing component counts.
+
+These records can be inspected while a request is queued or in flight. The
+shared capacity ledger separately tracks reserved, dispatched and settled work
+within its StateStore and quota domain. Request drafts consume no provider
+capacity. Before dispatch, concurrent workers share one atomic admission check;
+after a wait they recheck current headroom. Provider-reported usage is reconciled
+after capture, and a failed call without usage retains its reservation as unknown.
+Local tokenization remains an estimate of provider processing, not an exact
+provider token count. Auxiliary vision retains its existing image-plus-text and
+output estimate, tied to its own exact saved request; it does not tokenize
+base64 image bytes as text or use the main request's staged tokenizer trace.
+
+If a request fits the observed full window but current shared headroom is too
+small, the host waits for capacity. A single oversized request needs repacking:
+remove redundant overhead, keep exact evidence windows and retain executable
+routes to deferred material. A confirmed size rejection requires a newly
+serialized smaller request under the tightened target; waiting alone cannot
+repair identical bytes. Further research can proceed through multiple paced
+requests while preserving saved work. The provider's observed limit remains
+authoritative; the illustrative 8,000-token window is not a universal constant.
+A tightened repair target belongs to its captured rejection. Once a different,
+smaller replacement has a verified successful response, subsequent requests
+return to observed-limit pacing and normal provider-feedback admission. The
+original rejection and successful-replacement references remain available;
+already-held tasks can resolve this from saved evidence. Newer matching rate
+headers inform packing, and a fresh size rejection establishes a new repair
+target. Successful repair must not leave a permanent smaller limit on later
+tool selections.
+[Groq's rate-limit documentation](https://console.groq.com/docs/rate-limits)
+describes organization-level limits and response headers; activity outside this
+runtime's ledger is known only through available provider feedback.
+
+For a prepared model request whose forecast exceeds an observed full window,
+the capacity ledger reserves that window for one exclusive attempt after local
+charges and applicable provider waits clear. It retains the original estimate
+and reconciles actual usage without clipping it. This exception requires saved
+model-input estimate metadata; old unverifiable work retains its repair path.
+Configured local ceilings and evaluation call/token allowances remain hard
+bounds. A real provider size rejection keeps the existing smaller-request repair;
+a rate refusal keeps its saved retry time. Partial tool arguments never execute,
+and length-cutoff recovery preserves only eligible visible draft text.
 When a token-headroom reset time passes, the provider's reported token ceiling
-still bounds combined local reservations and recent charges. It is not treated
+still guides combined local reservations and recent charges. It is not treated
 as permission for several individually valid calls to exceed the shared window.
 Older quota records can recover that ceiling from their exact saved response
 header; no account limit is hardcoded. Other consumers of the provider account

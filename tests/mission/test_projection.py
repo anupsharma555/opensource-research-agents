@@ -890,7 +890,7 @@ def test_window_passage_must_match_exact_copy_hash_and_locator(monkeypatch):
 
     monkeypatch.setattr(
         projection,
-        "extract_blocks",
+        "extract_copy_blocks",
         lambda *_args, **_kwargs: (
             [SimpleNamespace(locator="block=1", text=content.decode())],
             "fixture-parser",
@@ -903,6 +903,10 @@ def test_window_passage_must_match_exact_copy_hash_and_locator(monkeypatch):
     ]
     records[("source_read_window", "window", 1)]["body"]["content_sha256"] = "wrong"
     with pytest.raises(StateError, match="exact source copy"):
+        projection._source(store, copy_ref, [window_ref])
+    records[("source_read_window", "window", 1)]["body"]["content_sha256"] = digest
+    records[("source_passage", passage_ref["id"], 1)]["body"]["locator"] = "block=2; chars=2:6"
+    with pytest.raises(StateError, match="does not replay against retained copy"):
         projection._source(store, copy_ref, [window_ref])
 
 

@@ -129,10 +129,10 @@ class RuntimeSkillTests(unittest.TestCase):
             root = copied_package(directory)
             roles_path = root / "roles" / "roles.json"
             roles = json.loads(roles_path.read_text(encoding="utf-8"))
-            roles["roles"][1]["skill_refs"][0]["version"] = "2.0.0"
+            roles["roles"][1]["skill_refs"][0]["version"] = "99.0.0"
             write_json(roles_path, roles)
             refresh_roles_hash(root)
-            with self.assertRaisesRegex(RegistryError, "incompatible with role request 2.0.0"):
+            with self.assertRaisesRegex(RegistryError, "incompatible with role request 99.0.0"):
                 load_registry(root, CAPABILITIES)
 
     def test_optional_specialist_missing_package_or_capability_is_scoped(self) -> None:

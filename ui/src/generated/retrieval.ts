@@ -13,6 +13,10 @@ export type Content = string | null;
 export type Contentretained = boolean;
 export type Contentsha256 = string | null;
 export type Contentunretainedreason = string | null;
+/**
+ * Bounded search-provider teaser for discovery only; not an inspected passage or a source-use grant.
+ */
+export type Discoveryexcerpt = string | null;
 export type Itemid = string;
 export type Field = string;
 export type Reason1 = string;
@@ -110,6 +114,7 @@ export interface RetrievalItem {
   contentRetained: Contentretained;
   contentSha256?: Contentsha256;
   contentUnretainedReason?: Contentunretainedreason;
+  discoveryExcerpt?: Discoveryexcerpt;
   itemId: Itemid;
   omittedFields?: Omittedfields;
   origin: Origin;

@@ -86,12 +86,15 @@ def test_saved_passage_search_leads_to_exact_source_window(tmp_path, monkeypatch
         step = len(seen)
         if step == 1:
             assert "search_saved_passages" in _catalog(packet)["tools"]
-            assert "search_saved_passages" not in _names(packet)
-            return tool("request_capability", {"tool_id": "search_saved_passages"}, step)
-        assert "search_saved_passages" in _names(packet)
-        if step == 2:
+            assert {"search_saved_passages", "read_source_window"} <= _names(packet)
+            availability = next(json.loads(row["content"])
+                                for row in packet["messages"] if row.get("role") == "user"
+                                and "trusted_host_attached_tool_availability" in (row.get("content") or ""))
+            assert {"search_saved_passages", "read_source_window"} <= set(
+                availability["call_now_local_functions"]
+            )
             return tool("search_saved_passages", {"query": "zephyr"}, step)
-        if step == 3:
+        if step == 2:
             search = _last_result(packet, "search_saved_passages")
             assert search["schema"] == "ora.saved_passage_search.v1"
             assert search["result_count"] == 1
@@ -105,7 +108,7 @@ def test_saved_passage_search_leads_to_exact_source_window(tmp_path, monkeypatch
             return tool("read_source_window", {
                 key: value for key, value in next_request.items() if key != "tool"
             }, step)
-        assert step == 4
+        assert step == 3
         window = _last_result(packet, "read_source_window")
         assert window["copy_ref"] == source_ref
         passage = host.store.get(**window["passages"][0]["passage_ref"])
@@ -125,7 +128,7 @@ def test_saved_passage_search_leads_to_exact_source_window(tmp_path, monkeypatch
         assert host.state(run.run_id).snapshot.mission.status == "completed", (
             len(seen), host._control(run.run_id, "agent-synthesis")["body"]["waiting_reason"]
         )
-        assert len(seen) == 4
+        assert len(seen) == 3
     finally:
         host.close()
 

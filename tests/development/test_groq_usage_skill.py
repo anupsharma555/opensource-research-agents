@@ -159,6 +159,54 @@ def test_database_revisions_use_first_capture_and_live_wal_without_rewriting(tmp
     db.close()
 
 
+def test_figure_usage_uses_exact_intent_profile_and_stays_in_vision_model(tmp_path):
+    db = sqlite3.connect(tmp_path / "state.sqlite3")
+    db.executescript("CREATE TABLE records(kind TEXT,id TEXT,version INTEGER,body TEXT,created_at TEXT);"
+                     "CREATE TABLE heads(kind TEXT,id TEXT,version INTEGER);")
+    scope = {"mission_id": "synthetic-mission", "run_id": "synthetic-run",
+             "actor_id": "synthetic-actor", "task_id": "synthetic-task"}
+    model = "qwen/qwen3.8-27b"
+    intent_ref = {"kind": "figure_request_intent", "id": "figure-intent-one", "version": 1}
+    page_ref = {"kind": "public_document_page_image", "id": "page-one", "version": 1}
+    ocr_ref = {"kind": "public_document_page_ocr", "id": "ocr-one", "version": 1}
+    document_ref = {"kind": "public_document_fetch", "id": "document-one", "version": 1}
+    common = {**scope, "document_ref": document_ref, "page_image_ref": page_ref,
+              "ocr_ref": ocr_ref, "page_number": 1, "request_sha256": "synthetic-hash"}
+    intent = {"schema": "ora.figure_request_intent.v1", **common,
+              "model": model, "credential_profile": "backup"}
+    response = {"schema": "ora.figure_response_receipt.v1", **common,
+                "intent_ref": intent_ref, "model": model, "http_status": 200,
+                "usage": {"prompt_tokens": 80, "completion_tokens": 20,
+                          "total_tokens": 100}}
+
+    def insert(kind, record_id, body):
+        db.execute("INSERT INTO records VALUES(?,?,?,?,?)",
+                   (kind, record_id, 1, json.dumps(body), "2026-01-15T15:00:00Z"))
+        db.execute("INSERT INTO heads VALUES(?,?,1)", (kind, record_id))
+
+    insert("figure_request_intent", intent_ref["id"], intent)
+    insert("figure_response_receipt", "figure-response:figure-intent-one", response)
+    insert("figure_dispatch_attempt", "figure-dispatch:figure-intent-one", {})
+    insert("figure_dispatch_attempt", "figure-dispatch:figure-intent-unknown", {})
+    db.commit()
+    calls, coverage = usage.read_state(tmp_path, None)
+    assert len(calls) == 1 and calls[0]["profile"] == "backup"
+    assert calls[0]["model"] == model
+    assert calls[0]["usage"]["total_tokens"] == 100
+    assert coverage["uncaptured_figure_dispatch_attempts"] == 1
+    assert report(calls)["periods"]["calendar_day"]["profiles"]["backup"]["captured_calls"] == 0
+    vision = usage.build_report(calls, as_of=usage.stamp("2026-01-15T17:00:00Z"),
+        day=date(2026, 1, 15), zone="America/New_York", model=model, daily_limit=None)
+    assert vision["periods"]["calendar_day"]["profiles"]["backup"]["token_totals"][
+        "total_tokens"]["known_sum"] == 100
+    db.execute("UPDATE records SET body=? WHERE kind='figure_response_receipt'",
+               (json.dumps({**response, "intent_ref": {
+                   **intent_ref, "version": 2}}),))
+    db.commit()
+    assert usage.read_state(tmp_path, None)[1]["unverified_figure_receipts"] == 1
+    db.close()
+
+
 def test_supplement_whitelists_fields_and_deduplicates_against_database_call(tmp_path):
     path = tmp_path / "standalone.json"
     path.write_text(json.dumps({"kind": "one_request_backup_credential_check",

@@ -245,13 +245,18 @@ def estimate_request_tokens(raw: bytes, *, basis: str = "auto") -> TokenEstimate
     return TokenEstimate(tokens, TOKENIZER_BASIS if basis == "auto" else basis, ASSET_SHA256, None)
 
 
-def estimate_context_tokens(value: str) -> int:
-    """Count a packer text fragment without the whole-request allowance."""
+def encode_context_token_ids(value: str) -> tuple[int, ...]:
+    """Encode local ordinary token IDs for a text fragment without network I/O."""
     if type(value) is not str:
         raise TypeError("Context text is required")
     try:
-        return len(_verified_encoding().encode_ordinary(value))
+        return tuple(_verified_encoding().encode_ordinary(value))
     except TokenEstimateUnavailable:
         raise
     except (UnicodeError, ValueError, RuntimeError) as exc:
         raise TokenEstimateUnavailable("tokenization_failed") from exc
+
+
+def estimate_context_tokens(value: str) -> int:
+    """Count a packer text fragment without the whole-request allowance."""
+    return len(encode_context_token_ids(value))

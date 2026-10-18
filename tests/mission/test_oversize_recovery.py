@@ -13,7 +13,10 @@ from ora.models.token_estimate import TOKENIZER_BASIS, estimate_request_tokens
 from tests.mission.test_service import MODEL, answer, service, tool
 
 
-def test_413_recovery_changes_request_and_delivers_selected_source_window(tmp_path, monkeypatch):
+@pytest.mark.parametrize("fresh_rejection", [False, True])
+def test_413_recovery_changes_request_and_delivers_selected_source_window(
+    tmp_path, monkeypatch, fresh_rejection,
+):
     sent = []
     sent_bytes = []
     source_ref = None
@@ -34,6 +37,12 @@ def test_413_recovery_changes_request_and_delivers_selected_source_window(tmp_pa
                 "selection_mode": "replace",
             }, 2)
         assert len(sent) == 3, "Recovery must not need another identical source read"
+        if fresh_rejection:
+            raise urllib.error.HTTPError(
+                "https://example.invalid", 413, "too large",
+                {"x-ratelimit-limit-tokens": "8000", "Retry-After": "0.01"},
+                BytesIO(b'{"error":{"code":"request_too_large"}}'),
+            )
         return answer("The supplied test passage is available for assessment.", 3)
 
     host = service(tmp_path, monkeypatch, transport)
@@ -72,6 +81,9 @@ def test_413_recovery_changes_request_and_delivers_selected_source_window(tmp_pa
         repaired = host._control(run.run_id, "agent-synthesis")["body"]
         assert repaired["input_budget"]["observed_limit_tokens"] == 8000
         assert repaired["phase"] in {"retry_at", "ready_model"}
+        assert host._effective_input_budget(host._control(run.run_id, "agent-synthesis"))["basis"] == (
+            "provider_413_with_retry_after_and_token_rate_headers"
+        )
         if repaired["phase"] == "retry_at":
             time.sleep(.03)
 
@@ -97,6 +109,24 @@ def test_413_recovery_changes_request_and_delivers_selected_source_window(tmp_pa
             item for item in host.store.records("model_response_receipt")
             if item["body"]["status"] == "tool_requested"
         )
+        accepted_control = host._control(run.run_id, "agent-synthesis")
+        resolved = host._effective_input_budget(accepted_control)
+        assert resolved["basis"] == "provider_accepted_smaller_413_repair"
+        assert resolved["resolved_repair_response_ref"] == {
+            "kind": "model_response_receipt", "id": second_response["id"], "version": 1,
+        }
+        assert resolved["observed_limit_tokens"] == 8000
+        assert accepted_control["body"]["input_budget"]["response_ref"] == {
+            "kind": "model_response_receipt", "id": failed["id"], "version": 1,
+        }
+        without_accepted = {**accepted_control, "body": {
+            **accepted_control["body"], "response_ref": None, "tool_turn_refs": [],
+        }}
+        assert host._effective_input_budget(without_accepted) == repaired["input_budget"]
+        wrong_actor = {**accepted_control, "body": {
+            **accepted_control["body"], "actor_id": "unrelated-actor",
+        }}
+        assert host._effective_input_budget(wrong_actor) == repaired["input_budget"]
         budget = host.store.get(
             "mission_call_budget", second_response["body"]["call_ref"]["id"]
         )["body"]
@@ -138,6 +168,107 @@ def test_413_recovery_changes_request_and_delivers_selected_source_window(tmp_pa
             for decision in third_intent["body"]["source_decisions"]
         )
         assert "RECOVERY_PASSAGE" in json.dumps(sent[2]["messages"])
+        third_call = third_intent["body"]["call_ref"]
+        third_receipt = host.store.get(
+            "model_response_receipt",
+            f"model-response:model-intent:{third_call['id']}:{third_call['version']}",
+        )
+        deadline = time.monotonic() + 4
+        while time.monotonic() < deadline and third_receipt is None:
+            time.sleep(.01)
+            third_receipt = host.store.get(
+                "model_response_receipt",
+                f"model-response:model-intent:{third_call['id']}:{third_call['version']}",
+            )
+        assert third_receipt is not None
+        if fresh_rejection:
+            work = next(
+                item for item in host.store.records("executor_work")
+                if item["body"]["spec"].get("call_id") == third_call["id"]
+            )
+            cap_id = host.executor._capacity_id(host.executor._spec_from(work))
+            cap = host.capacity.get(cap_id)
+            deadline = time.monotonic() + 4
+            while time.monotonic() < deadline and not (
+                third_receipt and cap and cap["phase"] == "failed"
+            ):
+                time.sleep(.01)
+                third_receipt = host.store.get(
+                    "model_response_receipt",
+                    f"model-response:model-intent:{third_call['id']}:{third_call['version']}",
+                )
+                cap = host.capacity.get(cap_id)
+            assert third_receipt and third_receipt["body"]["http_status"] == 413
+            assert cap and cap["phase"] == "failed"
+            current = host._control(run.run_id, "agent-synthesis")
+            third_ref = {
+                "kind": "model_response_receipt", "id": third_receipt["id"], "version": 1,
+            }
+            if (current["body"].get("input_budget") or {}).get("response_ref") != third_ref:
+                assert current["body"].get("work_id") == work["body"]["spec"]["work_id"]
+                assert host._repair_oversize(current, work, cap)
+            newest = host._control(run.run_id, "agent-synthesis")["body"]["input_budget"]
+            assert newest["response_ref"] == third_ref
+            assert newest["target_fraction"] == .70
+            assert newest["response_ref"] != repaired["input_budget"]["response_ref"]
+            assert host._effective_input_budget(
+                host._control(run.run_id, "agent-synthesis")
+            )["basis"] == "provider_413_with_retry_after_and_token_rate_headers"
+            return
+        unrelated_response = third_receipt
+        not_repair = {**host._control(run.run_id, "agent-synthesis"), "body": {
+            **host._control(run.run_id, "agent-synthesis")["body"],
+            "response_ref": {"kind": "model_response_receipt", "id": unrelated_response["id"],
+                             "version": 1},
+            "tool_turn_refs": [],
+        }}
+        assert host._effective_input_budget(not_repair) == repaired["input_budget"]
+        def newer_limit(tx):
+            current = tx.get("model_response_receipt", unrelated_response["id"])
+            return tx.put(
+                "model_response_receipt", current["id"],
+                {**current["body"], "rate_headers": {
+                    **(current["body"].get("rate_headers") or {}),
+                    "x-ratelimit-limit-tokens": "9000",
+                }}, expected_version=current["version"],
+            )
+
+        newer = host.store.transact(
+            "synthetic-newer-accepted-limit", {}, newer_limit,
+            mission_id=host._run(run.run_id)["body"]["mission_id"],
+        )
+        newest_control = {**host._control(run.run_id, "agent-synthesis"), "body": {
+            **host._control(run.run_id, "agent-synthesis")["body"],
+            "response_ref": {"kind": "model_response_receipt", "id": newer["id"],
+                             "version": newer["version"]},
+        }}
+        current_limit = host._effective_input_budget(newest_control)
+        assert current_limit["basis"] == "provider_accepted_smaller_413_repair"
+        assert current_limit["observed_limit_tokens"] == 9000
+        assert current_limit["limit_evidence_ref"] == newest_control["body"]["response_ref"]
+
+        def later_rate_limit(tx):
+            current = tx.get("model_response_receipt", unrelated_response["id"])
+            return tx.put(
+                "model_response_receipt", current["id"],
+                {**current["body"], "status": "error", "http_status": 429,
+                 "rate_headers": {"x-ratelimit-limit-tokens": "7000"}},
+                expected_version=current["version"],
+            )
+
+        limited = host.store.transact(
+            "synthetic-newer-rate-header", {}, later_rate_limit,
+            mission_id=host._run(run.run_id)["body"]["mission_id"],
+        )
+        paced_control = {**newest_control, "body": {
+            **newest_control["body"],
+            "response_ref": {"kind": "model_response_receipt", "id": limited["id"],
+                             "version": limited["version"]},
+        }}
+        paced = host._effective_input_budget(paced_control)
+        assert paced["basis"] == "provider_accepted_smaller_413_repair"
+        assert paced["observed_limit_tokens"] == 7000
+        assert paced["limit_evidence_ref"] == paced_control["body"]["response_ref"]
         assert all(item["model"] == MODEL for item in sent)
         assert all(item["reasoning_effort"] == "high" for item in sent)
         assert host.store.get(**source_ref) == source_before

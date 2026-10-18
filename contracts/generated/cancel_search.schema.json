@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "operationId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Operationid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "operationId"
+  ],
+  "title": "CancelSearchInput",
+  "type": "object"
+}

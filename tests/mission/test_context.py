@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 from dataclasses import replace
 
 import pytest
@@ -2089,6 +2088,14 @@ def test_archived_inspection_outcome_survives_new_search_and_context_paging(tmp_
         "status": "metadata_only", "hit_id": "old-hit",
         "reason": "PRIVATE_SYNTHETIC_DIAGNOSTIC_NOT_FOR_RECAP",
     })
+    store.transact(
+        "save-current-search-hit", {},
+        lambda tx: ref(tx.put("retrieval_hit", "new-hit", {
+            "mission_id": "m", "task_id": "task", "agent_instance_id": "peer",
+            "route": "europe_pmc.search", "source": {},
+        })),
+        mission_id="m",
+    )
     new_search = save_turn(3, "search_scholarly", {
         "route": "europe_pmc.search", "query": "synthetic", "limit": 1,
     }, {
@@ -2456,21 +2463,26 @@ def test_compacted_checked_window_uses_quality_for_original_partial_status(tmp_p
 
 
 def test_compacted_pdf_window_preserves_exact_rendered_check_and_caution(
-    tmp_path, monkeypatch,
+    tmp_path,
 ) -> None:
+    import shutil
+
+    from tests.evidence.test_source_format_walkthroughs import _pdf
     from tests.evidence.test_windows import checked_copy as checked_pdf_copy
 
-    monkeypatch.setattr("ora.evidence.intake.subprocess.run", lambda *a, **k:
-        subprocess.CompletedProcess(a[0], 0,
-            b"DOI: 10.1234/window.\nResults\nTable 1.\nGroup n=40; value -3 mg.\f",
-            b""))
+    if not shutil.which("pdftotext"):
+        pytest.skip("Poppler pdftotext unavailable")
+    content = _pdf([[
+        "DOI: 10.1234/window.", "Results", "Table 1.",
+        "Group n=40; value -3 mg.",
+    ]])
     table_check = {
         "page": 1, "row": "Group", "header": "Group n=40", "units": "mg",
         "footnote": "none present", "rendered_original_sha256": "a" * 64,
         "reviewer_basis": "Synthetic rendered-page fixture",
     }
     library, saved = checked_pdf_copy(
-        tmp_path, b"%PDF-1.4\nsynthetic", mime="application/pdf",
+        tmp_path, content, mime="application/pdf",
         table_check=table_check,
     )
     window = read_source_window(

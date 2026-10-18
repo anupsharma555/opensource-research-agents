@@ -76,6 +76,8 @@ def recovery_run(tmp_path, monkeypatch, condition):
     if condition == "compacted_recovery":
         host._update_control(control, input_budget={
             "observed_limit_tokens": 8000, "target_fraction": .70,
+            "basis": "qualification_imposed_limit",
+            "actual_provider_observation": False,
         })
     revoked = None
     if condition == "revoked_source":
@@ -135,7 +137,18 @@ def test_real_mission_recovery_conditions_survive_restart(tmp_path, monkeypatch,
         assert scored["execution_mode"] == "offline_test"
         assert scored["usage"]["actual_provider_usage"] is None
         assert len(scored["usage"]["injected_fixture_usage"]) == 4
+        if condition == "compacted_recovery":
+            intent = host.store.get(**selection["pressure_intent_ref"])
+            budget = host.store.get("mission_call_budget", intent["body"]["call_ref"]["id"])
+            assert budget["body"]["source_turn_mode"] == "source_free_recovery"
+            assert budget["body"]["rate_admission_policy"] != "provider_feedback_probe"
         if condition == "revoked_source":
-            assert "rejected" in json.dumps(requests[2])
+            pressure = host.store.get(**selection["pressure_intent_ref"])
+            response = host.store.get(
+                "model_response_receipt", f"model-response:{pressure['id']}",
+            )
+            result = host.store.get("context_tool_result", f"tool-result:{response['id']}")
+            message = json.loads(host.store.read_blob(result["body"]["blob"]["sha256"]))
+            assert json.loads(message["content"])["status"] == "rejected"
     finally:
         host.close()

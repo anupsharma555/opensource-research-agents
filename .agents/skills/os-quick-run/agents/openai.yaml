@@ -1,0 +1,4 @@
+interface:
+  display_name: "OS · Quick run"
+  short_description: "Run one quick live API case and explain its result"
+  default_prompt: "Use $os-quick-run to run one bounded live research API case now, then use $os-run-details to explain the saved run and its limits."

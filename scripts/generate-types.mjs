@@ -9,7 +9,16 @@ import { compile } from 'json-schema-to-typescript';
 const repositoryRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const checkOnly = process.argv.includes('--check');
 const contracts = [
+  ['render_source', 'render-source', 'RenderSourceInput'],
+  ['read_document_ocr', 'read-document-ocr', 'ReadDocumentOCRInput'],
+  ['inspect_figure', 'inspect-figure', 'InspectFigureInput'],
+  ['search_web', 'search-web', 'SearchWebInput'],
+  ['read_search_results', 'read-search-results', 'ReadSearchResultsInput'],
+  ['cancel_search', 'cancel-search', 'CancelSearchInput'],
+  ['search_operation', 'search-operation', 'SearchOperationResult'],
   ['runtime_plan', 'runtime-plan', 'RuntimePlan'],
+  ['save_plan', 'save-plan', 'SavePlanInput'],
+  ['modify_plan', 'modify-plan', 'ModifyPlanInput'],
   ['research', 'contracts', 'ResearchSnapshot'],
   ['live_start', 'live-start', 'LiveStartRequest'],
   ['live_followup', 'live-followup', 'LiveFollowupRequest'],

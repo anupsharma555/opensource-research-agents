@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import re
+import unicodedata
 from collections.abc import Mapping
 from typing import Any
 
@@ -26,8 +27,9 @@ MAPPING_VERSION = {
 }
 ITEM_FIELDS = frozenset({
     "id", "url", "title", "content", "surface", "origin", "rank", "rights_status",
-    "access_status", "scientific_metadata", "structured_content",
+    "access_status", "scientific_metadata", "structured_content", "discovery_excerpt",
 })
+DISCOVERY_EXCERPT_ROUTES = frozenset({"exa.search", "tavily.search", "searxng.search"})
 SCIENTIFIC_METADATA_FIELDS = frozenset({
     "authors", "doi", "pmid", "pmcid", "arxiv_id", "journal", "publication_date",
     "year", "keywords", "registry_ids", "dataset_ids", "citation_count",
@@ -311,7 +313,7 @@ def _scientific_fields(
     return metadata, structured, omissions
 
 
-def _item(raw: object, position: int, offset: int | None) -> dict[str, object]:
+def _item(raw: object, position: int, offset: int | None, route: str) -> dict[str, object]:
     if not isinstance(raw, Mapping):
         raise RetrievalFormatError("Item is not an object")
     if "error" in raw:
@@ -351,6 +353,20 @@ def _item(raw: object, position: int, offset: int | None) -> dict[str, object]:
         raise RetrievalFormatError("Item rights status is invalid")
     if access not in {"unknown", "available", "limited", "unavailable"}:
         raise RetrievalFormatError("Item access status is invalid")
+    raw_excerpt = raw.get("discovery_excerpt")
+    if raw_excerpt is not None and not isinstance(raw_excerpt, str):
+        raise RetrievalFormatError("Discovery excerpt must be text or absent")
+    excerpt, excerpt_redacted = None, False
+    if (raw_excerpt and route in DISCOVERY_EXCERPT_ROUTES
+            and surface == "teaser" and origin == "original_source"
+            and rights not in {"restricted", "not_retained"}
+            and access != "unavailable"):
+        safe_excerpt, excerpt_redacted = redact_text(raw_excerpt)
+        # Redact before bounding; control characters are not useful discovery text.
+        excerpt = " ".join(
+            "".join(" " if char.isspace() else char for char in safe_excerpt
+                    if char.isspace() or unicodedata.category(char) not in {"Cc", "Cf"}).split()
+        )[:300] or None
     retain_content = rights == "permitted"
     scientific_metadata, structured_content, omitted_fields = _scientific_fields(raw, rights)
     retained = {
@@ -362,6 +378,7 @@ def _item(raw: object, position: int, offset: int | None) -> dict[str, object]:
         "rank_scope": rank_scope,
         "title": title,
         "content": content if retain_content else None,
+        "discovery_excerpt": excerpt,
         "content_sha256": hashlib.sha256(content.encode()).hexdigest() if content else None,
         "content_retained": retain_content and content is not None,
         "content_unretained_reason": None if retain_content or content is None else "rights_not_confirmed",
@@ -374,6 +391,8 @@ def _item(raw: object, position: int, offset: int | None) -> dict[str, object]:
         "omitted_fields": omitted_fields,
     }
     clean, changed = redact(retained)
+    if excerpt_redacted:
+        changed.append("$.discovery_excerpt")
     if url_redacted:
         changed.append("$.original_url")
     clean["redacted_fields"] = sorted(set(changed))
@@ -444,7 +463,7 @@ def normalize_response(
     item_errors: list[dict[str, object]] = []
     for position, entry in enumerate(collection):
         try:
-            accepted.append(_item(entry, position, returned_offset))
+            accepted.append(_item(entry, position, returned_offset, clean_request["route"]))
         except RetrievalFormatError as exc:
             item_errors.append({"position": position, "code": "invalid_item", "reason": str(exc)})
     total_field = "count" if adapter == "count_offset" else "total"
@@ -552,7 +571,7 @@ def normalize_response(
     envelope = {
         "schema": SCHEMA,
         "adapter": adapter,
-        "mapping_version": MAPPING_VERSION[adapter],
+        "mapping_version": ("reference-web-discovery.v1" if clean_request["route"] in DISCOVERY_EXCERPT_ROUTES else MAPPING_VERSION[adapter]),
         "omitted_fields": response_omissions,
         "request": clean_request,
         "retrieved_at": retrieved_at,

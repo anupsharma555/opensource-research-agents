@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+import time
+import urllib.error
+from io import BytesIO
+
+import pytest
+
 from ora.contracts.models import LiveStartRequest
 from ora.coordination.board import ref
 from ora.mission.context import ContextOverflow
+from ora.mission.tool_catalog import DEFERABLE_CORE_TOOLS
+from ora.models.token_estimate import TOKENIZER_BASIS
 from tests.mission.test_service import answer, drain, service
 
 
@@ -104,7 +112,8 @@ def test_context_failure_remains_secondary_when_same_call_later_succeeds(tmp_pat
         host.close()
 
 
-def test_source_free_preflight_fences_both_unfit_attempts_before_dispatch(tmp_path, monkeypatch):
+@pytest.mark.parametrize("planning_selected", [False, True])
+def test_preflight_fences_unfit_attempts_before_dispatch(tmp_path, monkeypatch, planning_selected):
     calls = []
 
     def transport(request, *, timeout):
@@ -119,13 +128,25 @@ def test_source_free_preflight_fences_both_unfit_attempts_before_dispatch(tmp_pa
             agent_ids=["agent-synthesis"],
         ))
 
+        if planning_selected:
+            host._update_control(host._control(run.run_id, "agent-synthesis"),
+                                 active_skill_ids=["task-planning"])
+
         def cannot_fit(*_args, **_kwargs):
             raise ContextOverflow("PRIVATE model input and exception detail")
 
         monkeypatch.setattr(host.context, "assemble", cannot_fit)
         assert host._drive_run(host._run(run.run_id))[0]
         diagnostics = host.store.records("mission_host_diagnostic")
-        assert len(diagnostics) == 2
+        assert len(diagnostics) == 3
+        modes = {
+            (bool(b["body"].get("deferred_core_tool_ids")), b["body"]["source_turn_mode"])
+            for b in host.store.records("mission_call_budget")
+        }
+        assert modes == {
+            (False, "all_allowed_sources_fit"), (True, "all_allowed_sources_fit"),
+            (True, "source_free_recovery"),
+        }
         assert {item["body"]["call_ref"]["id"] for item in diagnostics} == {
             item["id"] for item in host.store.records("agent_call")
         }
@@ -141,11 +162,85 @@ def test_source_free_preflight_fences_both_unfit_attempts_before_dispatch(tmp_pa
             assert call["body"]["attempt_id"] == attempt["id"]
             assert budget["body"]["call_ref"] == ref(call)
             assert "PRIVATE" not in str(saved)
+            assert "preview_stage_token_estimate" not in saved
         assert calls == []
         assert host.store.records("model_request_intent") == []
         assert host.store.records("model_dispatch_attempt") == []
         assert host.store.records("model_response_receipt") == []
         assert {item.status for item in host.state(run.run_id).snapshot.attempts} == {"failed"}
+    finally:
+        host.close()
+
+
+def test_complete_rejected_preview_saves_stage_counts_without_intent_or_dispatch(
+    tmp_path, monkeypatch,
+):
+    def rejected(request, *, timeout):
+        raise urllib.error.HTTPError(
+            "https://example.invalid", 413, "too large",
+            {"x-ratelimit-limit-tokens": "8000", "Retry-After": "0.01"},
+            BytesIO(b'{"error":{"code":"request_too_large"}}'),
+        )
+
+    host = service(tmp_path, monkeypatch, rejected)
+    try:
+        run = host.start(LiveStartRequest(
+            request_id="complete-preview-stage-diagnostic",
+            question="Inspect synthetic source.",
+            evidence_text="DOI: 10.1234/preview. " + "A" * 30000,
+            agent_ids=["agent-synthesis"],
+        ))
+        control = host._control(run.run_id, "agent-synthesis")
+        assert host._schedule_model(control)
+        control = host._control(run.run_id, "agent-synthesis")
+        work = host._work_for(control)
+        spec = host.executor._spec_from(work)
+        capacity_id = host.executor._capacity_id(spec)
+        host.dispatch.poll(control["body"]["mission_id"])
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            receipt = host.store.get(
+                "model_response_receipt",
+                f"model-response:model-intent:{spec.call_id}:{spec.call_version}",
+            )
+            capacity = host.capacity.get(capacity_id)
+            if receipt and capacity and capacity["phase"] == "failed":
+                break
+            time.sleep(.01)
+        assert receipt and receipt["body"]["http_status"] == 413
+        assert host._repair_oversize(control, host._work_for(control), capacity)
+        control = host._control(run.run_id, "agent-synthesis")
+        host._update_control(
+            control, requested_capabilities=sorted(DEFERABLE_CORE_TOOLS),
+            feedback={"status": "synthetic_followup",
+                      "next_action": "Review all required source handles. " * 80},
+        )
+        with pytest.raises(ContextOverflow):
+            host._prepare_model(host._control(run.run_id, "agent-synthesis"))
+        diagnostics = [item["body"] for item in host.store.records("mission_host_diagnostic")
+                       if item["body"].get("reason") == "required_context_not_admitted"]
+        assert len(diagnostics) == 1
+        saved = diagnostics[0]
+        stage = saved["preview_stage_token_estimate"]
+        assert stage["preview_status"] == "complete_request_not_dispatched"
+        assert stage["final_input_tokens"] == saved["complete_request_estimate_tokens"]
+        assert stage["final_input_tokens"] > saved["observed_input_target_tokens"] == 5600
+        assert stage["basis"] == TOKENIZER_BASIS
+        assert len(stage["request_sha256"]) == 64
+        assert sum(item["marginal_tokens"] for item in stage["stages"]) == stage["final_input_tokens"]
+        assert "intent_ref" not in stage and "usage" not in stage
+        assert "Review all required source handles." not in str(stage)
+        assert len(host.store.records("model_request_intent")) == 1
+        assert len(host.store.records("model_dispatch_attempt")) == 1
+        failed_call = host.store.get(**saved["call_ref"])
+        assert host.store.get(
+            "model_request_intent", f"model-intent:{failed_call['id']}:{failed_call['version']}"
+        ) is None
+        assert not any(item["body"].get("call_id") == failed_call["id"]
+                       for item in host.store.records("capacity_operation"))
+        assert host.store.get("mission_call_budget", failed_call["id"])["body"].get(
+            "request_stage_token_estimate"
+        ) is None
     finally:
         host.close()
 

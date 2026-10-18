@@ -36,6 +36,8 @@ def test_old_source_free_preparation_reuses_call_with_fresh_inventory_operation(
         control = host._control(run.run_id, "agent-synthesis")
         host._update_control(control, input_budget={
             "observed_limit_tokens": 12000, "target_fraction": .70,
+            "basis": "qualification_imposed_limit",
+            "actual_provider_observation": False,
         })
         control = host._control(run.run_id, "agent-synthesis")
         call_id, attempt_id = host._model_ids(control, control["body"]["sequence"] + 1)

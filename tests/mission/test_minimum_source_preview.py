@@ -47,6 +47,7 @@ def test_minimum_retry_is_bounded_and_complete_size_checked(tmp_path, monkeypatc
                 'messages': [
                     {'role': 'developer', 'content': 'Synthetic preview instructions.'},
                     {'role': 'user', 'content': ' 0123456789' * units},
+                    *kwargs['messages'],
                 ],
                 'reasoning_effort': 'high', 'include_reasoning': True,
                 'max_completion_tokens': 8192, 'stream': False,

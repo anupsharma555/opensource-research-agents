@@ -57,12 +57,19 @@ failure. Run the existing `.venv` checks independently while repairing setup acc
 | `scripts/dev live serve --runtime mission --allow-model-calls --state-dir .local/research` | Explicitly start the local research host; new and saved unfinished work may call configured providers. |
 | `scripts/dev mission status --state-dir .local/research` | Read that host's saved research state without starting work. |
 | `scripts/dev setup --offline` | Install from populated caches; report an unavailable package precisely. |
+| `scripts/dev setup --observability` | Install the pinned, optional OpenTelemetry SDK and OTLP HTTP exporter for explicit trace export. |
 
 `ORA_NODE_BIN` may select an explicit **matching** Node executable. It is not a
 version fallback. Optional runtime comparisons have their own pinned dependency
 snapshots under `experiments/runtime_comparison/`; the chosen first runtime is
 standard-library asyncio and SQLite, so those frameworks are not core dependencies.
 The selected-model skill experiment is separately invoked and never part of CI.
+
+Observability dependencies are opt-in. `setup --observability` uses the same
+committed `uv.lock` and ordinary frontend setup; it does not enable trace export,
+read `.env`, or contact LangSmith. Export requires separate explicit runtime
+configuration. A later default `setup` returns the Python environment to its
+default dependency set.
 
 ## Deliberate dependency updates
 
@@ -76,6 +83,13 @@ An optional provider, framework or sandbox being unavailable affects its own
 qualification. It does not prevent the shared offline foundation from being used.
 
 ## Optional live Atlas connection
+
+Public PDF text reading uses Poppler (`pdftotext`). Optional selected-page OCR
+also needs Poppler's `pdfinfo`/`pdftoppm` and Tesseract with English language data
+on `PATH`. The pinned Python Pillow dependency prepares bounded PNG/JPEG crops
+and scaled OCR images. Poppler/Tesseract are local OS packages; setup does not
+install them or activate vision calls. See [document readers](document-readers.md)
+for formats, bounds, run-level vision opt-in and verification limits.
 
 See [Stage 4 local research](stage4-local.md) for explicit model activation,
 private state, native/browser launch, inspection commands and qualification.

@@ -9,7 +9,20 @@ it separately checks permissions and executes the selected actions.
 from __future__ import annotations
 
 from ora.agents.capabilities import content_hash
-from ora.contracts.models import ReadPlanInput, SavePlanInput
+from ora.contracts.models import (
+    CancelSearchInput,
+    FetchSourceAssetInput,
+    InspectFigureInput,
+    LegacySavePlanInput,
+    ListSourceAssetsInput,
+    ModifyPlanInput,
+    ReadDocumentOCRInput,
+    ReadPlanInput,
+    ReadSearchResultsInput,
+    RenderSourceInput,
+    SavePlanInput,
+    SearchWebInput,
+)
 from ora.retrieval.catalog_tools import CATALOG_TOOL_DESCRIPTIONS, CATALOG_TOOL_SCHEMAS
 from ora.retrieval.discovery import available_routes
 
@@ -30,60 +43,74 @@ CORE_RESEARCH_TOOLS = frozenset(
         "read_context_record",
     }
 )
+# These defaults stay granted and requestable when their schemas cannot fit.
+# Explicit peer selections and active skill tools take precedence over deferral.
+DEFERABLE_CORE_TOOLS = frozenset({
+    "search_scholarly", "read_context_record", "peer_request", "review_peer_answer", "board_read",
+})
 CORE_INVITATION_TOOLS = frozenset(
     {"discover_capabilities", "request_capability", "respond_invitation", "read_context_page"}
 )
 SOURCE_RECOVERY_TOOLS = frozenset({"read_source_inventory", "select_working_sources"})
 UNHANDLED_COMMON_TOOLS = frozenset({"claim_work", "peer_invite", "subscribe"})
 TOOL_PURPOSES = {
-    "browser_search": "Select Groq-native web discovery next turn; it is not a local function",
-    "read_browser_search_result": "Page this task's saved web discovery text and links",
-    "calculate": "Calculate arithmetic from supplied values; no source validation",
-    "search_saved_passages": "Find text within this task's permitted saved sources",
-    "read_skill_resource": "Read an active skill's instructions, examples or helper source",
-    "activate_skill": "Load optional workflow guidance and its permitted tools",
-    "release_skill": "Release optional skill guidance and its tool selections",
-    "release_capability": "Release one explicit tool selection",
-    "read_tool_result": "Page a saved tool result using current permissions",
-    "compact_conversation": "Save this peer's concise task continuation summary and archive completed visible assistant/tool exchanges",
-    "read_conversation_history": "Page this peer's saved assistant/tool exchanges with current source permissions",
-    "board_read": "List open board proposals and optional work",
-    "claim_work": "Low-level host claim; executor manages mission claims",
-    "discover_capabilities": "List tools, purposes and current access status",
-    "evidence_lookup": "List passage IDs and URL for one current source copy",
-    "peer_invite": "Low-level invite; use invite_peer in missions",
-    "peer_request": "Ask a registered peer a focused question",
-    "request_capability": "Select one permitted optional tool for the next turn",
-    "subscribe": "Low-level subscription; host delivers mission updates",
-    "defer_work": "Defer an exact optional proposal",
-    "fetch_source": "Fetch and inspect one saved hit's public URL",
-    "inspect_hit": "Inspect retained text from one saved retrieval hit",
-    "invite_peer": "Invite a configured role to exact open work",
-    "list_optional_work": "List optional tasks and their current versions",
-    "propose_scope_completion": "Propose completion of the requested scope",
-    "propose_work": "Create an optional research branch",
-    "publish_result": "Save a report and finish this peer's task",
-    "read_context_page": "List saved record references and short previews",
-    "read_context_record": "Read saved report, message or note text",
-    "read_note": "Read this peer's task note by note ID",
-    "read_source_window": "Read source text and return exact citation spans",
-    "read_source_inventory": "List saved source copies and access status during recovery",
-    "select_working_sources": "Choose source copies for the next model turn",
-    "respond_invitation": "Accept, decline or counter your saved invitation",
-    "review_peer_answer": "Record your review of an answer to your request",
-    "revise_work": "Revise an exact current work proposal",
-    "search_notes": "Search this peer's task notes",
-    "search_scholarly": "Search scholarly records or retrieve selected content",
-    "write_note": "Save or revise this peer's task note",
-    "save_plan": "Save or revise this peer's optional task plan without scheduling work",
-    "read_plan": "Read this peer's exact plan revision and changed reference heads",
-    "list_venues": "List dated research-venue discovery leads",
-    "propose_venue": "Save an additional research-venue lead",
-    "navigate_venue": "Open one saved venue and list public links",
-    "page_venue_navigation": "Page saved venue links without another fetch",
-    "inspect_navigation_document": "Check retained HTML from this task's saved navigation for source reading",
-    "estimate_latency": "Record or revise a rough task duration expectation",
-    "wait_for_dependencies": "Wait for specific peer answers or prerequisite tasks",
+    "list_source_assets": "Discover source-linked figures from exact retained HTML/XML",
+    "fetch_source_asset": "Fetch one discovered public figure image by exact asset reference",
+    "read_document_ocr": "Local OCR of one scanned page/image; unverified text",
+    "inspect_figure": "Vision-opt-in figure question; unverified interpretation",
+    "render_source": "Optional Browserless render after ordinary extraction",
+    "search_web": "Exa-first web search: quick for one targeted lookup; research for multiple complementary queries. Same-task identical searches reuse saved results unless refresh=true.",
+    "read_search_results": "Page saved operation results; no new search",
+    "cancel_search": "Cancel pending retrieval; keep completed results",
+    "browser_search": "Groq browsing for linked-page exploration; native provider tool, not a local function",
+    "read_browser_search_result": "Page saved browser discovery text/links",
+    "calculate": "Arithmetic on supplied values; no source validation",
+    "search_saved_passages": "Saved-source search: find text in retained permitted sources; no web request",
+    "read_skill_resource": "Page active skill guidance/examples/helper source",
+    "activate_skill": "Load optional guidance and selected tools",
+    "release_skill": "Release optional guidance and its tools",
+    "release_capability": "Release one selected tool",
+    "read_tool_result": "Page saved result under current permissions",
+    "compact_conversation": "Archive exchanges with a continuation summary",
+    "read_conversation_history": "Page archived exchanges under current permissions",
+    "board_read": "List open proposals and optional work",
+    "claim_work": "Low-level host claim; executor owns claims",
+    "discover_capabilities": "List tools, purposes and access",
+    "evidence_lookup": "Find current copy's passage IDs and URL",
+    "peer_invite": "Low-level invite; use invite_peer",
+    "peer_request": "Ask a registered peer",
+    "request_capability": "Select permitted tool for next turn",
+    "subscribe": "Low-level host subscription",
+    "defer_work": "Defer exact optional proposal",
+    "fetch_source": "Fetch and inspect saved public hit",
+    "inspect_hit": "Inspect retained saved-hit text",
+    "invite_peer": "Invite role to exact open work",
+    "list_optional_work": "List optional tasks/versions",
+    "propose_scope_completion": "Propose requested-scope completion",
+    "propose_work": "Create optional research branch",
+    "publish_result": "Save report and finish peer task",
+    "read_context_page": "List saved refs and previews",
+    "read_context_record": "Read saved record text",
+    "read_note": "Read own task note by ID",
+    "read_source_window": "Read exact source window/citation spans",
+    "read_source_inventory": "List saved copies and access during recovery",
+    "select_working_sources": "Select copies for next model turn",
+    "respond_invitation": "Accept, decline or counter invitation",
+    "review_peer_answer": "Review answer to own request",
+    "revise_work": "Revise exact current proposal",
+    "search_notes": "Find own task notes",
+    "search_scholarly": "Scholarly databases or exact DOI/PMID",
+    "write_note": "Save or revise own task note",
+    "save_plan": "Create first optional task plan",
+    "modify_plan": "Edit existing plan fields/steps",
+    "read_plan": "Read exact plan revision/stale refs",
+    "list_venues": "List dated venue leads",
+    "propose_venue": "Save additional venue lead",
+    "navigate_venue": "Open venue and list public links",
+    "page_venue_navigation": "Page saved links; no new fetch",
+    "inspect_navigation_document": "Inspect retained navigation HTML",
+    "estimate_latency": "Record rough task duration",
+    "wait_for_dependencies": "Wait for peer answers/prerequisites",
 }
 ROUTE_ALIASES = {
     "pubmed": "pubmed.search",
@@ -124,7 +151,25 @@ def tool_contract_matches(current: dict, saved: dict) -> bool:
         }
 
     try:
-        return contract(current) == contract(saved)
+        current_contract, saved_contract = contract(current), contract(saved)
+        if current_contract == saved_contract:
+            return True
+        # Saved search_web calls before optional refresh was introduced keep
+        # their exact old argument schema. The current handler defaults it to
+        # false; all other descriptor fields and schema fields must still match.
+        if current_contract.get("tool_id") != "search_web":
+            return False
+        schema = current_contract["schema"]
+        if (schema.get("properties", {}).get("refresh") != {
+                "title": "Refresh", "type": "boolean",
+            } or "refresh" in schema.get("required", [])):
+            return False
+        legacy_schema = {
+            **schema,
+            "properties": {key: value for key, value in schema["properties"].items()
+                           if key != "refresh"},
+        }
+        return saved_contract == {**current_contract, "schema": legacy_schema}
     except (ValueError, TypeError, AttributeError):
         return False
 
@@ -156,8 +201,24 @@ def _plan_schema(model) -> dict:
     return inline(schema)
 
 
+LEGACY_SAVE_PLAN_SCHEMA = _plan_schema(LegacySavePlanInput)
+LEGACY_SAVE_PLAN_DESCRIPTION = (
+    "Save or revise this peer's optional plan. Use expected_version 0 to create "
+    "or the current revision to replace the complete plan. No work is scheduled."
+)
+
+
 TOOL_SCHEMAS = {
+    "list_source_assets": _plan_schema(ListSourceAssetsInput),
+    "fetch_source_asset": _plan_schema(FetchSourceAssetInput),
+    "read_document_ocr": _plan_schema(ReadDocumentOCRInput),
+    "inspect_figure": _plan_schema(InspectFigureInput),
+    "render_source": _plan_schema(RenderSourceInput),
+    "search_web": _plan_schema(SearchWebInput),
+    "read_search_results": _plan_schema(ReadSearchResultsInput),
+    "cancel_search": _plan_schema(CancelSearchInput),
     "save_plan": _plan_schema(SavePlanInput),
+    "modify_plan": _plan_schema(ModifyPlanInput),
     "read_plan": _plan_schema(ReadPlanInput),
     "browser_search": _schema({}, []),
     "read_browser_search_result": _schema(
@@ -204,7 +265,7 @@ TOOL_SCHEMAS = {
         {
             "route": {
                 "type": "string",
-                "enum": sorted(set(available_routes()) | set(ROUTE_ALIASES)),
+                "enum": sorted((set(available_routes()) - {"tavily.search", "searxng.search"}) | set(ROUTE_ALIASES)),
                 "description": "Choose an exact route; pubmed and crossref aliases select search only.",
             },
             "query": {"type": "string", "description": "Required nonempty terms for search routes; optional for an exact selected_id or selected_url fetch."},
@@ -425,84 +486,66 @@ TOOL_SCHEMAS.update(CATALOG_TOOL_SCHEMAS)
 TOOL_SCHEMAS.update(OBSERVATION_TOOL_SCHEMAS)
 
 TOOL_DESCRIPTIONS = {
-    "save_plan": "Save an optional, advisory plan for this peer's current task. Use "
-    "expected_version 0 to create or the current plan version to revise. Give a "
-    "reason and exact evidence/work/peer references when relevant. Step dependencies "
-    "describe intended reasoning order; they do not schedule work, assign peers, "
-    "satisfy obligations or complete the task. Repeated revisions without new research "
-    "progress return a local churn diagnostic; other research tools remain usable.",
+    "list_source_assets": "List figure or table images authored in the exact retained HTML/XML source copy. Supply its source_id and source_version. Captions and links are untrusted source content; this makes no network or model call. Only a selected same-task, currently permitted copy can be used.",
+    "fetch_source_asset": "Fetch one authored PNG/JPEG by exact asset_ref from list_source_assets. Returns an image document_ref and page-1 reader actions. Request a deferred reader with request_capability first if its schema is not attached. No arbitrary URL; current parent and image use are rechecked.",
+    "read_document_ocr": "Recover printed text from one saved PDF page or PNG/JPEG. Supply document_ref from fetch_source or fetch_source_asset and page_number (1 for an image). Optional region isolates known coordinates; layout selects page, block or sparse labels. Preserve next_request when paging. OCR is unverified transcription, not a checked citation or figure interpretation; no vision call occurs.",
+    "inspect_figure": "Ask your own specific visual question about one saved PDF page or PNG/JPEG image. Supply exact document_ref from fetch_source or fetch_source_asset, one-based page_number (1 for an image), and question. Requires this run's vision opt-in; returns an unverified interpretation and usage.",
+    "render_source": "Explicit Browserless extraction of a selected public page after fetch_source has saved ordinary HTML. Supply its exact ordinary_document_ref and the missing-content reason. Preserves a separate rendered copy and existing source permissions; no login, unblock, or general discovery. At most one render runs in the shared pool. Read the retained copy before citing.",
+    "search_web": "Find web leads, not evidence. quick: one Exa fast query; research: up to ten complementary Exa auto queries. Include information_need; prefer saved sources/URLs/IDs. Tavily or SearXNG may fill gaps; quick uses configured Tavily fallback after known empty/failed retrieval. Identical searches reuse unless refresh=true.",
+    "read_search_results": "Page saved operation_id candidates by cursor; no new provider request. wait=true pauses for results. Fetch returned hit IDs before citing.",
+    "cancel_search": "Stop pending retrieval in this peer task's operation_id. Completed and late known results remain readable; in-flight external calls cannot be recalled or blindly replayed.",
+    "save_plan": "Create this peer's first optional task plan. Provide the complete initial plan; "
+    "expected_version must be 0. If a plan exists, use modify_plan. A plan records intent, "
+    "not dispatched work or task completion. The skill offers an optional planning template.",
+    "modify_plan": "Modify an existing plan using its exact expected_version and a revision_reason. "
+    "Supply only changed fields. Top-level lists replace those fields ([] clears an optional list); "
+    "update_steps edits existing stable IDs, add_steps adds new IDs, and remove_step_ids removes IDs. "
+    "Untouched fields and steps are retained. The entire resulting plan must have valid, acyclic "
+    "dependencies. This cannot create a plan or schedule work. Use the last returned revision, "
+    "or read_plan when needed; reread after a stale-version rejection.",
     "read_plan": "Read this peer's saved plan, or an exact historical version, with "
     "current task state and stale-reference markers. No arguments reads the current "
     "plan. The note text contains its structured JSON when current source use permits. "
     "A plan is a continuation aid, not accepted evidence or permission to execute work.",
-    "board_read": "List this mission's open proposal references and optional work. "
-    "No arguments needed; topic is unused. Returns work summaries, not report/source text.",
-    "discover_capabilities": "List granted tools, purposes and current access status. "
-    "No arguments. Use when the current menu is insufficient; this does not enable tools.",
-    "request_capability": "Select a request-first tool by exact tool_id; wait for its "
-    "schema next turn before calling. Does not execute it or supply missing data. "
-    "browser_search selects a native provider turn. Call attached tools directly.",
-    "peer_request": "Send a focused question to another registered peer using "
-    "target_instance_id or its unique alias/name. Include brief context and saved "
-    "references in question. Returns a request, not an answer. Invite absent roles first.",
+    "board_read": "List open proposal refs and optional work, without report or source text. "
+    "No arguments; topic is unused.",
+    "discover_capabilities": "List this role's tools, purposes and current access. Does not enable tools.",
+    "request_capability": "Select an exact request-first tool_id for the next turn; does not execute it. browser_search is native.",
+    "peer_request": "Ask a registered peer by exact instance ID or unique alias/name. "
+    "Include brief context and saved refs. Invite absent roles first.",
     "evidence_lookup": "Look up one inspected source_id among this task's selected source "
     "copies. Returns saved passage IDs and the source URL, without passage text. "
     "Use read_source_window to read the source; report IDs are not source IDs.",
     "browser_search": "Groq-hosted general web discovery on the selected GPT-OSS model. Request this capability to make native browser search available for one non-streaming model turn. Returned text, URLs and citation markers are discovery leads, not inspected source evidence; fetch returned hit IDs before using source passages. This uses the same selected Groq account and its allowance.",
     "read_browser_search_result": "Read this peer's saved browser-enabled response by response_id. Search text is unverified discovery material; only explicit returned URLs become hit IDs for fetch_source. Follow next_request to page exact content without another search. Opaque citation markers are not resolved URLs or inspected passages.",
     "calculate": CALCULATION_TOOL_DESCRIPTION,
-    "search_saved_passages": "Search this task's currently permitted retained extracted text with 1-8 word terms. Results are navigation snippets, not checked citation passages. Follow a hit's next_request to read_source_window; follow the page next_request for more matches. No match does not establish absence from the original source.",
+    "search_saved_passages": "Find 1-8 word terms in this task's permitted retained text. Snippets are navigation, not citation spans; follow next_request to read_source_window. No match does not establish original-source absence.",
     "read_skill_resource": "Read a bounded page of an active role-granted skill's registered rich_instructions, synthetic example or helper_source. Never executes the helper or reads arbitrary paths. Start at offset 0; follow next_request with its content hash. Activation and package pins are rechecked on every read.",
     "compact_conversation": "Write a concise continuation summary of the current task, open questions, contrary evidence and exact source IDs. This is your own working summary, not verified evidence. The host archives completed visible assistant/tool exchanges without deleting their records. Use read_conversation_history with the returned archive_id to recover exact exchange text.",
     "read_conversation_history": "Read saved assistant/tool exchanges for this actor's task using the archive_id returned by compact_conversation. Start with cursor 0 and empty projection_sha256; follow next_request for later pages. Current source permissions are checked again.",
-    "activate_skill": "Load optional workflow guidance using the exact role-granted skill_id. Its instructions and permitted tools become available next turn until released. It does not grant permissions or execute those tools.",
-    "release_skill": "Unload an optional skill by its exact skill_id next turn. Core rules and separately requested tools remain; saved research is retained.",
-    "release_capability": "Release an explicit selection by tool_id next turn. Core or active-skill tools remain exposed; this does not cancel work or delete results.",
-    "read_tool_result": "Read a bounded saved tool result by result_id for this actor and task, without executing the tool again. Follow next_request; use an empty projection_sha256 only at offset zero to start a fresh current-permission projection.",
-    "search_scholarly": "Choose route and limit: search routes use query; pubmed.pmid "
-    "(metadata), pubmed.abstract (abstract text) and crossref.doi use selected_id. "
-    "Numeric PMID IDs are accepted. exa.contents uses selected_url. Route IDs are "
-    "arguments, never function names. Europe PMC uses cursor; PubMed/Crossref use offset. "
-    "Use supported filters and returned next_request. Returns metadata/text and hit IDs "
-    "as the route permits; inspect hits before citing passages.",
-    "inspect_hit": "Inspect a saved retrieval hit by exact hit_id, not a source-copy ID, PMID or DOI. "
-    "Checks already-retained content; it does not fetch missing text from the web. "
-    "Returns a checked passage reference only when source use permits it.",
-    "fetch_source": "Fetch and inspect the public URL identified by a saved hit_id on an "
-    "enabled host; do not pass a URL as hit_id. Returns source/inspection results. "
-    "A successful fetch alone does not grant source-use permission.",
-    "read_source_window": "Read one bounded exact block window of an inspected permitted source copy. "
-    "Use the exact source_id and source_version from a supplied source packet, source inventory "
-    "or inspection result; a retained source copy does not need inspect_hit first. "
-    "Returns source text and exact citation spans, not report or note text. "
-    "Choose a positive char_limit for the "
-    f"needed text, clamped to {MAX_MISSION_SOURCE_WINDOW_CHARS} characters per block. next_request continues the exact copy. "
-    "A saved window enters the next model input only if its complete request fits. New passages "
-    "append to next-call selection by default, so adjacent windows can be read together. "
-    "Set selection_mode=replace to focus the next model input on this window; earlier "
-    "source-window text is then absent from that input, though its saved references remain "
-    "available. For a full reread from offset 0, replace avoids retaining the earlier "
-    "prefix twice. Use notes or append if joint reading is needed.",
+    "activate_skill": "Load exact role-granted skill_id guidance and tools next turn until released; no execution or new permission.",
+    "release_skill": "Unload exact skill_id next turn. Core and separately selected tools, and saved work, remain.",
+    "release_capability": "Release exact selected tool_id next turn; core/active-skill tools and saved work remain.",
+    "read_tool_result": "Page this task's saved result_id without rerunning it. Follow next_request; empty projection_sha256 starts at offset zero under current permissions.",
+    "search_scholarly": "Choose route/limit. Search uses query; exact PMID/DOI uses selected_id; exa.contents uses selected_url. pubmed.abstract returns available text, pubmed.pmid metadata. Europe PMC pages by cursor; PubMed/Crossref by offset. Inspect before citing.",
+    "inspect_hit": "Inspect retained text by exact hit_id, not source ID, PMID or DOI. Does not fetch missing text. For metadata-only hits use source_text_options or fetch_source. Returns checked passages only when permitted.",
+    "fetch_source": "Fetch public HTML/PDF/XML/text by hit_id, not URL. Read selectable text with read_source_window; OCR scans; inspect_figure handles authorized visual questions. Download alone grants no source use.",
+    "read_source_window": "Read selectable text from a permitted source copy, including text PDFs; PNG/JPEG images have no text windows. For image labels use read_document_ocr; for a visual question use opt-in inspect_figure. Request either reader with request_capability first if its schema is not attached. Follow next_request for more text.",
     "read_source_inventory": "Page exact source-copy IDs, versions and use status without source text. "
     "Use inventory_id/version and cursor/limit from a source-free recovery turn. "
     "This lists saved copies; it does not search the web or read their text.",
     "select_working_sources": "Choose exact saved source copies for the next model turn; "
     "use source_refs from the inventory and its current expected_version. An empty list is "
     "allowed. Returns the saved selection; source-use permissions are unchanged.",
-    "publish_result": "Save this peer's report and finish its task. Cite original-source "
-    "claims with exact inspected source/span pairs; attribute peer records in text. "
-    "Include limitations. Other mission work may continue.",
+    "publish_result": "Save report and finish peer task. Cite claims with inspected source/span pairs; attribute peer input and include limits. Other work may continue.",
     "review_peer_answer": "Review an answer to your request using request_id, answer_id, "
     "disposition answered or partly_answered, and reason. Saves your review, not a report.",
-    "read_context_page": "List saved record references and short previews omitted from a prior "
-    "model input. Read full report text with read_context_record; an existing read_request "
-    "can be used directly. Use the inclusion_id shown in that input and a positive item "
-    "limit. The returned page may be smaller; follow next_cursor to continue listing.",
-    "read_context_record": "Read the text of one authorized saved report, message, board "
-    "record or working note in bounded windows. Use its read_request arguments when supplied. "
-    "inclusion_id identifies the context index; kind/id/version identify the record. "
-    "Returns permitted text or its current access status. Follow next_request for more "
-    "text; original sources use checked source readers.",
+    "read_context_page": "List omitted saved record refs and previews by inclusion_id. "
+    "Use a positive item limit and follow next_cursor. For full text, use a supplied "
+    "read_request with read_context_record.",
+    "read_context_record": "Read authorized report, message, board or note text in bounded "
+    "windows. Use a supplied read_request or inclusion_id with exact kind/id/version. "
+    "Follow next_request; original sources use checked source readers.",
     "write_note": "Save this actor's task note using note_id and text, with category "
     "note, hypothesis, contradiction, next_action or checkpoint. Use "
     "expected_version 0 for a new note or its exact current version to revise it. "

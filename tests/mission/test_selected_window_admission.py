@@ -188,7 +188,8 @@ def test_selected_window_archives_exact_duplicate_when_full_request_needs_space(
         control = host._control(run.run_id, actor)
         proposal = host.store.get("board_proposal", control["body"]["task_id"])
         candidates = []
-        for target in range(6200, 6801, 50):
+        # Catalog descriptions can shift the exact fit; retain an 8k search bound.
+        for target in range(6200, 8001, 50):
             plan = plan_source_turn(host.store, ref(control),
                                     source_input_allowance_tokens=target)
             if plan["mode"] == "source_free_recovery":
@@ -235,7 +236,7 @@ def test_selected_window_archives_exact_duplicate_when_full_request_needs_space(
             "publish_result", "read_context_page", "read_context_record",
             "read_source_inventory", "read_source_window", "release_skill",
             "request_capability", "review_peer_answer", "search_scholarly",
-            "select_working_sources",
+            "select_working_sources", "search_saved_passages",
         }
         assert len(call["body"]["exposed_tools"]) == len(expected_tools)
         assert set(call["body"]["exposed_tools"]) == expected_tools

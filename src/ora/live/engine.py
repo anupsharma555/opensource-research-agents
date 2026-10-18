@@ -477,6 +477,8 @@ class ResearchHost:
         # additions must not change the identity of an unchanged saved request.
         body.pop("requiredAgentIds", None)
         body.pop("credentialProfile", None)
+        if not request.allow_vision:
+            body.pop("allowVision", None)
         return hashlib.sha256(_json(body).encode()).hexdigest()
 
     def _duplicate(self, db: sqlite3.Connection, request: Any) -> LiveReceipt | None:
@@ -498,6 +500,8 @@ class ResearchHost:
             raise LiveError("Host is closed", 503)
         if not isinstance(request, LiveStartRequest):
             request = LiveStartRequest.model_validate(request)
+        if request.allow_vision:
+            raise LiveError("Vision calls need the shared mission runtime")
         if request.required_agent_ids:
             raise LiveError("Required contribution choices need the shared mission runtime")
         if request.credential_profile not in {None, "primary"}:
@@ -545,6 +549,8 @@ class ResearchHost:
             raise LiveError("Host is closed", 503)
         if not isinstance(request, LiveFollowupRequest):
             request = LiveFollowupRequest.model_validate(request)
+        if request.allow_vision:
+            raise LiveError("Vision calls need the shared mission runtime")
         if request.required_agent_ids:
             raise LiveError("Required contribution choices need the shared mission runtime")
         if request.credential_profile not in {None, "primary"}:
@@ -1065,6 +1071,7 @@ class ResearchHost:
                 "content",
                 "tool_calls",
                 "usage",
+                "cache_observation",
                 "model",
                 "elapsed_seconds",
                 "finish_reason",

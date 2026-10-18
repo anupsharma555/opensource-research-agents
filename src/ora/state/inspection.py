@@ -111,6 +111,8 @@ def save_snapshot(store: StateStore, operation_id: str, snapshot: dict, *, sourc
                     ):
                         raise StateError("Source encounter belongs to a different navigation")
                 elif document_ref:
+                    from ora.evidence.source_assets import document_copy_reference_matches
+
                     document = tx.get(**document_ref)
                     if (
                         publication is not None
@@ -118,7 +120,8 @@ def save_snapshot(store: StateStore, operation_id: str, snapshot: dict, *, sourc
                         or document is None
                         or document["body"].get("mission_id") != origin_mission_id
                         or document["body"].get("content_sha256") != copy_body["content_sha256"]
-                        or document["body"].get("final_url") != copy_body["reference"]
+                        or not document_copy_reference_matches(
+                            tx, document, copy_body["reference"])
                     ):
                         raise StateError("Source encounter belongs to a different public fetch")
                 elif (

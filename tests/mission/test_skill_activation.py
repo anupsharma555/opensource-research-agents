@@ -25,7 +25,7 @@ def test_optional_activation_release_and_explicit_tools_survive_restart(tmp_path
         step = len(requests)
         names = {entry["function"]["name"] for entry in body["tools"]}
         instructions = body["messages"][0]["content"]
-        assert "Use exact source and span identifiers" in instructions
+        assert "Cite inspected supporting source/span IDs" in instructions
         assert "Link a narrow claim" in instructions or "# Evidence linking" in instructions
         if step == 1:
             assert "study-appraisal" in instructions
@@ -220,7 +220,8 @@ def test_legacy_selection_receipt_replays_after_interrupted_control_update(tmp_p
         host.close()
 
 
-def test_old_oversized_result_exposes_reader_after_restart_without_new_flag(tmp_path, monkeypatch):
+@pytest.mark.parametrize("saved_flag", ["missing", False])
+def test_old_oversized_result_exposes_reader_after_restart(tmp_path, monkeypatch, saved_flag):
     requests = []
 
     def transport(request, *, timeout):
@@ -262,8 +263,11 @@ def test_old_oversized_result_exposes_reader_after_restart_without_new_flag(tmp_
     else:
         raise AssertionError("Oversized saved result did not reach next-call state")
     assert len(requests) == 2
-    legacy_body = {key: value for key, value in control["body"].items()
-                   if key != "pageable_tool_results_available"}
+    legacy_body = dict(control["body"])
+    if saved_flag == "missing":
+        legacy_body.pop("pageable_tool_results_available", None)
+    else:
+        legacy_body["pageable_tool_results_available"] = False
     host._save("mission_task_control", control["id"], legacy_body,
                mission_id=legacy_body["mission_id"], operation_id="legacy-paging-control")
     host.close()
