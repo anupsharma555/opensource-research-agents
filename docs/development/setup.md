@@ -91,6 +91,12 @@ and scaled OCR images. Poppler/Tesseract are local OS packages; setup does not
 install them or activate vision calls. See [document readers](document-readers.md)
 for formats, bounds, run-level vision opt-in and verification limits.
 
+The offline GitHub check installs Ubuntu's `poppler-utils`, `tesseract-ocr` and
+`tesseract-ocr-eng` packages and verifies those commands and English language data
+before testing synthetic documents. It also installs the pinned observability
+extra so exporter tests run; this does not activate provider calls or trace export.
+CI stops at the first failing Python test and prints its traceback.
+
 See [Stage 4 local research](stage4-local.md) for explicit model activation,
 private state, native/browser launch, inspection commands and qualification.
 The [earlier supplied-evidence extension](live-research.md) uses its explicit legacy runtime.

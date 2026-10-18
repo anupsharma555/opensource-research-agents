@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
 import time
 from datetime import datetime, timezone
@@ -154,6 +155,14 @@ def run_case(store, case, budget, values, state_dir, *, clock, sleep):
                 budget.save()
                 return
             wake = datetime.fromisoformat(retry_at.replace("Z", "+00:00")).timestamp()
+            wait_ref = result.get("wait_ref")
+            saved_wait = store.get(**wait_ref) if isinstance(wait_ref, dict) else None
+            if saved_wait and saved_wait["body"].get("route") == case["route"] and (
+                saved_wait["body"].get("retry_at") == retry_at
+            ):
+                exact_wake = saved_wait["body"].get("until_epoch")
+                if type(exact_wake) in (int, float) and math.isfinite(exact_wake):
+                    wake = exact_wake
             if wake >= min(row["deadline"], budget.data["deadline"]):
                 row.update(status="pending", reason="rate_wait_beyond_observation", wake_at=wake)
                 budget.save()

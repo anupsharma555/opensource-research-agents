@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import time
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
@@ -166,8 +165,9 @@ def test_malformed_result_item_stops_before_another_provider(tmp_path):
     assert result["stop_reason"] == "malformed_provider_items" and len(calls) == 1
 
 
-def test_known_rate_wait_uses_saved_reset_and_only_one_retry(tmp_path, monkeypatch):
-    epoch = [time.time()]
+@pytest.mark.parametrize("start", [1792293000.1234562, 1792293000.1234568])
+def test_known_rate_wait_uses_saved_reset_and_only_one_retry(tmp_path, monkeypatch, start):
+    epoch = [start]
     sleeps, calls = [], []
     def sleep(seconds):
         sleeps.append(seconds)
@@ -181,6 +181,9 @@ def test_known_rate_wait_uses_saved_reset_and_only_one_retry(tmp_path, monkeypat
     assert len(calls) == 2 and calls[1] >= calls[0] + 2
     assert sum(sleeps) == pytest.approx(2)
     assert result["cases"][0]["status"] == "pending"
+    ledger = json.loads((tmp_path / ".local/search-validation/batches/synthetic-batch.json").read_text())
+    assert ledger["cases"]["exa-fast"]["retry_count"] == 1
+    assert len(ledger["attempts"]) == 2
     assert result["stop_reason"] is None
 
 
