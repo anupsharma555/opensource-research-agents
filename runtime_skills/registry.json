@@ -2,7 +2,7 @@
   "registry_version": "1.1.0",
   "roles": {
     "path": "roles/roles.json",
-    "sha256": "e21c5a58105e3d36b0045ba22dc817de5882166f10de387bc1f2388152ead756"
+    "sha256": "de79df1abeba1243afc634b9a0ed978cbcf2fa7774a886499f500f48fa147195"
   },
   "schema": "ora.runtime_skills.registry.v1",
   "skills": [

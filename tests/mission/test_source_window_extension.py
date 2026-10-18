@@ -48,13 +48,15 @@ def test_requested_abstract_window_enters_fitting_exact_model_input(
                 "x-ratelimit-limit-tokens": "8000",
             }
             return response
-        prior = json.loads(next(
-            message["content"] for message in reversed(body["messages"])
-            if message["role"] == "tool"
-        ))
+        tool_messages = [
+            message for message in body["messages"] if message["role"] == "tool"
+        ]
+        prior = json.loads(tool_messages[-1]["content"]) if tool_messages else None
         if turn == 2:
+            assert prior is not None
             return tool("inspect_hit", {"hit_id": prior["hits"][0]["hit_id"]}, turn)
         if turn == 3:
+            assert prior is not None
             saved_result = store.get(**prior["saved_tool_result_ref"])
             original = json.loads(store.read_blob(saved_result["body"]["blob"]["sha256"]))
             original_preview = json.loads(original["content"])["preview"]["text"]
@@ -72,15 +74,35 @@ def test_requested_abstract_window_enters_fitting_exact_model_input(
                 "char_limit": requested, "selection_mode": "replace",
             }, turn)
         if turn == 4:
-            saved_result = store.get(**prior["saved_tool_result_ref"])
+            saved_result = next(
+                item for item in store.records("context_tool_result")
+                if json.loads(store.read_blob(item["body"]["blob"]["sha256"]))["name"]
+                == "read_source_window"
+            )
+            if prior is not None:
+                assert prior["saved_tool_result_ref"] == {
+                    key: saved_result[key] for key in ("kind", "id", "version")
+                }
             original = json.loads(store.read_blob(saved_result["body"]["blob"]["sha256"]))
             original_window = json.loads(original["content"])
             packet = json.loads(body["messages"][1]["content"])["source_packets"][0]
+            working = json.loads(body["messages"][-1]["content"])
+            delivered_window = (
+                prior if prior is not None else working["last_checked_window"]
+            )
+            assert delivered_window["window_ref"] == original_window["window_ref"]
+            assert delivered_window["next_cursor"] == original_window["next_cursor"]
+            if prior is None:
+                assert delivered_window["source_text_status"] == (
+                    "checked_window_passages_in_selected_source_packet"
+                )
             assert original_window["requested_char_limit"] == requested
             assert original_window["effective_char_limit"] == requested
-            assert prior["returned_chars"] == min(requested, len(abstract))
+            assert original_window["returned_chars"] == min(requested, len(abstract))
+            assert packet["passage_refs"] == original_window["passage_refs"]
+            assert packet["id"] == original_window["copy_ref"]["id"]
             assert packet["text"].count(original_window["passages"][0]["text_preview"]) == 1
-            assert prior["next_cursor"] == original_window["next_cursor"] == (
+            assert original_window["next_cursor"] == (
                 None if requested >= len(abstract)
                 else {"block_offset": 0, "char_offset": requested}
             )
@@ -297,7 +319,11 @@ def test_over_16k_request_pages_and_does_not_claim_oversized_model_delivery(
         ][source_ref["id"]] == window_result["passage_refs"]
 
         host._update_control(
-            control, input_budget={"observed_limit_tokens": 8000, "target_fraction": .70},
+            control, input_budget={
+                "observed_limit_tokens": 8000, "target_fraction": .70,
+                "basis": "qualification_imposed_limit",
+                "actual_provider_observation": False,
+            },
         )
         assert host._schedule_model(host._control(run.run_id, "agent-synthesis"))
         call_ref = host._control(run.run_id, "agent-synthesis")["body"]["call_ref"]
@@ -311,6 +337,12 @@ def test_over_16k_request_pages_and_does_not_claim_oversized_model_delivery(
         assert estimate_context_tokens(selected_text) > 6000
         assert estimate_context_tokens(selected_text) + budget["fixed_input_estimate"] > 8000
         assert budget["observed_account_limit"] == 8000
+        assert budget["account_limit_evidence_ref"] is None
+        assert budget["rate_admission_policy"] != "provider_feedback_probe"
+        assert budget["request_stage_token_estimate"]["estimate_only_probe"] is False
+        assert budget["exact_complete_request_estimate_tokens"] + budget[
+            "prior_completion_reservation"
+        ] <= 8000
         assert budget["source_turn_mode"] == "source_free_recovery"
         assert intent["body"]["source_decisions"] == []
         assert "source_packets" not in json.dumps(prepared["messages"])

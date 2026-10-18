@@ -46,6 +46,20 @@ def _remaining(value: object) -> int | None:
     return int(value) if isinstance(value, str) and value.isdecimal() else None
 
 
+def _rate_forecast_demand(operation: dict, observed_limit: int | None) -> int:
+    """Reserve a full observed window for an oversized, prepared model forecast.
+
+    The exact estimate and eventual usage remain unchanged. Only a reproducible
+    model-input estimate qualifies; explicit configured ceilings and legacy work
+    without that estimate retain their existing admission rules.
+    """
+    demand = operation["estimated_tokens"]
+    if (operation["kind"] == "model" and operation.get("request_token_estimate")
+            and type(observed_limit) is int and observed_limit > 0):
+        return min(demand, observed_limit)
+    return demand
+
+
 def _saved_token_limit(tx: Transaction, snapshot: dict) -> int | None:
     """Read an older quota head's limit from its exact captured response."""
     stored = snapshot.get("observed_token_limit")
@@ -74,11 +88,12 @@ class QuotaLimit:
     requests: int | None = None
     tokens: int | None = None
     basis: str = "configured"
+    concurrency: int | None = None
 
     def __post_init__(self):
         if not math.isfinite(self.window_seconds) or self.window_seconds <= 0:
             raise ValueError("Quota window must be positive and finite")
-        for value in (self.requests, self.tokens):
+        for value in (self.requests, self.tokens, self.concurrency):
             if value is not None and (type(value) is not int or value < 0):
                 raise ValueError("Quota ceilings must be nonnegative integers")
         if self.basis not in {"configured", "observed"}:
@@ -102,7 +117,9 @@ class CapacityPolicy:
     def snapshot(self) -> dict:
         return {
             "permits": dict(self.permits),
-            "quotas": {key: vars(value) for key, value in sorted(self.quotas.items())},
+            "quotas": {key: {k: v for k, v in vars(value).items()
+                             if k != "concurrency" or v is not None}
+                       for key, value in sorted(self.quotas.items())},
             "review_reserve": self.review_reserve,
         }
 
@@ -138,6 +155,39 @@ class CapacityScheduler:
             return snapshot
 
         store.transact("capacity-config-v1", snapshot, save)
+
+    @staticmethod
+    def add_resource_scopes(store: StateStore, policy: CapacityPolicy) -> None:
+        """Add scopes or tighten web limits while preserving existing work."""
+        desired = policy.snapshot()
+        existing = store.get(CONFIG, "default")
+        if existing is None or existing["body"] == desired:
+            return
+        old = existing["body"]
+        def no_higher(previous, updated):
+            return previous is None or updated is not None and updated <= previous
+        def web_tightening(scope, previous, updated):
+            return (scope in {"web:exa", "web:tavily", "web:searxng", "web:browserless"}
+                    and updated is not None
+                    and updated["window_seconds"] >= previous["window_seconds"]
+                    and updated["basis"] == previous["basis"]
+                    and no_higher(previous.get("requests"), updated.get("requests"))
+                    and no_higher(previous.get("tokens"), updated.get("tokens"))
+                    and no_higher(previous.get("concurrency"), updated.get("concurrency")))
+        if (old["permits"]["model"] != desired["permits"]["model"]
+                or old["permits"]["compute"] != desired["permits"]["compute"]
+                or desired["permits"]["retrieval"] > old["permits"]["retrieval"]
+                or old["review_reserve"] != desired["review_reserve"]
+                or any(desired["quotas"].get(k) != v and not web_tightening(k, v, desired["quotas"].get(k))
+                       for k, v in old["quotas"].items())):
+            raise StateConflict("Resource scope update cannot relax or alter unrelated limits")
+        def save(tx):
+            current = tx.get(CONFIG, "default")
+            if current != existing:
+                raise StateConflict("Capacity configuration changed during scope addition")
+            tx.put(CONFIG, "default", desired, expected_version=current["version"])
+            return desired
+        store.transact("capacity-resource-scopes:" + hashlib.sha256(canonical(desired).encode()).hexdigest(), desired, save)
 
     @staticmethod
     def reconcile_additive_quota_domain(
@@ -576,6 +626,7 @@ class CapacityScheduler:
             if scoped_operations is None:
                 return None
             block = tx.get(QUOTA, scope)
+            observed_limits = []
             if block:
                 blocked_until = block["body"]["blocked_until"]
                 if blocked_until is None:
@@ -604,6 +655,8 @@ class CapacityScheduler:
             token_ceiling = limit.tokens
             if block:
                 observed = _saved_token_limit(tx, block["body"])
+                if type(observed) is int and observed > 0:
+                    observed_limits.append(observed)
                 reset_at = block["body"].get("tokens_reset_at")
                 # Once a provider headroom snapshot expires, its reported limit
                 # still bounds simultaneous local reservations in the new window.
@@ -626,11 +679,26 @@ class CapacityScheduler:
                 ready = max(ready, observed_ready)
                 inherited_limit = _saved_token_limit(tx, inherited)
                 if inherited_limit is not None:
+                    if inherited_limit > 0:
+                        observed_limits.append(inherited_limit)
                     token_ceiling = (inherited_limit if token_ceiling is None
                                      else min(token_ceiling, inherited_limit))
+            observed_ceiling = min(observed_limits) if observed_limits else None
+            demand = _rate_forecast_demand(body, observed_ceiling)
+            probe = demand < body["estimated_tokens"]
+            for operation in scoped_operations:
+                item = operation["body"]
+                if scope not in item["quota_scopes"] or not item["reservation"]:
+                    continue
+                if probe or _rate_forecast_demand(item, observed_ceiling) < item["estimated_tokens"]:
+                    return None  # An oversized forecast gets one exclusive attempt.
+            if probe:
+                # Wait out local charges as well as provider reset observations.
+                token_ceiling = (observed_ceiling if token_ceiling is None
+                                 else min(token_ceiling, observed_ceiling))
             def fits():
                 return ((limit.requests is None or requests + 1 <= limit.requests)
-                        and (token_ceiling is None or tokens + body["estimated_tokens"] <= token_ceiling))
+                        and (token_ceiling is None or tokens + demand <= token_ceiling))
             if not fits():
                 for expiry, amount in sorted(charges):
                     requests -= 1
@@ -755,9 +823,10 @@ class CapacityScheduler:
     ) -> float | None:
         """Reserve local calls not accounted for by a fresh provider snapshot."""
         observed_at = snapshot.get("observed_at")
+        demand = _rate_forecast_demand(candidate, snapshot.get("observed_token_limit"))
         if not isinstance(observed_at, (int, float)):
             for dimension, needed in (
-                ("requests", 1), ("tokens", candidate["estimated_tokens"]),
+                ("requests", 1), ("tokens", demand),
             ):
                 remaining = snapshot.get(f"remaining_{dimension}")
                 if type(remaining) is int and needed > remaining:
@@ -796,7 +865,7 @@ class CapacityScheduler:
         ready = now
         for dimension, needed in (
             ("requests", extra_requests + 1),
-            ("tokens", extra_tokens + candidate["estimated_tokens"]),
+            ("tokens", extra_tokens + demand),
         ):
             remaining = snapshot.get(f"remaining_{dimension}")
             reset_at = snapshot.get(f"{dimension}_reset_at")
@@ -870,6 +939,13 @@ class CapacityScheduler:
             ))
             for record in candidates:
                 item = record["body"]
+                if any(
+                    self.policy.quotas[scope].concurrency is not None
+                    and sum(scope in a["quota_scopes"] for a in active)
+                    >= self.policy.quotas[scope].concurrency
+                    for scope in item["quota_scopes"]
+                ):
+                    continue
                 if review_waiting and not item["review"] and kind == "model":
                     normal_active = sum(not a["review"] for a in active)
                     if normal_active >= self.policy.permits[kind] - self.policy.review_reserve:
@@ -961,7 +1037,8 @@ class CapacityScheduler:
             body = record["body"]
             if body["phase"] != "admitted":
                 raise StateConflict("Only admitted work may dispatch")
-            attempt = {"at": now, "reserved_tokens": body["estimated_tokens"],
+            attempt = {"at": now, "generation": generation,
+                       "reserved_tokens": body["estimated_tokens"],
                        "charged_tokens": body["estimated_tokens"], "usage_known": False,
                        "cached_tokens": None, "status": "dispatched"}
             updated = dict(body, phase="dispatched", attempts=[*body["attempts"], attempt], external_active=True)
@@ -1180,6 +1257,40 @@ class CapacityScheduler:
         return self.store.transact(
             f"{operation_prefix}{scope}-{observation_id or uuid.uuid4().hex}", request, save
         )
+
+    def observe_retry_after(
+        self, scope: str, *, retry_after: float, observed_at: float,
+        source_operation_id: str, observation_id: str,
+    ) -> dict:
+        """Honor a captured rejection without rescheduling its completed tool."""
+        if (scope not in self.policy.quotas or not observation_id
+                or not math.isfinite(retry_after) or retry_after < 0
+                or not math.isfinite(observed_at) or observed_at < 0):
+            raise StateError("Retry observation needs a configured scope and finite delay")
+        wake = observed_at + retry_after
+
+        def save(tx):
+            operation = tx.get(OPERATION, source_operation_id)
+            if (operation is None or scope not in operation["body"]["quota_scopes"]
+                    or not operation["body"]["attempts"]):
+                raise StateError("Retry observation needs an attempted operation in this scope")
+            record = tx.get(QUOTA, scope)
+            previous = record["body"] if record else {}
+            prior_block = previous.get("blocked_until", 0)
+            blocked_until = None if prior_block is None else max(wake, prior_block)
+            quota = tx.put(QUOTA, scope, {
+                **previous, "blocked_until": blocked_until,
+                "explicit_block_until": blocked_until,
+                "source": "retry_after", "rate_limited_at": observed_at,
+                "external_headroom": previous.get("external_headroom", "unknown"),
+            }, expected_version=record["version"] if record else 0)
+            self._record_inherited_quota_tx(tx, scope, source_operation_id, quota,
+                {"blocked_until": wake, "source": "retry_after"}, observation_id)
+            return quota["body"]
+
+        return self.store.transact(f"capacity-retry-observation:{scope}:{observation_id}",
+            {"scope": scope, "retry_after": retry_after, "observed_at": observed_at,
+             "source_operation_id": source_operation_id}, save)
 
     def observe_rate_headers(
         self, scope: str, headers: Mapping[str, str], *,

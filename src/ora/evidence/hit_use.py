@@ -131,6 +131,49 @@ def _matching_copies(reader: StateStore | Transaction, hit: dict,
     return list(copies.values())
 
 
+def _public_document_copies(reader: StateStore | Transaction, hit: dict) -> list[dict] | None:
+    """Follow indexed, exact public fetch links for this hit alone.
+
+    Broad web hits are URL candidates and have no content hash. Their checked
+    copies are linked through an exact public-document fetch rather than a
+    scholarly encounter's retrieval_hit field.
+    """
+    pointer = _ref(hit)
+    if isinstance(reader, Transaction):
+        rows = reader.db.execute(
+            "SELECT source_kind,source_id,source_version FROM links "
+            "WHERE target_kind=? AND target_id=? AND target_version=? "
+            "AND relation='fetched_from_browser_hit'",
+            (pointer["kind"], pointer["id"], pointer["version"]),
+        )
+        documents = [reader.get(row["source_kind"], row["source_id"], row["source_version"])
+                     for row in rows]
+    else:
+        documents = [reader.get(**link["source"]) for link in reader.links(hit, incoming=True)
+                     if link["relation"] == "fetched_from_browser_hit"]
+    copies = {}
+    for document in documents:
+        if (document is None or document["kind"] != "public_document_fetch"
+                or document["body"].get("hit_ref") != pointer
+                or document["body"].get("requested_url")
+                != hit["body"].get("source", {}).get("original_url")):
+            continue
+        document_ref = _ref(document)
+        copy = reader.resolve(
+            "source_copy.public_document", f"{document['id']}:{document['version']}"
+        )
+        if copy is None:
+            continue
+        if (copy["kind"] != "source_copy"
+                or copy["body"].get("document_ref") != document_ref
+                or copy["body"].get("content_sha256")
+                != document["body"].get("content_sha256")
+                or copy["body"].get("reference") != document["body"].get("final_url")):
+            return None  # An inconsistent origin cannot justify reinspection.
+        copies[(copy["id"], copy["version"])] = copy
+    return list(copies.values())
+
+
 def checked_hit_dependencies(
     reader: StateStore | Transaction, hit: dict, *,
     exclude_copy_ref: dict | None = None,
@@ -165,10 +208,15 @@ def checked_hit_dependencies(
             return None
     elif exclude_quality_ref is not None:
         return None
+    copies = _public_document_copies(reader, hit)
+    if copies is None:
+        return None
     if not isinstance(digest, str) or not digest:
-        return []
+        matching = copies
+    else:
+        matching = _matching_copies(reader, hit, digest) + copies
     dependencies = []
-    for copy in _matching_copies(reader, hit, digest):
+    for copy in matching:
         if copy["body"].get("inspection_state") != "checked":
             continue
         if exclude_copy_ref == _ref(copy):

@@ -218,10 +218,16 @@ def main():
     parser.add_argument(
         "--offline", action="store_true", help="Use cached dependencies only during setup"
     )
+    parser.add_argument(
+        "--observability", action="store_true",
+        help="Install optional OpenTelemetry export dependencies during setup",
+    )
     parser.add_argument("--view", choices=["findings", "sources", "diagnostics"], default="sources")
     args, remaining = parser.parse_known_args()
     if args.command not in {"live", "mission"} and remaining:
         parser.error("unrecognized arguments: " + " ".join(remaining))
+    if args.observability and args.command != "setup":
+        parser.error("--observability is available only with setup")
     try:
         if args.command == "bootstrap":
             bootstrap()
@@ -229,6 +235,8 @@ def main():
         if args.command == "setup":
             before = locks()
             command = [uv_executable(), "sync", "--locked", "--python", PYTHON_VERSION]
+            if args.observability:
+                command.extend(["--extra", "observability"])
             if args.offline:
                 command.append("--offline")
             run(command)

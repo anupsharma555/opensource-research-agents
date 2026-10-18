@@ -311,5 +311,6 @@ def _create_host(root, state_dir, args):
             "Historical runs were not migrated or rewritten."
         )
     from ora.mission import MissionService
+    from ora.observability.config import runtime_export_config
 
-    return MissionService(root, state_dir)
+    return MissionService(root, state_dir, trace_config=runtime_export_config(root))

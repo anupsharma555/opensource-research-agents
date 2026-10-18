@@ -34,7 +34,7 @@ def _copy_package(tmp_path: Path) -> Path:
 def test_every_role_can_use_instruction_only_planning_without_extra_capabilities():
     registry = load_registry(ROOT, set())
     skill = registry.skills[SKILL]
-    assert skill.version == "1.0.0"
+    assert skill.version == "2.0.0"
     assert skill.helper is None
     assert skill.manifest["instruction_only"] is True
     assert "helper" not in skill.manifest
@@ -52,7 +52,7 @@ def test_activation_selects_plan_tools_and_release_preserves_independent_request
     pins = pin_catalog(ROOT)["literature_acquisition"]
     assert pins[SKILL]["optional"] is True
     assert pins[SKILL]["helper_sha256"] is None
-    assert pins[SKILL]["tool_ids"] == ["save_plan", "read_plan"]
+    assert pins[SKILL]["tool_ids"] == ["save_plan", "modify_plan", "read_plan"]
     assert SKILL not in selected_ids(pins, {})
     assert "save_plan" not in selected_tools(pins, {})
     active = {"active_skill_ids": [SKILL]}
@@ -74,7 +74,7 @@ def test_planning_resources_require_activation(resource):
         read_skill_resource(ROOT, active_skill_ids=[], **arguments)
     page = read_skill_resource(ROOT, active_skill_ids=[SKILL], **arguments)
     assert page["text"]
-    assert page["skill_version"] == "1.0.0"
+    assert page["skill_version"] == "2.0.0"
     with pytest.raises(StateError, match="no helper source"):
         read_skill_resource(
             ROOT, role_id="analysis", pins=pins, active_skill_ids=[SKILL],
@@ -157,3 +157,25 @@ def test_configuration_pins_guidance_but_cannot_invoke_it_as_a_helper(tmp_path):
     assert receipt["body"]["status"] == "rejected"
     assert receipt["body"]["reason"] == "Instruction-only skill has no executable helper"
     assert receipt["body"]["result"] is None
+
+
+def test_archived_planning_pin_reads_original_resources_and_rejects_drift(tmp_path):
+    from ora.mission.skill_activation import _pin, legacy_planning_skill
+
+    root = _copy_package(tmp_path)
+    old = legacy_planning_skill(root)
+    pins = pin_catalog(root)['analysis']
+    pins[SKILL] = _pin(old, True)
+    assert pins[SKILL]['tool_ids'] == ['save_plan', 'read_plan']
+    checked = checked_registry(root, 'analysis', pins, [SKILL])
+    assert checked.render_instructions(SKILL) == old.instruction_paths['concise'].read_text()
+    assert 'modify_plan' not in checked.render_instructions(SKILL)
+    for resource, path in [('rich_instructions', old.instruction_paths['rich']),
+                           ('example', old.example_path)]:
+        page = read_skill_resource(root, role_id='analysis', pins=pins,
+                                   active_skill_ids=[SKILL], skill_id=SKILL, resource=resource)
+        assert page['text'] == path.read_text()[:1800]
+        assert page['skill_version'] == '1.0.0'
+    old.instruction_paths['rich'].write_text('Unpinned changed guidance')
+    with pytest.raises(RegistryError, match='content hash differs'):
+        checked_registry(root, 'analysis', pins, [SKILL])

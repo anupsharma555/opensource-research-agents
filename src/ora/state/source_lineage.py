@@ -107,6 +107,14 @@ def inherited_public_source(
     ):
         return False
     origin = reader.get(**origin_ref)
+    if document_ref and origin is not None:
+        from ora.evidence.source_assets import document_copy_reference_matches
+
+        source_url_matches = document_copy_reference_matches(
+            reader, origin, copy["body"].get("reference"))
+    else:
+        source_url_matches = bool(
+            origin and origin["body"].get("final_url") == copy["body"].get("reference"))
     if (
         not origin or origin["body"].get("mission_id") != owner
         or encounter["body"].get("mission_id") not in (None, owner)
@@ -114,7 +122,7 @@ def inherited_public_source(
             "document_ref" if document_ref else "navigation_ref"
         ) != origin_ref
         or origin["body"].get("content_sha256") != copy["body"].get("content_sha256")
-        or origin["body"].get("final_url") != copy["body"].get("reference")
+        or not source_url_matches
     ):
         return False
     matching = [item for item in snapshot["body"].get("inspection", {}).get("sources", [])

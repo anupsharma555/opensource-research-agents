@@ -4,11 +4,34 @@ The current [Python contract models](../../src/ora/contracts/models.py) accept `
 
 ## Three different versions
 
+Public-document readers add canonical `ReadDocumentOCRInput` and
+`InspectFigureInput` tool schemas. `LiveStartRequest` and `LiveFollowupRequest`
+add optional `allowVision` (default false). Absent/false preserves prior request
+replay identity; reusing an ID with a different vision permission is rejected.
+Saved older runs stay disabled and retain their pinned tool manifests. Derived
+page images, OCR and auxiliary vision receipts use separate v1 record kinds;
+they do not change checked source passages. Generated JSON/TypeScript comes from
+`scripts/dev generate`. See [document readers](../development/document-readers.md)
+for explicit opt-in, uncertainty handling and proof limits.
+
+Mission request preparation `source_working_set_v16` distinguishes estimated
+rate pressure from a captured provider size rejection. New internal
+`mission_call_budget.rate_admission_policy` values record ordinary pacing,
+a provider-feedback attempt, or confirmed size repair; older budgets without
+this field retain their recorded interpretation. Exact saved requests and
+configured model/output settings are unchanged. Eligible undispatched waits
+can be reprepared under the existing versioned recovery path. This changes
+backend scheduling policy, not the public command or snapshot schema.
+
 The additive `runtime_plan` contract describes optional agent-authored advisory
 plans stored as versioned working-note checkpoints. Its generated schema and
-TypeScript type do not alter existing command or snapshot envelopes. The two
-deferred tools `save_plan` and `read_plan` are new grants for new configurations;
-saved calls and role catalogs retain their original pins. Instruction-only skill
+TypeScript type do not alter existing command or snapshot envelopes. The
+deferred tools `save_plan`, `modify_plan` and `read_plan` are grants for new
+configurations. `save_plan` version 2 creates only; the new `modify_plan` input
+schema describes targeted, version-checked revisions. New runs record
+`planning_tool_version: 2`; older runs retain the v1 full-document save contract,
+exact archived skill bytes and original grants. The new `save_plan` and
+`modify_plan` schemas/types are generated from canonical Python models. Instruction-only skill
 manifests explicitly omit executable helpers; existing helper-backed packages
 retain their previous validation. See [runtime planning](../development/stage4-planning.md).
 
@@ -168,3 +191,38 @@ means a peer postponed that work; it is neither queued execution nor cancellatio
 The legacy supplied-evidence host rejects nonempty requirement selections and
 excludes the empty new field from its historical request fingerprint. A resumed
 shared mission also preserves its original policy and request identity.
+
+## Progressive web search
+
+`SearchWebInput`, `ReadSearchResultsInput`, `CancelSearchInput`,
+`SearchOperationResult` and `RenderSourceInput` are additive canonical interfaces.
+`search_web` requires a quick/research mode and an information need. Its local
+operation cursor enumerates saved candidates, not provider pagination. Existing
+DOI/PMID and selected-content routes remain available. New tools are discovered
+and attached through the normal role catalog; saved call manifests are not
+rewritten. General web guidance v1 bytes remain archived for pinned older runs.
+
+`SearchWebInput.refresh` is optional and defaults to false; older inputs and
+saved operation arguments without it remain readable. The current unreleased
+search-result interface adds optional `reuse_status` (`new`, `reused`, or
+`refreshed`); absence/null means the start disposition was not recorded, not
+that a provider request occurred. Regenerate matched clients for these additive
+fields; older strict readers are not qualified to accept new fields. Saved
+tool descriptors lacking only the optional refresh field retain their original
+argument schema. Other schema or permission changes are not treated as prose-only
+compatibility. See [search reuse](../development/progressive-web-search.md).
+
+New stores default to six retrieval slots. Existing stored lower capacity
+policies are retained. New provider scopes are added without removing old quota
+bindings or reservations. Limits apply to dispatchers sharing that state store,
+not unrelated projects using the same account. See
+[progressive search](../development/progressive-web-search.md).
+
+Web search receipts may carry an optional `discovery_excerpt` (at most 300
+characters) in a retrieval item. It is a redacted search teaser for navigation,
+separate from retained source `content`; it does not change source rights or
+create a checked passage. Only the Exa/Tavily/SearXNG search mappings populate
+it. The mapping is pinned as `reference-web-discovery.v1`. Explicit source-use
+prohibitions suppress it. Exact source intake and passage checks still govern
+model claims. Search result pages expose `has_more` separately from pending
+provider work, so completion does not require an empty-page polling call.

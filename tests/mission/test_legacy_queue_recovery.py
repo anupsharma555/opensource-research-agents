@@ -99,10 +99,16 @@ def test_legacy_overlimit_replans_without_mutating_saved_input(tmp_path, monkeyp
             "fallback_reason": estimate.fallback_reason,
         }
         assert new_intent["body"]["request_sha256"] != original_hash
-        assert new_intent["body"]["source_decisions"] == []
+        assert new_intent["body"]["source_refs"] == source_refs
+        decisions = new_intent["body"]["source_decisions"]
+        assert len(decisions) == len(source_refs) == 1
+        assert decisions[0]["copy_ref"] == source_refs[0]
+        assert decisions[0]["allowed_for_model"] is True
+        assert decisions[0]["use"] == "permitted"
+        assert decisions[0]["unknown_policy"] == "reject"
         assert host.store.get("mission_call_budget", new_call_ref["id"])["body"][
             "source_turn_mode"
-        ] == "source_free_recovery"
+        ] == "all_allowed_sources_fit"
         assert sent == []
     finally:
         host.close()

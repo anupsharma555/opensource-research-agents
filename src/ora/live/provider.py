@@ -293,20 +293,23 @@ class GroqProvider:
             if not isinstance(finish_reason, str):
                 raise ProviderError("Groq returned no finish reason.", status=502)
             usage = payload.get("usage")
-            if not isinstance(usage, dict):
+            if usage is None:
                 raise ProviderError("Groq returned no token usage.", status=502)
-            counts = {name: usage.get(name) for name in (
-                "prompt_tokens", "completion_tokens", "total_tokens"
-            )}
-            if any(isinstance(value, bool) or not isinstance(value, int) or value < 0
-                   for value in counts.values()):
+            # Import after module initialization: the selected model adapter
+            # also imports this legacy provider for shared transport constants.
+            from ora.models.usage import normalize_groq_usage, observe_groq_cache
+
+            counts = normalize_groq_usage(usage)
+            if counts is None:
                 raise ProviderError("Groq returned invalid token usage.", status=502)
+            cache_observation = observe_groq_cache(usage)
         except (UnicodeError, json.JSONDecodeError):
             raise ProviderError("Groq returned invalid JSON.", status=502) from None
         return {
             "content": content,
             "tool_calls": tool_calls,
             "usage": counts,
+            "cache_observation": cache_observation,
             "model": self.model,
             "elapsed_seconds": elapsed,
             "finish_reason": finish_reason,

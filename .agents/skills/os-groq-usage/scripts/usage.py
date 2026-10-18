@@ -102,6 +102,18 @@ def exact_config(db: sqlite3.Connection, pointer: object) -> dict:
     return dict(zip(("provider", "model", "settings_profile", "profile"), row)) if row else {}
 
 
+def exact_figure_intent(db: sqlite3.Connection, pointer: object) -> dict:
+    """Read only a response's exact vision intent, never its request blob."""
+    if (not isinstance(pointer, dict) or pointer.get("kind") != "figure_request_intent"
+            or type(pointer.get("version")) is not int):
+        return {}
+    row = db.execute(
+        "SELECT body FROM records WHERE kind='figure_request_intent' AND id=? AND version=?",
+        (pointer.get("id"), pointer.get("version")),
+    ).fetchone()
+    return json.loads(row[0]) if row else {}
+
+
 def normalize_call(body: dict, observed: str, identity: str, config: dict,
                    legacy_before: datetime | None) -> dict:
     recorded = [value for value in (body.get("credential_profile"), config.get("profile"),
@@ -131,13 +143,36 @@ def read_state(state: Path, legacy_before: datetime | None) -> tuple[list[dict],
         db.execute("PRAGMA query_only=ON")
         db.execute("BEGIN")
         rows = db.execute(
-            "SELECT r.id,r.body,(SELECT MIN(v.created_at) FROM records v "
+            "SELECT r.kind,r.id,r.body,(SELECT MIN(v.created_at) FROM records v "
             "WHERE v.kind=r.kind AND v.id=r.id) FROM records r "
-            "JOIN heads h USING(kind,id,version) WHERE r.kind='model_response_receipt'"
+            "JOIN heads h USING(kind,id,version) WHERE r.kind IN "
+            "('model_response_receipt','figure_response_receipt')"
         ).fetchall()
         excluded_provider = 0
-        for record_id, raw, observed in rows:
+        unverified_figure = 0
+        figure_receipts = 0
+        for kind, record_id, raw, observed in rows:
             body = json.loads(raw)
+            if kind == "figure_response_receipt":
+                figure_receipts += 1
+                intent = exact_figure_intent(db, body.get("intent_ref"))
+                if (body.get("schema") != "ora.figure_response_receipt.v1"
+                        or not intent or intent.get("schema") != "ora.figure_request_intent.v1"
+                        or intent.get("request_sha256") != body.get("request_sha256")
+                        or intent.get("model") != body.get("model")
+                        or any(intent.get(key) != body.get(key) for key in (
+                            "mission_id", "run_id", "actor_id", "task_id",
+                            "document_ref", "page_image_ref", "ocr_ref", "page_number",
+                        ))):
+                    unverified_figure += 1
+                    continue
+                call = normalize_call(
+                    body, observed, f"figure:{record_id}",
+                    {"model": intent["model"], "profile": intent.get("credential_profile")},
+                    legacy_before,
+                )
+                calls.append(call)
+                continue
             config = exact_config(db, body.get("configuration_ref"))
             if config.get("provider") != "groq":
                 excluded_provider += 1
@@ -146,8 +181,18 @@ def read_state(state: Path, legacy_before: datetime | None) -> tuple[list[dict],
             call = normalize_call(body, observed, str(identity), config, legacy_before)
             call["quota_observation"] = quota_observation(state, body, observed)
             calls.append(call)
+        uncaptured_figure_dispatches = db.execute(
+            "SELECT COUNT(*) FROM records d JOIN heads h USING(kind,id,version) "
+            "WHERE d.kind='figure_dispatch_attempt' AND NOT EXISTS ("
+            "SELECT 1 FROM records r JOIN heads rh USING(kind,id,version) "
+            "WHERE r.kind='figure_response_receipt' "
+            "AND r.id='figure-response:' || substr(d.id,length('figure-dispatch:')+1))"
+        ).fetchone()[0]
     return calls, {"path": str(path), "receipt_records": len(rows),
-                   "non_groq_or_unverified_provider_records": excluded_provider}
+                   "non_groq_or_unverified_provider_records": excluded_provider,
+                   "figure_receipt_records": figure_receipts,
+                   "unverified_figure_receipts": unverified_figure,
+                   "uncaptured_figure_dispatch_attempts": uncaptured_figure_dispatches}
 
 
 def read_supplement(path: Path) -> list[dict]:
@@ -249,7 +294,7 @@ def build_report(calls: list[dict], *, as_of: datetime, day: date, zone: str,
                  if day_start <= stamp(value["observed_at"]) < day_end]
         daily_latest[profile] = (max(dated, key=lambda o: stamp(o["observed_at"]))
                                  if dated else None)
-    return {"schema": "ora.groq.usage.summary.v1", "skill_version": "0.2.0",
+    return {"schema": "ora.groq.usage.summary.v1", "skill_version": "0.2.1",
             "observed_at": as_of.isoformat(), "timezone": zone, "date": day.isoformat(),
             "model": model, "planning_daily_allowance": daily_limit, "periods": periods,
             "latest_provider_daily_quota_observations": latest,

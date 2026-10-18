@@ -95,6 +95,11 @@ def read_skill_resource(
         active_skill_ids=active_skill_ids, skill_id=skill_id,
     )
     spec, metadata, qualification = _resource_spec(skill, resource)
+    # The checked registry may resolve an exact archived package for an old pin.
+    if resource in {"rich_instructions", "example"}:
+        path = (skill.instruction_paths["rich"] if resource == "rich_instructions"
+                else skill.example_path)
+        spec = {**spec, "path": str(path.relative_to(root.resolve()))}
     text, digest = _verified_text(root, spec)
     if content_sha256 and content_sha256 != digest:
         raise StateError("Skill resource changed; restart from offset zero")

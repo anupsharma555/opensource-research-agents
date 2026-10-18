@@ -499,6 +499,15 @@ def source_inventory_page(
         }
         if source_url is not None:
             item["source_url"] = source_url
+            document_ref = copy["body"].get("document_ref")
+            document = store.get(**document_ref) if document_ref else None
+            if (document is not None
+                    and document["body"].get("representation", "ordinary_html") == "ordinary_html"
+                    and document["body"].get("actor_id") == actor_id
+                    and document["body"].get("task_id") == task_id):
+                # Retain exact navigation even in a source-free recovery turn,
+                # where the original fetch tool reply may not be replayed.
+                item["ordinary_document_ref"] = document_ref
         if status == "permitted":
             progress = context._source_progress(control, [copy], body["mission_id"])[0]
             navigation = context._source_free_navigation_item(control, progress)
@@ -561,8 +570,19 @@ def source_inventory_page(
             if len(canonical(candidate)) > reply_char_limit:
                 item.pop("title_omitted_for_page_budget", None)
                 candidate = candidate_page()
+            if len(canonical(candidate)) > reply_char_limit and "ordinary_document_ref" in item:
+                # The copy ref and reader remain usable; rendering can recover
+                # the exact document ref from a roomier inventory request.
+                item.pop("ordinary_document_ref")
+                item["ordinary_document_ref_omitted_for_page_budget"] = True
+                candidate = candidate_page()
             if len(canonical(candidate)) > reply_char_limit and "source_url" in item:
                 item.pop("saved_reading_omitted_for_page_budget", None)
+                candidate = candidate_page()
+            if (len(canonical(candidate)) > reply_char_limit
+                    and "ordinary_document_ref_omitted_for_page_budget" in item):
+                # Even an omission marker is optional when exact IDs are long.
+                item.pop("ordinary_document_ref_omitted_for_page_budget")
                 candidate = candidate_page()
             if len(canonical(candidate)) > reply_char_limit and "source_url" in item:
                 item.pop("source_url")

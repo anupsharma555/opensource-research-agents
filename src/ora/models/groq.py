@@ -27,6 +27,7 @@ from ora.live.provider import (
     GroqProvider,
     _retry_after,
 )
+from ora.models.usage import normalize_groq_usage, observe_groq_cache
 
 Phase = Literal["collect", "final"]
 Status = Literal["complete", "tool_requested", "partial", "failed"]
@@ -145,6 +146,9 @@ class ModelOutcome:
     partial_response: bytes | None = field(default=None, repr=False)
     provider_error: dict[str, Any] | None = field(default=None, repr=False)
     provider_metadata: dict[str, Any] | None = field(default=None, repr=False)
+    cache_observation: dict[str, str | int] = field(
+        default_factory=lambda: {"status": "unavailable"},
+    )
 
     @property
     def executable_tool_calls(self) -> tuple[dict[str, Any], ...]:
@@ -630,6 +634,7 @@ class GroqSelectedAdapter:
         calls: dict[int, dict[str, Any]] = {}
         finish: str | None = None
         usage: dict[str, Any] | None = None
+        raw_usage: Any = None
         model: str | None = None
         response_id: str | None = None
         request_id: str | None = None
@@ -662,6 +667,7 @@ class GroqSelectedAdapter:
                 if isinstance(x_groq, dict) and isinstance(x_groq.get("id"), str):
                     request_id = x_groq["id"]
                 if chunk.get("usage") is not None:
+                    raw_usage = chunk["usage"]
                     usage = _usage(chunk["usage"])
                     if usage is None:
                         raise ValueError("invalid usage")
@@ -720,17 +726,19 @@ class GroqSelectedAdapter:
                                     key: value for key, value in (usage or {}).items()
                                     if key.endswith("_time")}},
                                 "interrupted_stream" if not done else "invalid_stream",
-                                partial_response=raw)
+                                partial_response=raw,
+                                cache_observation={"status": "unavailable"})
         payload = {"id": response_id, "model": model, "x_groq": {"id": request_id},
                    "choices": [{"message": {"role": "assistant", "content": content or None,
                                             "reasoning": reasoning or None,
                                             "tool_calls": [calls[index] for index in sorted(calls)]},
-                                "finish_reason": finish}], "usage": usage}
+                                "finish_reason": finish}], "usage": raw_usage}
         return self.decode(prepared, payload, started=started, response_sha256=digest,
                            headers=headers)
 
     def decode(self, prepared: PreparedCall, payload: Any, *, started: float | None = None,
-               response_sha256: str | None = None, headers: dict[str, str] | None = None) -> ModelOutcome:
+               response_sha256: str | None = None,
+               headers: dict[str, str] | None = None) -> ModelOutcome:
         """Decode a saved provider fixture without credential lookup or network access."""
         elapsed = max(0.0, time.monotonic() - started) if started is not None else 0.0
         if response_sha256 is None:
@@ -766,6 +774,7 @@ class GroqSelectedAdapter:
         usage = _usage(payload.get("usage"))
         if usage is None:
             return self._failed(prepared, "invalid_usage", started, 502)
+        cache_observation = observe_groq_cache(payload.get("usage"))
         x_groq = payload.get("x_groq")
         request_id = x_groq.get("id") if isinstance(x_groq, dict) else None
         if not isinstance(request_id, str):
@@ -780,7 +789,8 @@ class GroqSelectedAdapter:
                            reasoning=reasoning, reasoning_status=reasoning_status,
                            usage=usage, timings={"wall_seconds": elapsed, **{
                                key: value for key, value in usage.items() if key.endswith("_time")
-                           }}, provider_metadata=metadata)
+                           }}, provider_metadata=metadata,
+                           cache_observation=cache_observation)
 
         # Browser search is server-side. Preserve any provider-returned metadata
         # without treating it as a locally executable tool call or source record.
@@ -833,7 +843,8 @@ class GroqSelectedAdapter:
                                                           if key.endswith("_time")}},
                             "invalid_final_schema" if prepared.phase == "final" and status == "partial"
                             and finish == "stop" else None,
-                            provider_metadata=metadata)
+                            provider_metadata=metadata,
+                            cache_observation=cache_observation)
 
     def _failed(self, prepared: PreparedCall, kind: str, started: float | None,
                 http_status: int | None = None, retry_after: float | None = None,
@@ -858,27 +869,7 @@ def _safe_headers(headers: Any) -> dict[str, str]:
 
 def _usage(raw: Any) -> dict[str, Any] | None:
     """Retain reported totals and valid optional breakdowns without estimating them."""
-    if not isinstance(raw, dict):
-        return None
-    result: dict[str, Any] = {}
-    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-        value = raw.get(key)
-        if type(value) is not int or value < 0:
-            return None
-        result[key] = value
-    for key in ("queue_time", "prompt_time", "completion_time", "total_time"):
-        value = raw.get(key)
-        if type(value) in {int, float} and math.isfinite(value) and value >= 0:
-            result[key] = float(value)
-    for section, detail, total in (
-        ("prompt_tokens_details", "cached_tokens", "prompt_tokens"),
-        ("completion_tokens_details", "reasoning_tokens", "completion_tokens"),
-    ):
-        breakdown = raw.get(section)
-        value = breakdown.get(detail) if isinstance(breakdown, dict) else None
-        if type(value) is int and 0 <= value <= result[total]:
-            result[section] = {detail: value}
-    return result
+    return normalize_groq_usage(raw)
 
 
 def _validate_subset(schema: dict[str, Any], value: Any) -> None:

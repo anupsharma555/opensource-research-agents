@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
-SKILL_VERSION = "0.3.1"
+SKILL_VERSION = "0.3.2"
 SNAPSHOT_COMPONENT_FORMAT = "ora.snapshot.components.v1"
 KINDS = (
     "agent_attempt", "agent_call", "board_outcome", "board_proposal",

@@ -1,0 +1,3 @@
+# Initial worker request
+
+Prepare a six-week survey pilot targeting at least 30 completions within 48 staff hours and $200. Run one three-week cohort in weeks 1–3 and one in weeks 4–6; choose email or onsite cards for each. Past synthetic cohorts: email yielded 18 completions, used 14 staff hours and cost $60; cards yielded 14 completions, used 20 hours and cost $100. Both methods are initially available. Assume sufficient distinct participants and no other costs. These are small nonrandomized convenience samples; future yields are uncertain. Compare options, keep a short revisable working plan, and recommend a schedule with totals and limitations. Use only these supplied facts; no external research or contact.

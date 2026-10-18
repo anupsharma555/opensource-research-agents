@@ -2,7 +2,7 @@
 name: os-groq-usage
 description: Track saved Groq token usage by credential profile with a private daily log, seven-day view, and dated quota observations.
 metadata:
-  version: "0.2.0"
+  version: "0.2.1"
 ---
 
 # OS Groq Usage Tracking
@@ -15,7 +15,8 @@ For quality and efficiency of an individual run, use `os-qualify-run` alongside 
 ## Collect and summarize
 
 1. Identify the durable workspace(s) used in the requested period. Read their
-   `model_response_receipt` records, not repeated snapshot exports or prior totals.
+   `model_response_receipt` records and exact-linked `figure_response_receipt`
+   records, not repeated snapshot exports or prior totals.
    Include separately saved one-call checks when relevant. Do not search all source,
    reasoning or snapshot objects. Never load `.env` to calculate usage.
 2. Run the helper from the repository root, repeating `--state-dir` when needed:
@@ -29,7 +30,9 @@ For quality and efficiency of an individual run, use `os-qualify-run` alongside 
    `.local/checks/groq-usage-daily-log.json`. Each invocation refreshes the selected
    day and six preceding local days from the selected saved records. The receipt
    includes the selected calendar day, a separate trailing 24-hour window, and a
-   seven-local-day view. Defaults use `openai/gpt-oss-120b`. Use
+   seven-local-day view. Defaults use `openai/gpt-oss-120b`. For saved figure
+   calls, run a separate report with `--model qwen/qwen3.8-27b`; do not add
+   vision tokens to the GPT-OSS model's allowance. Use
    `--date YYYY-MM-DD`, a timezone-aware `--as-of`, or `--model` for another scope.
    Inspect both output files and the daily log update status.
 3. Account for unlabelled older calls. Resolve the exact saved configuration first.
@@ -50,6 +53,9 @@ For quality and efficiency of an individual run, use `os-qualify-run` alongside 
    day; a narrower invocation retains a separate history lane.
    Dated quota observations in the daily log are historical headroom measured
    within that local day; they never establish current remaining capacity.
+   Report uncaptured figure dispatch attempts separately as unknown consumption,
+   never as zero-token calls. A saved figure interpretation is unverified image
+   reading, not evidence that its scientific claim was checked.
 
 ## Remaining capacity is a separate question
 

@@ -189,6 +189,9 @@ def test_followup_search_result_survives_one_local_context_fallback(
         )
         control = host._control(child.run_id, "agent-critique")
         next_call_id, next_attempt_id = host._model_ids(control, control["body"]["sequence"] + 1)
+        saved_result = host.store.get(
+            "context_tool_result", f"tool-result:{control['body']['tool_turn_refs'][-1]['id']}"
+        )
         original_assemble = host.context.assemble
         if force_unfittable:
             monkeypatch.setattr(host, "_completed_search_has_navigation", lambda *_: False)
@@ -207,7 +210,12 @@ def test_followup_search_result_survives_one_local_context_fallback(
             assert host.store.get("agent_attempt", next_attempt_id)["body"]["status"] == "failed"
             budgets = [item["body"] for item in host.store.records("mission_call_budget")
                        if item["body"].get("run_id") == child.run_id]
-            assert sum(b["source_turn_mode"] == "source_free_recovery" for b in budgets) == 1
+            source_free = [b for b in budgets if b["source_turn_mode"] == "source_free_recovery"]
+            assert source_free
+            assert {b["rate_admission_policy"] for b in budgets} >= {
+                "estimate_pacing", "provider_feedback_probe"
+            }
+            assert host.store.get(saved_result["kind"], saved_result["id"]) == saved_result
             return
         assert host._schedule_model(control)
         current = host._control(child.run_id, "agent-critique")

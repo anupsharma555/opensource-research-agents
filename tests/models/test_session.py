@@ -22,6 +22,8 @@ from ora.models import (
     SessionError,
     SourceSelection,
 )
+from ora.observability.export import EXPORT_KIND, project_run, project_run_summary
+from ora.observability.metrics import build_context_metrics
 from ora.state import StateConflict, StateStore
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -298,7 +300,26 @@ def test_saved_selection_abstract_request_and_private_capture(tmp_path: Path,
     assert receipt["body"]["usage"]["total_tokens"] == 30
     assert receipt["body"]["usage"]["prompt_tokens_details"] == {"cached_tokens": 4}
     assert receipt["body"]["usage"]["completion_tokens_details"] == {"reasoning_tokens": 12}
+    assert receipt["body"]["cache_observation"] == {"status": "reported_hit", "cached_tokens": 4}
     assert captured[0][1] == 120 and len(captured) == 1
+    store.transact("seed-run-for-projection", {}, lambda tx: tx.put(
+        "mission_run", "run", {"mission_id": "mission", "run_id": "run", "status": "active"},
+    ), mission_id="mission")
+    metrics = build_context_metrics(store, "run")
+    assert metrics["calls"][0]["usage"]["cache_read"] == {"status": "reported", "value": 4}
+    assert metrics["calls"][0]["usage"]["reasoning"] == {
+        "status": "reported", "value": 12,
+    }
+    assert project_run(store, "mission", run_id="run")["created"] >= 1
+    summary = project_run_summary(store, "mission", "run")
+    spans = store.records(EXPORT_KIND)
+    model_span = next(item for item in spans if item["body"]["name"] == "osra.model.call")
+    attributes = model_span["body"]["attributes"]
+    assert attributes["gen_ai.usage.cache_read.input_tokens"] == 4
+    assert attributes["gen_ai.usage.reasoning.output_tokens"] == 12
+    assert attributes["osra.cache.observation"] == "reported_hit"
+    assert store.get(**summary["summary_ref"])["body"]["status"] == "pending"
+    assert len(captured) == 1  # Local metrics and projection do not dispatch another model call.
     assert "PRIVATE_REASONING_SENTINEL" not in json.dumps(receipt)
     payload = store.read_blob(receipt["body"]["blob"]["sha256"]).decode()
     assert "PRIVATE_REASONING_SENTINEL" not in payload
@@ -323,6 +344,60 @@ def test_saved_selection_abstract_request_and_private_capture(tmp_path: Path,
     resumed = ModelSession(StateStore(tmp_path), ROOT, adapter=bridge.adapter)
     assert resumed.load(prepared.intent_ref).request.body == prepared.request.body
     assert resumed.store.get(**receipt_ref)["body"]["usage"] == receipt["body"]["usage"]
+    assert resumed.store.get(**receipt_ref)["body"]["cache_observation"] == receipt["body"]["cache_observation"]
+
+
+@pytest.mark.parametrize(("detail", "expected"), [
+    (None, {"status": "not_reported"}),
+    ({"cached_tokens": 0}, {"status": "reported_zero", "cached_tokens": 0}),
+    ({"cached_tokens": "four"}, {"status": "malformed"}),
+])
+def test_capture_saves_cache_field_quality_separately_from_usage(tmp_path, monkeypatch, detail, expected):
+    monkeypatch.setenv("GROQ_API_KEY", "synthetic-token")
+    raw = json.loads(response())
+    if detail is not None:
+        raw["usage"]["prompt_tokens_details"] = detail
+    store, _registry, bridge, call, _config, copy_ref, _captured = setup(
+        tmp_path, raw=json.dumps(raw).encode(),
+    )
+    prepared = bridge.prepare(
+        call_id=call["id"], call_version=call["version"], phase="collect",
+        messages=[{"role": "user", "content": "Review synthetic abstract"}],
+        sources=select(copy_ref),
+    )
+    receipt = store.get(**bridge.invoke_capture(prepared.intent_ref))["body"]
+    assert receipt["cache_observation"] == expected
+    if expected["status"] == "malformed":
+        assert "prompt_tokens_details" not in receipt["usage"]
+
+
+def test_streamed_usage_observation_survives_session_receipt(tmp_path, monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "synthetic-token")
+    chunks = [
+        {"model": MODEL, "choices": [{"delta": {"content": "Synthetic result"},
+                                        "finish_reason": "stop"}]},
+        {"model": MODEL, "choices": [], "usage": {
+            "prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
+            "prompt_tokens_details": {"cached_tokens": 35},
+            "completion_tokens_details": {"reasoning_tokens": 7},
+        }},
+    ]
+    raw = ("".join("data: " + json.dumps(chunk) + "\n\n" for chunk in chunks)
+           + "data: [DONE]\n\n").encode()
+    store, _registry, bridge, call, _config, copy_ref, _captured = setup(
+        tmp_path, raw=raw, credential_settings={"stream": True},
+    )
+    prepared = bridge.prepare(
+        call_id=call["id"], call_version=call["version"], phase="collect",
+        messages=[{"role": "user", "content": "Review synthetic abstract"}],
+        sources=select(copy_ref),
+    )
+    assert prepared.request.body["stream_options"] == {"include_usage": True}
+    receipt = store.get(**bridge.invoke_capture(prepared.intent_ref))["body"]
+    assert receipt["status"] == "complete"
+    assert receipt["usage"]["prompt_tokens_details"] == {"cached_tokens": 35}
+    assert receipt["usage"]["completion_tokens_details"] == {"reasoning_tokens": 7}
+    assert receipt["cache_observation"] == {"status": "reported_hit", "cached_tokens": 35}
 
 
 @pytest.mark.parametrize("route", ["direct", "cache", "peer"])
@@ -656,6 +731,7 @@ def test_interrupted_response_has_trace_and_unknown_reasoning(tmp_path: Path,
     receipt_ref = bridge.invoke_capture(prepared.intent_ref)
     receipt = store.get(**receipt_ref)["body"]
     assert receipt["status"] == "failed" and receipt["error_kind"] == "invalid_json"
+    assert receipt["cache_observation"] == {"status": "unavailable"}
     assert receipt["reasoning_status"] == "unknown"
     assert receipt["response_sha256"] == hashlib.sha256(raw).hexdigest()
     assert receipt["partial_response_sha256"] == hashlib.sha256(raw).hexdigest()

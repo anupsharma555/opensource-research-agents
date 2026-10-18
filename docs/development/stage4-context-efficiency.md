@@ -30,6 +30,39 @@ bounded to 3,000 characters, including escaping and continuation metadata.
 The page identifies the exact note text dependencies overlapping its window.
 This representation was introduced by working-context packer v30.
 
+Packer v45 also bounds web and scholarly discovery listings. Their previews
+retain exact operation/candidate handles and advertise a `read_tool_result`
+detail request; the permission-filtered full listing stays pageable without
+repeating discovery. Web operation navigation survives intervening capability
+selections and later operation versions. Current source permissions and producing
+source dependencies apply to both previews and detail pages. This is discovery
+metadata, not checked source text; source-window delivery remains separate.
+
+Packer v50 adds the same saved-result reader to `search_saved_passages` and
+pages oversized immediate replies. Its latest query and exact read coordinates
+remain visible even when the full exchange is archived. Previewed matches,
+matches in the saved page and additional query matches are counted separately;
+reading an existing result does not rerun the search. Both searched-copy and
+producing-input source dependencies survive paging and are rechecked before
+dispatch. These navigation snippets do not become checked claim evidence.
+
+Packer v51 presents new OCR receipts with the exact selected text, source URL,
+physical page, region/layout, unverified status and continuation. It retains
+source-authored figure captions with their parent URL and truncation flag when
+the image came from a discovered asset. Engine hashes, word-box diagnostics and
+full image transforms remain in immutable OCR records instead of repeating in
+model input. Current source and caption permissions are checked before this
+projection; native checked passages and OCR transcriptions remain distinct.
+
+The current question is included once when the task objective already contains
+it, and the separate short scope survives packing. Longer previews retain an
+explicit partial flag and exact saved-record reader. Selected image captions and
+OCR/vision actions similarly survive capability changes, with current source-use
+checks and truthful attached/request-first labels. See
+[document readers](document-readers.md) for the image-specific correction when a
+peer tries the text reader on a PNG/JPEG. These changes preserve useful next
+actions; they do not require the peer to follow a prescribed reading sequence.
+
 ## Optional skills and tools
 
 New runs distinguish mandatory shared instructions from optional role skills.
@@ -72,6 +105,82 @@ qualification.
 `discover_capabilities` remains available for refresh and compatibility.
 The catalog consumes input tokens and participates in the same complete-request
 budget checks as instructions, selected sources and tool schemas.
+
+Repeated input has two costs: the size of each request and the number of turns
+that resend it. Preserve short purposes for every granted tool and essential
+source-use rules, while keeping detailed optional guidance behind
+`discover_capabilities`, `activate_skill` and `read_skill_resource`. A saved
+reference is useful only when an exposed or requestable reader can resolve it.
+Do not replace required instructions or attached argument schemas with an
+unreadable link, or assume the model remembers an earlier request implicitly.
+
+Keep three levels of tool guidance distinct:
+
+1. The full catalog carries short names and purposes for discovery.
+2. Attached schemas carry executable arguments and concise selection guidance.
+   Under input pressure, unselected default scholarly, board and peer-reader
+   schemas may be deferred through the same request-first mechanism used by
+   optional tools. Explicit selections and active-skill tools remain attached.
+3. Extended workflow guidance stays in optional skills and their pageable
+   resources. Essential evidence, permissions, continuation and callability rules
+   remain in the request. Fetching more guidance consumes context and can add a
+   model turn, so a link is useful only for detail that is not needed every turn.
+
+Admission estimator v17 attempts that schema deferral before an estimate-only
+provider-feedback probe or source-free recovery. Packer v46 also removes a
+duplicate selected passage preview only after proving the exact text and current
+permissions match the separately delivered source packet. Public-document
+coverage accepts the exact historical joined-block length only with verified
+extraction lineage; new inspections record the sum of block lengths. Saved
+receipts are unchanged. When a checked source window is selected under pressure,
+repeated search lead cards and routine outcome pointers can be replaced by their
+existing saved-result readers. Operation handles, continuation, current source
+progress and the exact selected evidence remain available.
+
+Packer v47 preserves a concise reading-position description in both ordinary and
+compacted source-window replies. The description distinguishes physical PDF page
+locators from extracted block counts and treats `next_request` as an available
+reading action, not a requirement to scan every page. See
+[selective reading](document-readers.md#selective-reading-and-progress) for the
+supported saved-text-search route, completion guidance and proof limits.
+
+Minute pacing and request size are separate controls: waiting replenishes a
+rate window but does not make the next serialized request smaller. Compact
+avoidable overhead first, then check the complete packet and its completion
+reservation. Preserve provider feedback, real rejection repair, explicit run
+ceilings and the configured output cap; never infer that an unseen response
+consumed its full reservation.
+
+Packer v48 pages older web lead cards through their exact saved-result reader
+when a checked source is selected under pressure. It also removes verified
+duplicate run references, equal source-status fields and redundant HTML fetch
+aliases while retaining the source URL, document reference and factual reuse
+feedback. Non-HTML reader advice remains intact. Confirmed size-repair packing
+may compact these duplicates before the ordinary hard target is reached to leave
+some headroom; it does not change the provider-feedback policy for an untried
+forecast, the output cap, selected tools, or source permissions.
+
+Compact catalog purposes and instruction wording retain every discoverable tool,
+current callability and optional skill choice. The complete serialized request
+is still the sizing authority. A passing saved-state replay qualifies only that
+packet; a more informative passage or a later tool result can need a different
+fit. See [source walkthroughs](source-quality-walkthroughs.md) for delivery and
+answer-support checks.
+
+Groq's [prompt caching](https://console.groq.com/docs/prompt-caching) supports
+GPT-OSS and exact repeated prefixes, including instructions and tools. Keep
+stable instructions before changing task/source data. Cache hits are not
+guaranteed, and Groq credits cached tokens against rate limits after processing.
+Do not assume a hit to admit an otherwise oversized cold request. The adapter
+retains reported `prompt_tokens_details.cached_tokens`; missing values mean
+unknown. Validate actual cache benefit separately from offline packing savings.
+
+When reviewing token efficiency, separate provider-reported input/completion
+usage from local tokenizer estimates of individual prompt components. Reasoning
+is a completion subset; an output reservation is not consumption. A rejected
+request without usage remains unknown. Measure complete serialized requests and
+preserve the full capability catalog in before/after checks; a smaller prompt
+alone does not prove fewer turns, lower total usage, or a supported final answer.
 
 Admission estimator v9 also tries a temporary single-copy input when an explicit,
 successfully checked `read_source_window` cannot fit alongside the other selected
@@ -218,6 +327,12 @@ The controller can export the later events explicitly with `--phase pressure`
 or `--phase late`. Do not supply future events with the initial question.
 The controlled case requests a direct final answer with exact bracketed passage
 record IDs. Tool-authored publication reports are outside this scorer's protocol.
+For `compacted_recovery`, the controller imposes an 8,000-token comparison
+allowance with a 70% input target. This explicit evaluation bound cannot be
+bypassed by the provider-rate estimate probe. The host may use the remaining
+room up to the same hard allowance after an exact recovery read. The scorer
+checks the saved pressure and final requests separately; a recovered passage
+that never reached the final model input does not pass.
 
 Score an explicitly selected saved run without launching or resuming it:
 

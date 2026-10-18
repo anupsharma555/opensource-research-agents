@@ -141,11 +141,20 @@ ROUTE_FILTERS = {
     "pubmed.search": frozenset({"from_date", "until_date"}),
     "pubmed.pmid": frozenset({"pmid", "selected_id"}),
     "pubmed.abstract": frozenset({"pmid", "selected_id"}),
-    "exa.search": frozenset({"from_date", "until_date", "mode"}),
+    "exa.search": frozenset({"from_date", "until_date", "mode", "highlights"}),
     "exa.contents": frozenset(
         {"id", "url", "max_characters", "max_age_hours", "selection_reason"}
     ),
 }
+
+for _provider in ("tavily", "searxng"):
+    ROUTES[f"{_provider}.search"] = {
+        "provider": _provider, "index": f"{_provider}_web", "operation": "search",
+        "adapter": "opaque_cursor", "keyed": _provider == "tavily",
+        "surfaces": ["teaser"], "query_description": "Explicit complementary web discovery.",
+        "returned_content": "Candidate excerpts and URLs; inspect source copies before citing.",
+    }
+    ROUTE_FILTERS[f"{_provider}.search"] = frozenset()
 
 
 def available_routes() -> dict[str, dict]:
@@ -315,6 +324,7 @@ def build_call(request: dict, credential: str | None = None) -> tuple[str, str, 
         return "GET", _url("https://api.crossref.org/works", params), None, {}
     if route.startswith("pubmed."):
         base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+        key_param = {"api_key": credential} if credential else {}
         if route in {"pubmed.pmid", "pubmed.abstract"}:
             pmid = _exact_identifier(filters, query, "pmid")
             if route == "pubmed.abstract":
@@ -327,7 +337,7 @@ def build_call(request: dict, credential: str | None = None) -> tuple[str, str, 
                 _url(
                     base + ("efetch.fcgi" if route == "pubmed.abstract" else "esummary.fcgi"),
                     {"db": "pubmed", "id": pmid,
-                     "retmode": "xml" if route == "pubmed.abstract" else "json"},
+                     "retmode": "xml" if route == "pubmed.abstract" else "json", **key_param},
                 ),
                 None,
                 {},
@@ -341,6 +351,7 @@ def build_call(request: dict, credential: str | None = None) -> tuple[str, str, 
             "retmode": "json",
             "retmax": limit,
             "retstart": window.get("offset") or 0,
+            **key_param,
         }
         if start or end:
             params.update(
@@ -351,6 +362,15 @@ def build_call(request: dict, credential: str | None = None) -> tuple[str, str, 
                 }
             )
         return "GET", _url(base + "esearch.fcgi", params), None, {}
+    if route == "tavily.search":
+        return "POST", "https://api.tavily.com/search", {
+            "query": query, "max_results": min(limit, 10), "search_depth": "basic",
+            "include_answer": False, "include_raw_content": False, "include_usage": True,
+        }, {"Authorization": f"Bearer {credential or ''}", "Content-Type": "application/json"}
+    if route == "searxng.search":
+        # Resolved to an operator-configured dedicated endpoint by WebSearch's
+        # transport. Model input cannot choose an arbitrary service endpoint.
+        return "GET", _url("https://osra-searxng.invalid/search", {"q": query, "format": "json"}), None, {}
     headers = {"x-api-key": credential or "", "Content-Type": "application/json"}
     if route == "exa.search":
         if window.get("offset") or window.get("cursor"):
@@ -359,6 +379,8 @@ def build_call(request: dict, credential: str | None = None) -> tuple[str, str, 
         if mode not in ROUTES["exa.search"]["modes"]:
             raise ValueError("Exa Search mode is not supported by this discovery route")
         body = {"query": query, "type": mode, "numResults": limit}
+        if filters.get("highlights") is True:
+            body["contents"] = {"highlights": True}
         _date_filters(filters, begin="startPublishedDate", end="endPublishedDate")
         # Exa's timestamp bounds are exclusive. Date-only filters denote whole
         # UTC calendar days, so bracket them with the adjacent representable
@@ -742,21 +764,30 @@ def _pubmed_abstract_item(raw: dict) -> dict:
 
 def _exa_item(raw: dict, *, contents: bool) -> dict:
     text = raw.get("text") if contents else None
-    summary = raw.get("summary")
+    summary = raw.get("summary") if contents else None
     if (text is not None and not isinstance(text, str)) or (
         summary is not None and not isinstance(summary, str)
     ):
         raise ValueError("Malformed Exa text or summary")
+    highlights = raw.get("highlights") if not contents else None
+    excerpt = (
+        "\n".join(highlights)
+        if isinstance(highlights, list) and all(isinstance(x, str) for x in highlights)
+        else None
+    )
     selected = text if text else summary if summary else None
     surface = "passage" if text else "provider_summary" if summary else "teaser"
+    restricted = (raw.get("rights_status") in {"restricted", "not_retained"}
+                  or raw.get("explicit_prohibition_detected") is True)
     return {
         "id": raw.get("id"),
         "url": raw.get("url"),
         "title": raw.get("title"),
         "content": selected,
+        "discovery_excerpt": excerpt if not contents and not restricted else None,
         "surface": surface,
         "origin": "provider_generated" if surface == "provider_summary" else "original_source",
-        "rights_status": "unknown",
+        "rights_status": "restricted" if restricted else "unknown",
         "access_status": "available",
         "scientific_metadata": {"publication_date": raw["publishedDate"]}
         if raw.get("publishedDate")
@@ -846,6 +877,23 @@ def map_response(
             "count": payload.get("_search_count", len(raw)),
             "offset": offset,
             "max_visible": 10000 if route == "pubmed.search" else None,
+        }
+    if route in {"tavily.search", "searxng.search"}:
+        return {
+            "status": "ok", "results": _map_items(payload.get("results", []), lambda x: {
+                "id": x.get("url"), "url": x.get("url"), "title": x.get("title"),
+                "discovery_excerpt": x.get("content") if (
+                    x.get("rights_status") not in {"restricted", "not_retained"}
+                    and x.get("explicit_prohibition_detected") is not True
+                ) else None,
+                "surface": "teaser", "origin": "original_source",
+                "rights_status": "restricted" if (
+                    x.get("rights_status") in {"restricted", "not_retained"}
+                    or x.get("explicit_prohibition_detected") is True
+                ) else "unknown", "access_status": "available",
+            }), "has_more": False, "usage": {"provider_request": 1, **(
+                {"credits": payload["usage"]["credits"]} if isinstance(payload.get("usage"), dict)
+                and isinstance(payload["usage"].get("credits"), (int, float)) else {})},
         }
     raw = payload.get("results", [])
     cost = payload.get("costDollars", {})

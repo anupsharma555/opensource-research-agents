@@ -303,7 +303,7 @@ def test_browser_html_fetch_without_public_use_basis_remains_unreadable(
         b"<html><main><p>Synthetic documentation details.</p></main>"
         b"<footer>No text and data mining.</footer></html>"
         if scenario == "page_prohibition" else
-        b"%PDF-1.4 synthetic non-HTML content"
+        b"PK\x03\x04 synthetic unsupported archive"
         if scenario == "unsupported_type" else
         b"<html><main><p>Synthetic documentation details.</p></main></html>"
     )
@@ -315,7 +315,7 @@ def test_browser_html_fetch_without_public_use_basis_remains_unreadable(
         receipt = {
             "status": 200, "content": html, "content_sha256": digest,
             "byte_length": len(html),
-            "content_type": "application/pdf" if scenario == "unsupported_type" else "text/html",
+            "content_type": "application/zip" if scenario == "unsupported_type" else "text/html",
             "requested_url": url, "final_url": url, "redirect_chain": [],
             "access_basis": "public_https_unauthenticated",
             "retrieved_at": "2026-10-13T00:00:00Z",
@@ -418,7 +418,8 @@ def test_interrupted_browser_document_use_reconciles_only_original_work(
             return tool("fetch_source", {"hit_id": selected["hit_id"]}, turn)
         assert scenario in {"resume", "after_fetch", "revoked_use"}
         if scenario == "revoked_use":
-            assert "Native browser search returns URL leads.</p>" not in json.dumps(packet["messages"])
+            assert "Native browser search returns URL leads." not in json.dumps(packet["messages"])
+            assert _last_result(packet, "fetch_source")["status"] == "source_unavailable"
             return tool("publish_result", {
                 "title": "Document use revoked", "text": "No source claim was made.",
                 "citations": [], "limitations": ["Document model-use grant was revoked"],

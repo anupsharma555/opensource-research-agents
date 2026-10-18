@@ -12,12 +12,14 @@ import json
 
 from ora.coordination.board import ref
 from ora.coordination.executor import ConcurrentExecutor, WorkResult
+from ora.evidence.hit_use import hit_allows_reinspection
 from ora.evidence.intake import IntakeService, detected_content_type
 from ora.retrieval.catalog_tools import _navigation_result
 from ora.state import StateConflict, StateStore
 from ora.state.store import Transaction, canonical
 
 from .context import ContextError, WorkingContext
+from .document_tools import supported_public_document_type
 
 KIND = "mission_tool_operation"
 
@@ -569,6 +571,8 @@ def reconcile_late_public_document_fetch(
         or proposal["body"].get("status") != "open"
     )
     hit = executor.store.get(**hit_ref)
+    if hit is None or not hit_allows_reinspection(executor.store, hit):
+        stale = True  # Preserve a revoked copy without granting it again on restart.
     try:
         browser_response = WorkingContext(executor.store).browser_hit_response(
             hit, mission_id=spec.mission_id, actor_id=spec.actor_id,
@@ -585,7 +589,7 @@ def reconcile_late_public_document_fetch(
     copy_ref = None
     if not stale:
         content = executor.store.read_blob(document["body"]["blob"]["sha256"])
-        if detected_content_type(content, document["body"]["content_type"]) != "text/html":
+        if not supported_public_document_type(detected_content_type(content, document["body"]["content_type"])):
             result["classification"] = "unsupported_public_document_type"
         else:
             inspected = intake.inspect_public_document(

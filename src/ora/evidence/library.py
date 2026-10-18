@@ -623,7 +623,9 @@ class EvidenceLibrary:
             document is None
             or observed_encounter["body"].get("document_ref") != document_ref
             or document["body"].get("content_sha256") != checksum
-            or document["body"].get("final_url") != reference
+            or (document["body"].get("requested_url") if
+                document["body"].get("origin_kind") == "parent_source_asset" else
+                document["body"].get("final_url")) != reference
             or document["body"].get("checked_at") != retrieved_at
             or document["body"].get("detected_content_type") != mime_type
         ):
@@ -693,7 +695,9 @@ class EvidenceLibrary:
                 if (
                     encounter["body"].get("document_ref") != document_ref
                     or exact_document["body"].get("content_sha256") != checksum
-                    or exact_document["body"].get("final_url") != reference
+                    or (exact_document["body"].get("requested_url") if
+                        exact_document["body"].get("origin_kind") == "parent_source_asset" else
+                        exact_document["body"].get("final_url")) != reference
                 ):
                     raise EvidenceError("Public document origin changed before copy commit")
             hit_ref = encounter["body"].get("retrieval_hit")

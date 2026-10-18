@@ -90,7 +90,8 @@ def test_small_output_plan_requests_keep_full_catalog_and_exact_admission_across
             assert packet["max_completion_tokens"] == output_cap
             assert packet["reasoning_effort"] == "high"
             catalog = _index(packet["messages"][0]["content"])
-            assert len(catalog["tools"]) == 45
+            # Full current catalog includes web navigation and both document readers.
+            assert len(catalog["tools"]) == 54
             assert {"save_plan", "read_plan", "browser_search", "search_scholarly"} <= set(catalog["tools"])
             assert catalog["skills"]["task-planning"]["state"] == "available_to_activate"
             attached = {item["function"]["name"] for item in packet["tools"]}
@@ -103,19 +104,24 @@ def test_small_output_plan_requests_keep_full_catalog_and_exact_admission_across
                 response = tool("save_plan", {"plan": initial, "expected_version": 0}, step)
             elif step == 3:
                 assert PROMPTS[1] in raw.decode()
-                assert "save_plan" in attached and "read_plan" not in attached
-                response = tool("request_capability", {"tool_id": "read_plan"}, step)
+                assert "save_plan" not in attached
+                response = tool("request_capability", {"tool_id": "modify_plan"}, step)
             elif step == 4:
-                assert {"save_plan", "read_plan"} <= attached
-                response = tool("read_plan", {}, step)
-            else:
-                assert step == 5
+                assert "modify_plan" in attached and "save_plan" not in attached
+                response = tool("modify_plan", {"expected_version": 1,
+                    "revision_reason": revised["revision_reason"], "changes": {
+                        "goal": revised["goal"], "completion_criteria": revised["completion_criteria"],
+                        "update_steps": [{"id": item["id"], "description": item["description"]}
+                                         for item in revised["steps"]]}}, step)
+            elif step == 5:
                 last_tool = next(item for item in reversed(packet["messages"]) if item["role"] == "tool")
                 result = json.loads(last_tool["content"])
-                assert last_tool["name"] == "read_plan" and result["status"] == "available"
-                assert result["note"]["version"] == 1
-                assert json.loads(result["note"]["body"]["text"]) == initial
-                response = tool("save_plan", {"plan": revised, "expected_version": 1}, step)
+                assert last_tool["name"] == "modify_plan" and result["plan_ref"]["version"] == 2
+                response = tool("request_capability", {"tool_id": "read_plan"}, step)
+            else:
+                assert step == 6
+                assert {"modify_plan", "read_plan"} <= attached
+                response = tool("read_plan", {}, step)
             response.payload["usage"] = {
                 "prompt_tokens": 100, "completion_tokens": PRIOR_COMPLETION,
                 "total_tokens": 100 + PRIOR_COMPLETION,
@@ -154,7 +160,7 @@ def test_small_output_plan_requests_keep_full_catalog_and_exact_admission_across
         assert control["body"]["requested_capabilities"] == ["save_plan"]
         resumed._update_control(control, feedback={"user_request": PROMPTS[1]})
         _drive_until(resumed, run.run_id, lambda: (
-            len(dispatch_bytes) == 5
+            len(dispatch_bytes) == 6
             and resumed.store.get("working_note", original["id"])["version"] == 2
             and resumed._control(run.run_id, "agent-synthesis")["body"]["phase"] == "ready_model"
         ), failures)
@@ -166,7 +172,7 @@ def test_small_output_plan_requests_keep_full_catalog_and_exact_admission_across
         assert not resumed._control(run.run_id, "agent-synthesis")["body"]["active_skill_ids"]
 
         intents = resumed.store.records("model_request_intent")
-        assert len(intents) == len(dispatch_bytes) == 5
+        assert len(intents) == len(dispatch_bytes) == 6
         by_hash = {hashlib.sha256(raw).hexdigest(): raw for raw in dispatch_bytes}
         sizing = []
         reservations = []
@@ -210,11 +216,11 @@ def test_small_output_plan_requests_keep_full_catalog_and_exact_admission_across
                 "configured_output_cap_fits_observed_limit": estimate.tokens + output_cap <= observed_limit,
                 "legacy_byte_estimate": estimate_request_tokens(raw, basis=LEGACY_BASIS).tokens,
             })
-        assert sorted(reservations) == [0, PRIOR_COMPLETION, PRIOR_COMPLETION, PRIOR_COMPLETION, PRIOR_COMPLETION]
+        assert sorted(reservations) == [0, *([PRIOR_COMPLETION] * 5)]
         assert any(row["legacy_byte_estimate"] > OBSERVED_LIMIT for row in sizing)
         (tmp_path / "admission-sizing.json").write_text(json.dumps({
             "proof_kind": "offline_scripted_admission", "output_cap": output_cap,
-            "observed_limit_tokens": observed_limit, "catalog_count": 45,
+            "observed_limit_tokens": observed_limit, "catalog_count": 54,
             "prompts": list(PROMPTS), "requests": sorted(sizing, key=lambda row: row["dispatch_index"]),
         }, indent=2) + "\n")
     finally:
@@ -278,7 +284,7 @@ def test_v13_waiting_preparation_recovers_at_same_packer_with_small_output_cap(
         assert estimate.basis == TOKENIZER_BASIS and estimate.fallback_reason is None
         packet = json.loads(raw)
         assert packet["max_completion_tokens"] == 1536
-        assert len(_index(packet["messages"][0]["content"])["tools"]) == 45
+        assert len(_index(packet["messages"][0]["content"])["tools"]) == 54
         names = {item["function"]["name"] for item in packet["tools"]}
         assert "save_plan" in names and "read_plan" not in names
         assert current_budget["body"]["estimated_tokens_with_completion_reservation"] <= OBSERVED_LIMIT

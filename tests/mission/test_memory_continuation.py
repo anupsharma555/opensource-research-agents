@@ -201,8 +201,9 @@ def test_absent_peer_can_be_invited_then_receive_multiline_request_under_same_mo
         synthesis_turns += 1
         if synthesis_turns == 1:
             instructions = body["messages"][0]["content"]
-            assert "Use peer_request only for another registered peer in this run" in instructions
-            assert "expose invite_peer with request_capability" in instructions
+            assert "peer_request targets registered peers" in instructions
+            assert "invite absent configured roles to exact work first" in instructions
+            assert "invite_peer" in instructions
             assert "agent-critique (Mxra)" not in instructions
             assert {"peer_request", "request_capability"} <= {
                 item["function"]["name"] for item in body["tools"]

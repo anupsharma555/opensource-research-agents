@@ -14,7 +14,7 @@ URL = "https://example.org/docs/browser-search"
 
 
 def _case(tmp_path, *, url=URL, invalid_document=False, wrong_reference=False,
-          wrong_document_mission=False, navigation=False):
+          wrong_document_mission=False, navigation=False, copy_id="copy"):
     store = StateStore(tmp_path)
     html = b"<html><title>Synthetic guide</title><main>Saved text.</main></html>"
     digest = hashlib.sha256(html).hexdigest()
@@ -47,7 +47,7 @@ def _case(tmp_path, *, url=URL, invalid_document=False, wrong_reference=False,
         encounter = tx.put("source_encounter", "encounter", {
             "mission_id": "m", "route": route, origin_key: origin_ref,
         })
-        copy = tx.put("source_copy", "copy", {
+        copy = tx.put("source_copy", copy_id, {
             "mission_id": "m", "publication": None,
             "navigation_ref": origin_ref if navigation else None,
             "document_ref": None if navigation else origin_ref,
@@ -66,7 +66,7 @@ def _case(tmp_path, *, url=URL, invalid_document=False, wrong_reference=False,
             "quality_ref": ref(quality), "allowed_uses": ["model_input"],
             "policy_status": "granted",
         })
-        tx.bind("source_use.copy", "copy:1", "source_use", use["id"])
+        tx.bind("source_use.copy", f"{copy_id}:1", "source_use", use["id"])
         return {"copy_ref": ref(copy), "use_ref": ref(use)}
 
     saved = store.transact("document-inventory-fixture", {}, save, mission_id="m")
@@ -91,6 +91,7 @@ def test_permitted_web_document_keeps_exact_url_in_normal_and_source_free_invent
     assert item["ref"] == saved["copy_ref"]
     assert item["title"] == "Saved web document"
     assert item["source_url"] == URL
+    assert item["ordinary_document_ref"] == store.get(**saved["copy_ref"])["body"]["document_ref"]
     assert item["model_input_status"] == "permitted"
     assert item["fetch"] == {
         "tool": "read_source_window", "source_id": saved["copy_ref"]["id"],
@@ -104,6 +105,8 @@ def test_permitted_web_document_keeps_exact_url_in_normal_and_source_free_invent
     assert tight["source_url"] == URL
     assert tight["model_input_status"] == "permitted"
     assert tight["fetch"]["tool"] == "read_source_window"
+    assert "ordinary_document_ref" not in tight
+    assert tight["ordinary_document_ref_omitted_for_page_budget"] is True
 
 
 def test_existing_navigation_title_does_not_gain_document_url(tmp_path):
@@ -115,6 +118,15 @@ def test_existing_navigation_title_does_not_gain_document_url(tmp_path):
     source_free = {"source_context_mode": "source_free_recovery", "inventory": page}
     assert "Synthetic program" in canonical(source_free)
     assert URL not in canonical(source_free)
+
+
+def test_tight_inventory_keeps_short_url_with_realistic_copy_id(tmp_path):
+    store, inventory_ref, saved = _case(tmp_path, copy_id="source-copy-" + "a" * 36)
+    item, _page = _item(store, inventory_ref, reply_char_limit=500)
+    assert item["ref"] == saved["copy_ref"]
+    assert item["source_url"] == URL
+    assert item["model_input_status"] == "permitted"
+    assert item["fetch"]["tool"] == "read_source_window"
 
 
 def test_permitted_exact_document_keeps_url_for_another_peer_task(tmp_path):
@@ -170,6 +182,7 @@ def test_revoked_current_use_hides_url_and_reader(tmp_path):
     assert item["model_input_status"] == "restricted"
     assert item["fetch"] is None
     assert "source_url" not in item
+    assert "ordinary_document_ref" not in item
     assert "saved_reading" not in item
 
 
@@ -179,5 +192,6 @@ def test_oversize_url_is_omitted_last_without_losing_reader_or_current_use(tmp_p
     item, _page = _item(store, inventory_ref, reply_char_limit=500)
     assert item["model_input_status"] == "permitted"
     assert item["fetch"]["tool"] == "read_source_window"
+    assert "ordinary_document_ref" not in item
     assert "source_url" not in item
     assert item["source_url_omitted_for_page_budget"] is True

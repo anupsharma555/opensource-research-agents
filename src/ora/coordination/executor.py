@@ -19,6 +19,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from typing import Any, Callable, Mapping
 
+from ora.agents.capabilities import content_hash
 from ora.agents.json_shapes import finite_json
 from ora.state import StateConflict, StateError, StateStore
 from ora.state.source_lineage import inherited_public_source
@@ -156,7 +157,7 @@ class ConcurrentExecutor:
         for pointer in spec.input_refs:
             if (
                 type(pointer) is dict and pointer.get("kind") == "source_copy"
-                and spec.call_id
+                and (spec.call_id or spec.kind == "model" and spec.handler_id == "mission-figure")
                 and inherited_public_source(
                     tx, mission_id=spec.mission_id, run_id=spec.run_id,
                     copy_ref=pointer, actor_id=spec.actor_id,
@@ -1040,6 +1041,29 @@ class ConcurrentExecutor:
         self._mark_external_unknown(spec, generation)
         return {"work_id": spec.work_id, "status": "uncertain"}
 
+    @staticmethod
+    def _trace_call_binding(tx: Transaction, spec: WorkSpec) -> tuple[str | None, int | None]:
+        """Pin an auxiliary figure trace to its selecting call without changing usage accounting."""
+        if spec.kind != "model" or spec.handler_id != "mission-figure":
+            return spec.call_id or None, spec.call_version
+        attempt = tx.get("agent_attempt", spec.attempt_id)
+        call_ref = attempt["body"].get("call_ref") if attempt else None
+        call = tx.get(**call_ref) if isinstance(call_ref, dict) else None
+        if (attempt is None or call is None or call_ref != ref(call)
+                or any(attempt["body"].get(key) != value for key, value in (
+                    ("mission_id", spec.mission_id), ("run_id", spec.run_id),
+                    ("task_id", spec.proposal_ref["id"]), ("agentId", spec.actor_id)))
+                or any(call["body"].get(key) != value for key, value in (
+                    ("mission_id", spec.mission_id), ("task_id", spec.proposal_ref["id"]),
+                    ("instance_id", spec.actor_id), ("attempt_id", spec.attempt_id)))
+                or any(not any(
+                    {key: item.get(key) for key in ("kind", "id", "version")} == pointer
+                    and item.get("sha256") == content_hash(tx.get(**pointer)["body"])
+                    for item in call["body"].get("input_refs", [])
+                ) for pointer in spec.input_refs)):
+            raise StateError("Figure trace lost its exact selecting model call")
+        return call_ref["id"], call_ref["version"]
+
     def _accept(
         self, spec: WorkSpec, cap: dict, fence: dict, result: WorkResult, *,
         recovered_uncertain: bool = False,
@@ -1142,6 +1166,7 @@ class ConcurrentExecutor:
                     evidence_refs=message.get("evidence_refs", []),
                 )
                 pointers.append(sent["message_ref"])
+            trace_call_id, trace_call_version = self._trace_call_binding(tx, spec)
             trace = self.traces.append_tx(
                 tx,
                 _id("executor-event:", [spec.mission_id, spec.work_id]),
@@ -1152,8 +1177,8 @@ class ConcurrentExecutor:
                     spec.attempt_id,
                     spec.actor_id,
                     self._capacity_id(spec),
-                    call_id=spec.call_id or None,
-                    call_version=spec.call_version,
+                    call_id=trace_call_id,
+                    call_version=trace_call_version,
                     configuration_ref=spec.configuration_ref,
                 ),
                 category=spec.kind,
@@ -1246,29 +1271,38 @@ class ConcurrentExecutor:
             spec, result, tool_name="fetch_source", navigation_ref=document_ref,
         )
 
+    def accept_saved_web_query_result(
+        self, spec: WorkSpec, result: WorkResult, page_ref: dict,
+    ) -> dict:
+        """Fence one completed, saved discovery page without another provider call."""
+        return self._accept_saved_local_result(
+            spec, result, tool_name="web-query", navigation_ref=page_ref,
+        )
+
     def _accept_saved_local_result(
         self, spec: WorkSpec, result: WorkResult, *, tool_name: str,
         navigation_ref: dict,
     ) -> dict:
         payload = result.payload if isinstance(result.payload, dict) else {}
         saved_result = payload.get("result")
+        web_query = tool_name == "web-query"
         expected_outputs = (
             (navigation_ref,) if tool_name == "navigate_venue" else
             (saved_result["copy_ref"],) if isinstance(saved_result, dict)
             and saved_result.get("copy_ref") else ()
         )
         if (
-            tool_name not in {"navigate_venue", "inspect_navigation_document", "fetch_source"}
-            or spec.handler_id != "mission-tool"
-            or result.disposition != "continue_task"
+            tool_name not in {"navigate_venue", "inspect_navigation_document", "fetch_source", "web-query"}
+            or spec.handler_id != ("web-query" if web_query else "mission-tool")
+            or result.disposition != ("completed" if web_query else "continue_task")
             or result.messages
             or result.used_tokens is not None
             or result.output_refs != expected_outputs
-            or payload.get("name") != tool_name
+            or (not web_query and payload.get("name") != tool_name)
             or not isinstance(saved_result, dict)
-            or saved_result.get(
+            or (saved_result.get("page_ref") if web_query else saved_result.get(
                 "document_ref" if tool_name == "fetch_source" else "navigation_ref"
-            ) != navigation_ref
+            )) != navigation_ref
         ):
             raise StateError("Recovered local tool needs one exact saved effect")
         work = self.store.get(self.KIND, self._work_record_id(spec))
@@ -1437,6 +1471,13 @@ class ConcurrentExecutor:
                 )
                 return {**observed, "error_class": type(exc).__name__}
             if result.disposition in {"completed", "continue_task"}:
+                if spec.handler_id == "web-query":
+                    latest = self.capacity.get(cap_id)
+                    if latest is not None and latest["cancel_requested"]:
+                        return self._observe_or_unknown(
+                            spec, cap["generation"], fence, result,
+                            "web_query_result_after_cancel",
+                        )
                 try:
                     accepted = self._accept(spec, cap, fence, result)
                 except Exception as exc:

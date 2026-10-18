@@ -56,9 +56,26 @@ def _wait_id(route: str) -> str:
     return "discovery-wait-" + _digest(group)
 
 
-def _admit_ncbi(store: StateStore) -> dict:
-    """Reserve a shared no-key E-utilities slot across processes and restarts."""
-    record_id = "ncbi-eutils"
+def _ncbi_interval(credential: str | None, requests_per_second: int | None) -> float:
+    maximum = 10 if credential else 3
+    if requests_per_second is not None and (
+        type(requests_per_second) is not int or requests_per_second < 1
+    ):
+        raise ValueError("NCBI requests per second must be a positive integer")
+    rate = min(requests_per_second or maximum, maximum)
+    return max(0.1 if credential else 0.36, 1 / rate)
+
+
+def _admit_ncbi(
+    store: StateStore, credential: str | None = None,
+    requests_per_second: int | None = None,
+) -> dict:
+    """Reserve a slot in the local shared IP or keyed E-utilities pool."""
+    record_id = (
+        "ncbi-eutils-key-" + hashlib.sha256(credential.encode()).hexdigest()
+        if credential else "ncbi-eutils"
+    )
+    interval = _ncbi_interval(credential, requests_per_second)
 
     def action(tx):
         previous = tx.get("discovery_capacity", record_id)
@@ -67,8 +84,11 @@ def _admit_ncbi(store: StateStore) -> dict:
         body = {
             "schema": "ora.discovery.capacity.v1",
             "provider": "ncbi",
-            "next_allowed_epoch": scheduled + 0.36,
-            "documented_limit": "3 requests/second without API key",
+            "next_allowed_epoch": scheduled + interval,
+            "documented_limit": (
+                "10 requests/second per API key" if credential
+                else "3 requests/second per IP without API key"
+            ),
         }
         saved = tx.put(
             "discovery_capacity",
@@ -79,7 +99,8 @@ def _admit_ncbi(store: StateStore) -> dict:
         return {"wait_seconds": max(0.0, scheduled - now), "capacity_ref": _ref(saved)}
 
     return store.transact(
-        "ncbi-admit-" + uuid.uuid4().hex, {"provider": "ncbi", "mode": "public_no_key"}, action
+        "ncbi-admit-" + uuid.uuid4().hex,
+        {"provider": "ncbi", "mode": "keyed" if credential else "public_no_key"}, action,
     )
 
 
@@ -150,10 +171,12 @@ def _read(
     *,
     name: str,
     store: StateStore | None = None,
+    credential: str | None = None,
+    ncbi_requests_per_second: int | None = None,
 ) -> tuple[HTTPResult, dict]:
     admission_ms = 0.0
     if store is not None and name.startswith("pubmed."):
-        reservation = _admit_ncbi(store)
+        reservation = _admit_ncbi(store, credential, ncbi_requests_per_second)
         admission_ms = reservation["wait_seconds"] * 1000
         if admission_ms:
             time.sleep(reservation["wait_seconds"])
@@ -189,11 +212,12 @@ def _error_response(status: int | None, headers: Mapping[str, str], reason: str)
     return {"status": "error", "error_code": "timeout" if reason == "timeout" else "upstream_error"}
 
 
-def _pubmed_summary_call(ids: list[str]) -> str:
+def _pubmed_summary_call(ids: list[str], credential: str | None = None) -> str:
     from urllib.parse import urlencode
 
     return "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?" + urlencode(
-        {"db": "pubmed", "id": ",".join(ids), "retmode": "json"}
+        {"db": "pubmed", "id": ",".join(ids), "retmode": "json",
+         **({"api_key": credential} if credential else {})}
     )
 
 
@@ -294,6 +318,7 @@ def _saved_hits(store: StateStore, refs: list[dict]) -> list[dict]:
                         "rights_status",
                         "access_status",
                         "content_sha256",
+                        "discovery_excerpt",
                         "scientific_metadata",
                     )
                 },
@@ -307,6 +332,7 @@ def run_discovery_page(
     request: Mapping[str, Any],
     *,
     credential: str | None = None,
+    ncbi_requests_per_second: int | None = None,
     transport: Callable[..., HTTPResult] = http_transport,
 ) -> dict:
     """Execute one requested window. No implicit route switch, query expansion or retry.
@@ -317,6 +343,8 @@ def run_discovery_page(
     """
     request = dict(request)
     route = request.get("route")
+    if isinstance(route, str) and route.startswith("pubmed."):
+        _ncbi_interval(credential, ncbi_requests_per_second)
     page_identity = {
         key: request.get(key)
         for key in (
@@ -359,7 +387,7 @@ def run_discovery_page(
     method, url, body, headers = build_call(request, credential)
     if resumed_esearch is not None:
         method, url, body, headers = (
-            "GET", _pubmed_summary_call(resumed_esearch["body"]["id_list"]), None, {}
+            "GET", _pubmed_summary_call(resumed_esearch["body"]["id_list"], credential), None, {}
         )
     adapter = available_routes()[route]["adapter"]
     blank = {"status": "ok", "results" if adapter == "opaque_cursor" else "items": []}
@@ -405,6 +433,8 @@ def run_discovery_page(
             headers,
             name="pubmed.esummary" if resumed_esearch is not None else route,
             store=store if route.startswith("pubmed.") else None,
+            credential=credential if route.startswith("pubmed.") else None,
+            ncbi_requests_per_second=ncbi_requests_per_second,
         )
         legs.append(leg)
         if resumed_esearch is not None:
@@ -486,11 +516,13 @@ def run_discovery_page(
                     summary, summary_leg = _read(
                         transport,
                         "GET",
-                        _pubmed_summary_call(ids),
+                        _pubmed_summary_call(ids, credential),
                         None,
                         {},
                         name="pubmed.esummary",
                         store=store,
+                        credential=credential,
+                        ncbi_requests_per_second=ncbi_requests_per_second,
                     )
                     legs.append(summary_leg)
                     if summary.status >= 400:

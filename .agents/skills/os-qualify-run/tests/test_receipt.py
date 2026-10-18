@@ -127,7 +127,7 @@ def test_receipt_keeps_unknown_usage_and_continuing_work_distinct(tmp_path: Path
 
     result = receipt["runs"][0]
     assert receipt["generator"] == {
-        "skill": "os-qualify-run", "skill_version": "0.3.1",
+        "skill": "os-qualify-run", "skill_version": "0.3.2",
         "helper_sha256": hashlib.sha256(SCRIPT.read_bytes()).hexdigest(),
     }
     assert receipt["schema"] == "ora.codex.run_metadata_receipt.v2"

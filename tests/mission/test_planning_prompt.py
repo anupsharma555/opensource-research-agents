@@ -65,19 +65,28 @@ def test_serialized_developer_instructions_label_optional_planning_with_full_cat
             developer = packet["messages"][0]
             assert developer["role"] == "developer"
             instructions = developer["content"]
+            assert "Read coherent sections within the input budget" in instructions
+            assert "choose further reading, saved-text search, another source or an answer" in instructions
+            assert "Reading every page is optional" in instructions
+            assert "unread text does not establish that information is absent" not in instructions
+            assert "search_saved_passages locates retained text" not in instructions
+            assert "Wait only for pending retrieval" in instructions
+            assert "source URLs from verified metadata" in instructions
             assert instructions.count(LABEL) == 1
             section = instructions.split(LABEL + "\n", 1)[1].split("\n\n", 1)[0]
             assert len(section.split()) <= 100
             assert "complex, uncertain or dependent tasks" in section
             assert "Simple tasks may skip planning" in section
             assert "Plans are advisory" in section
-            assert "No planning call is required" in section
-            assert {"discover_capabilities", "activate_skill", "request_capability",
-                    "save_plan", "read_plan"} <= set(section.replace("/", " ").split())
+            assert "see catalog for creation/revision/read tools" in section
+            assert "activate_skill with skill_id task-planning loads the template" in section
             catalog = _index(instructions)
-            assert len(catalog["tools"]) == 45
+            # Keep the default catalog intact, including web and document readers.
+            assert len(catalog["tools"]) == 54
             assert {"browser_search", "search_scholarly", "propose_work", "revise_work",
-                    "peer_request", "wait_for_dependencies", "save_plan", "read_plan"} <= set(catalog["tools"])
+                    "peer_request", "wait_for_dependencies", "save_plan", "read_plan",
+                    "search_web", "read_search_results", "cancel_search", "render_source",
+                    "read_document_ocr", "inspect_figure"} <= set(catalog["tools"])
         initial = packets[0]
         attached = {item["function"]["name"] for item in initial["tools"]}
         assert {"save_plan", "read_plan"}.isdisjoint(attached)
@@ -87,6 +96,9 @@ def test_serialized_developer_instructions_label_optional_planning_with_full_cat
         last_attached = {item["function"]["name"] for item in packets[-1]["tools"]}
         if selection == "activate":
             assert control["active_skill_ids"] == ["task-planning"]
+            assert control["planning_guidance_ref"]["kind"] == "mission_capability_selection"
+            assert all("optional_planning_guidance" not in (m.get("content") or "")
+                       for m in packets[-1]["messages"][1:])
             assert "# Task planning" in packets[-1]["messages"][0]["content"]
             assert {"save_plan", "read_plan"} <= last_attached
         else:
@@ -95,6 +107,7 @@ def test_serialized_developer_instructions_label_optional_planning_with_full_cat
             if selection == "request_tool":
                 assert "read_plan" in last_attached and "save_plan" not in last_attached
         assert not host.store.records("working_note")
+        assert not host.store.records("source_read_window")
     finally:
         host.close()
 

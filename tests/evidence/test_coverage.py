@@ -30,6 +30,93 @@ def checked_copy(tmp_path, content: bytes, *, mime="text/plain", surface="abstra
     return library, saved
 
 
+def checked_public_web_copy(tmp_path):
+    """Use the real public-document intake to retain one synthetic HTML copy."""
+    store = StateStore(tmp_path / "state")
+    library = EvidenceLibrary(store)
+    text = "Synthetic rendered appendix has an exact retained detail."
+    content = f"<html><body><p>{text}</p></body></html>".encode()
+    digest = hashlib.sha256(content).hexdigest()
+    blob = store.put_blob(content)
+    url = "https://example.org/synthetic"
+
+    def save(tx):
+        delivery = tx.put("retrieval_delivery", "synthetic-delivery", {})
+        delivery_ref = ref(delivery)
+        hit = tx.put("retrieval_hit", "synthetic-web-hit", {
+            "source": {"original_url": url, "rights_status": "unknown"},
+        })
+        tx.link(hit, delivery, "derived_from")
+        document = tx.put("public_document_fetch", "synthetic-rendered-document", {
+            "mission_id": "synthetic-mission", "run_id": "synthetic-run",
+            "actor_id": "synthetic-peer", "task_id": "synthetic-task",
+            "hit_ref": ref(hit), "response_ref": delivery_ref,
+            "status": 200, "requested_url": url, "final_url": url,
+            "redirect_chain": [], "checked_at": "2026-10-15T12:00:00Z",
+            "content_type": "text/html", "detected_content_type": "text/html",
+            "content_sha256": digest, "byte_length": len(content),
+            "access_basis": "public_https_unauthenticated", "authenticated": False,
+            "hit_rights_status": "unknown", "representation": "browserless_rendered_html",
+            "blob": blob,
+        })
+        return ref(document)
+
+    document_ref = store.transact("synthetic-rendered-setup", {}, save)
+    inspected = IntakeService(library).inspect_public_document(
+        "synthetic-rendered-inspection", document_ref,
+        mission_id="synthetic-mission", run_id="synthetic-run",
+        actor_id="synthetic-peer", task_id="synthetic-task",
+    )
+    assert inspected["classification"] == "web_document"
+    assert inspected["model_input_status"] == "permitted"
+    assert inspected["copy_ref"] is not None
+    return library, inspected["copy_ref"], text
+
+
+def test_checked_public_web_window_has_coverage_but_forgery_does_not(tmp_path):
+    library, copy_ref, text = checked_public_web_copy(tmp_path)
+    store = library.store
+    window = read_source_window(
+        library, "synthetic-web-window", copy_ref,
+        block_offset=0, char_offset=0, block_limit=1, char_limit=1000,
+    )
+    selected = window["passage_refs"]
+    exact = extracted_text_coverage(store, copy_ref, selected, [window["window_ref"]])
+    assert exact["status"] == "complete_extracted_text"
+    assert exact["source_surface"] == "web_document"
+    assert exact["covered_chars"] == exact["total_chars"] == len(text)
+
+    passage = store.get(**selected[0])
+
+    def forge_passage(tx):
+        forged = tx.put("source_passage", "synthetic-forged-web-passage", {
+            **passage["body"], "text": "Different, uninspected words",
+        })
+        return ref(forged)
+
+    forged_ref = store.transact("synthetic-forged-web-passage", {}, forge_passage)
+    forged = extracted_text_coverage(store, copy_ref, [forged_ref], [window["window_ref"]])
+    assert forged["status"] == "unknown"
+    assert forged["reason"] == "passage_locator_not_unique_or_exact"
+
+    use = store.resolve("source_use.copy", f"{copy_ref['id']}:{copy_ref['version']}")
+    quality = store.get(**use["body"]["quality_ref"])
+
+    def forge_quality(tx):
+        altered = tx.put("intake_quality", "synthetic-bad-web-quality", {
+            **quality["body"], "source_sha256": "0" * 64,
+        })
+        tx.put("source_use", use["id"], {
+            **use["body"], "quality_ref": ref(altered),
+        }, expected_version=use["version"])
+        return {}
+
+    store.transact("synthetic-bad-web-quality", {}, forge_quality)
+    mismatch = extracted_text_coverage(store, copy_ref, selected, [window["window_ref"]])
+    assert mismatch["status"] == "unknown"
+    assert mismatch["reason"] == "source_quality_mismatch"
+
+
 def supplied_without_quality_mapping(tmp_path, *, route="user_supplied", text=None,
                                      mime="text/plain", validation="exact-user-submission"):
     """Match the private mission's pinned submitted-text quality shape."""

@@ -2,7 +2,7 @@
 name: os-qualify-run
 description: Evaluate research runs across project stages using saved execution, context, API usage, evidence, collaboration, recovery, storage and presentation records. Use for run diagnostics, an explicit parallel test batch or deciding the next development test; distinguish live work from replay or fixtures. Do not use for the offline foundation alone.
 metadata:
-  version: 0.3.1
+  version: 0.3.2
 ---
 
 # Qualify a saved research run
@@ -20,6 +20,19 @@ A denied process or localhost probe means availability is unknown, not that the 
 For the repository's mission/SQLite runtime, read [mission runtime inspection](references/mission-runtime.md) before using its commands or receipt helper. The reference owns their prerequisites and supported record shapes. If that runtime or helper is absent or incompatible, skip those commands and use the selected runtime's documented read-only records; do not abandon the review or infer support from this skill package. For another runtime, first establish its command and record mapping without guessing endpoints or schemas. Produce a private manual receipt when no compatible helper exists, stating what it could not measure.
 
 Check other active runs and shared provider capacity before calling a result isolated. An unavailable component limits its own proof. Mark a dimension **not applicable** only when the task does not require it; required but absent evidence remains **missing**, not a pass. For example, a retrieval-only case has no model-token result, while a peer-collaboration test with no peer records lacks required evidence.
+
+## Explain the qualification question
+
+Start the user-facing review by explaining what the selected run was intended to
+test, the task and material it received, and the behavior the evidence must show.
+State each concrete behavior and its required evidence, then label the observed
+result as demonstrated, failed, unexercised or inconclusive as appropriate.
+Guide delivery alone does not establish productive use; one successful case
+does not establish an improvement over another approach.
+Connect the observations to that question before reporting a pass, failure or
+inconclusive result. Separate a useful answer from demonstrated use of the target
+capability. For a proposed live run, explain any staged change and its bounded
+allowance before dispatch; keep evaluator-only criteria out of the worker prompt.
 
 ## Inspect before another test
 

@@ -69,12 +69,20 @@ def test_peer_reads_saved_nonpublication_html_in_next_model_turn(tmp_path, monke
             assert item["model_input_status"] == "permitted"
             assert item["title"] == "Program"
             selected["copy_ref"] = item["ref"]
+            assert "read_source_window" not in {
+                entry["function"]["name"] for entry in calls[-1]["tools"]
+            }
+            return tool("request_capability", {"tool_id": "read_source_window"}, count)
+        if count == 8:
+            assert "read_source_window" in {
+                entry["function"]["name"] for entry in calls[-1]["tools"]
+            }
             return tool("read_source_window", {
-                "source_id": item["ref"]["id"],
-                "source_version": item["ref"]["version"],
+                "source_id": selected["copy_ref"]["id"],
+                "source_version": selected["copy_ref"]["version"],
                 "block_offset": 1, "char_offset": 0, "char_limit": 200,
             }, count)
-        assert count == 8
+        assert count == 9
         visible = json.dumps(json.loads(request.data)["messages"])
         assert "Poster 17: synthetic methods and findings." in visible
         window = host.store.records("source_read_window")[0]
@@ -96,7 +104,7 @@ def test_peer_reads_saved_nonpublication_html_in_next_model_turn(tmp_path, monke
     ))
     drain(host, run.run_id, limit=35)
     assert host._run(run.run_id)["body"]["status"] == "completed"
-    assert len(calls) == 8 and len(fetches) == 1
+    assert len(calls) == 9 and len(fetches) == 1
     assert len(host.store.records("source_copy")) == 1
     assert host.store.records("publication") == []
     snapshot = host.state(run.run_id).snapshot
@@ -168,12 +176,20 @@ def test_interrupted_local_inspection_recovers_only_original_current_work(
             )
             assert inventory["items"][0]["model_input_status"] == "permitted"
             selected["copy_ref"] = inventory["items"][0]["ref"]
+            assert "read_source_window" not in {
+                entry["function"]["name"] for entry in calls[-1]["tools"]
+            }
+            return tool("request_capability", {"tool_id": "read_source_window"}, step)
+        if step == 8:
+            assert "read_source_window" in {
+                entry["function"]["name"] for entry in calls[-1]["tools"]
+            }
             return tool("read_source_window", {
                 "source_id": selected["copy_ref"]["id"],
                 "source_version": selected["copy_ref"]["version"],
                 "block_offset": 1, "char_offset": 0, "char_limit": 200,
             }, step)
-        assert step == 8
+        assert step == 9
         visible = json.dumps(json.loads(request.data)["messages"])
         assert "Poster 17: synthetic methods and findings." in visible
         window = reopened.store.records("source_read_window")[0]
@@ -265,7 +281,7 @@ def test_interrupted_local_inspection_recovers_only_original_current_work(
         if scenario in {"resume", "revoked_use"}:
             drain(reopened, run.run_id, limit=35)
             assert reopened._run(run.run_id)["body"]["status"] == "completed"
-            assert len(calls) == (8 if scenario == "resume" else 7)
+            assert len(calls) == (9 if scenario == "resume" else 7)
             assert len(reopened.store.records("source_copy")) == 1
             assert len(reopened.store.records("source_use")) == 1
             assert len(reopened.store.records("publication")) == 0

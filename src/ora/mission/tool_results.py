@@ -13,6 +13,10 @@ from ora.state import StateError
 from ora.state.store import canonical
 
 PAGEABLE_TOOLS = frozenset({"read_note", "read_plan", "search_notes", "board_read", "list_optional_work"})
+WEB_PAGEABLE_TOOLS = frozenset({"search_web", "read_search_results", "cancel_search"})
+SCHOLARLY_PAGEABLE_TOOLS = frozenset({"search_scholarly"})
+ASSET_PAGEABLE_TOOLS = frozenset({"list_source_assets"})
+SAVED_PASSAGE_PAGEABLE_TOOLS = frozenset({"search_saved_passages"})
 RESULT_PAGE_SCHEMA = "ora.saved_tool_result_window.v1"
 MAX_RESULT_PAGE_CHARS = 3000
 MAX_RESULT_WINDOW_CHARS = 1800

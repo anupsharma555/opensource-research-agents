@@ -1,7 +1,5 @@
 """Agents can request later exact text without replacing an inspected copy."""
 
-import subprocess
-
 import pytest
 
 from ora.evidence import (
@@ -13,6 +11,7 @@ from ora.evidence import (
 )
 from ora.state import StateStore
 from ora.state.store import StateConflict
+from tests.evidence.test_source_format_walkthroughs import _pdf
 
 
 def checked_copy(tmp_path, content, *, mime="application/xml", surface="full_text",
@@ -171,17 +170,17 @@ def test_policy_change_at_transaction_or_before_return_is_detected(tmp_path, mon
 
 
 def test_pdf_window_reports_page_and_table_context_without_claiming_cell_validity(
-    tmp_path, monkeypatch
+    tmp_path,
 ):
-    monkeypatch.setattr("ora.evidence.intake.subprocess.run", lambda *a, **k:
-        subprocess.CompletedProcess(a[0], 0,
-            b"DOI: 10.1234/window.\nResults\nTable 1.\nGroup n=40; value -3 mg.\f"
-            b"Discussion\nLater interpretation.\f", b""))
     table_check = {"page": 1, "row": "Group", "header": "Group n=40", "units": "mg",
                    "footnote": "none present", "rendered_original_sha256": "a" * 64,
                    "reviewer_basis": "Synthetic rendered-page fixture"}
-    library, saved = checked_copy(tmp_path, b"%PDF-1.4\nsynthetic",
-                                  mime="application/pdf", table_check=table_check)
+    pdf = _pdf([
+        ["DOI: 10.1234/window.", "Results", "Table 1.", "Group n=40; value -3 mg."],
+        ["Discussion", "Later interpretation."],
+    ])
+    library, saved = checked_copy(tmp_path, pdf, mime="application/pdf",
+                                  table_check=table_check)
     page = read_source_window(library, "pdf-window", saved["copy_ref"], block_limit=1)
     assert "page=1" in page["passages"][0]["locator"]
     assert page["table_context"]["rendered_original_check"] == table_check
@@ -191,3 +190,35 @@ def test_pdf_window_reports_page_and_table_context_without_claiming_cell_validit
     assert "page=2" in later["passages"][0]["locator"]
     assert later["table_context"]["rendered_original_check"] is None
     assert later["table_context"]["reviewed_page_elsewhere"] == 1
+
+
+def test_pdf_progress_uses_physical_page_locators_across_blank_page(tmp_path):
+    pdf = _pdf([
+        ["DOI: 10.1234/window. First page text."], None,
+        ["Third page text."],
+    ])
+    library, saved = checked_copy(tmp_path, pdf,
+                                  mime="application/pdf", surface="abstract")
+    first = read_source_window(library, "pdf-progress-first", saved["copy_ref"],
+                               block_limit=1, char_limit=12)
+    assert "PDF page 1" in first["reading_progress"]
+    assert "block 1/2 chars 0:12" in first["reading_progress"]
+    assert "More retained text" in first["reading_progress"]
+    assert first["next_cursor"] == {"block_offset": 0, "char_offset": 12}
+    later = read_source_window(library, "pdf-progress-third", saved["copy_ref"],
+                               block_offset=1, block_limit=1)
+    assert "PDF page 3" in later["reading_progress"]
+    assert "block 2/2" in later["reading_progress"]
+    assert "total pages unknown" in later["reading_progress"]
+    assert "whole source reading unverified" in later["reading_progress"]
+    assert later["next_cursor"] is None
+
+
+def test_xml_progress_names_extracted_blocks_not_pdf_pages(tmp_path):
+    library, saved = checked_copy(tmp_path, xml_sections(2))
+    window = read_source_window(library, "xml-progress", saved["copy_ref"],
+                                block_limit=1, char_limit=15)
+    assert window["reading_progress"].startswith("Extracted block 1/")
+    assert "see section locators" in window["reading_progress"]
+    assert "PDF page" not in window["reading_progress"]
+    assert window["next_cursor"] == {"block_offset": 0, "char_offset": 15}

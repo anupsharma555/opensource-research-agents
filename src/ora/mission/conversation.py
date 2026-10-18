@@ -15,6 +15,40 @@ MAX_SUMMARY_CHARS = 8000
 MAX_HISTORY_PAGE_CHARS = 1800
 
 
+def _continuation_input_refs(context: WorkingContext, body: dict,
+                             archived_note_refs: list[dict]) -> list[dict]:
+    """Pin the task memory whose later revision can invalidate a summary."""
+    store = context.store
+    task = store.get("board_proposal", body["task_id"])
+    if task is None or task["body"].get("mission_id") != body["mission_id"]:
+        raise ContextError("Compaction task is unavailable")
+    pointers = [ref(task), *archived_note_refs]
+    # A request revision carries answer/review state. Dissent and uptake can
+    # change a peer's interpretation without changing the original task.
+    for kind in ("mail_request", "board_dissent", "peer_update_uptake"):
+        after = ""
+        while True:
+            page = store.records(kind, after_id=after)
+            for item in page:
+                saved = item["body"]
+                if saved.get("mission_id") != body["mission_id"]:
+                    continue
+                if kind == "mail_request":
+                    relevant = (
+                        body["actor_id"] in {saved.get("requester_id"), saved.get("recipient_id")}
+                        and (saved.get("cause_ref") or {}).get("id") == body["task_id"]
+                    )
+                else:
+                    subject = saved.get("proposal_ref") or saved.get("task_ref") or {}
+                    relevant = subject.get("id") == body["task_id"]
+                if relevant:
+                    pointers.append(ref(item))
+            if len(page) < 1000:
+                break
+            after = page[-1]["id"]
+    return list({(p["kind"], p["id"], p["version"]): p for p in pointers}.values())
+
+
 def _scoped_source_copy(context: WorkingContext, pointer: object, *,
                         mission_id: str, actor_id: str, task_id: str) -> dict | None:
     """Resolve a local or exactly inherited source for this peer's current task."""
@@ -252,13 +286,15 @@ def save_compaction(context: WorkingContext, *, control: dict, response_ref: dic
         "archived_note_refs": archived_note_refs,
         "prior_summary_ref": prior_summary_ref,
     }
+    input_refs = _continuation_input_refs(context, body, archived_note_refs)
     summary_body = {
         "schema": "ora.context_summary.v2", "mission_id": body["mission_id"],
         "actor_id": body["actor_id"], "task_id": body["task_id"],
         "text": summary.strip(), "authority": "model_authored_continuation_aid",
         "archive_ref": {"kind": "conversation_archive", "id": archive_id, "version": 1},
         "archived_note_refs": archived_note_refs,
-        "source_dependency_refs": source_refs, "input_refs": [], "source_refs": source_refs,
+        "source_dependency_refs": source_refs, "input_refs": input_refs,
+        "source_refs": source_refs,
     }
 
     def write(tx):

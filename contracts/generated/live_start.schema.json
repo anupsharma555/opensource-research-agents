@@ -12,6 +12,12 @@
       "title": "Agentids",
       "type": "array"
     },
+    "allowVision": {
+      "default": false,
+      "description": "Explicitly permit auxiliary Groq Qwen figure-reading calls using this run's selected credential profile.",
+      "title": "Allowvision",
+      "type": "boolean"
+    },
     "credentialProfile": {
       "anyOf": [
         {

@@ -855,7 +855,8 @@ class ModelSession:
             "blob": private_blob,
             "partial_response_sha256": (_sha(outcome.partial_response)
                                         if outcome.partial_response is not None else None),
-            "usage": outcome.usage, "rate_headers": outcome.rate_headers,
+            "usage": outcome.usage, "cache_observation": outcome.cache_observation,
+            "rate_headers": outcome.rate_headers,
             "timings": outcome.timings, "error_kind": outcome.error_kind,
             "http_status": outcome.http_status,
             "retry_after_seconds": outcome.retry_after_seconds,

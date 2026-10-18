@@ -1,0 +1,34 @@
+{
+  "schema": "ora.runtime_skill.example.v1",
+  "synthetic": true,
+  "scenario": "A synthetic methods reviewer has two interpretations and awaits a directed peer response. These conceptual checkpoints illustrate guidance, not tool payloads or proof that work executed.",
+  "input": {
+    "task_context": "Determine whether the synthetic study's observed change supports a causal interpretation.",
+    "inspected_evidence": {
+      "source_id": "synthetic-study-copy",
+      "version": 1,
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "locator": "Methods, paragraph 2",
+      "observation": "The synthetic study lacks a concurrent control group."
+    },
+    "peer_request": {
+      "id": "synthetic-request-design-review",
+      "version": 1,
+      "status": "pending"
+    }
+  },
+  "illustrative_plan": {
+    "goal": "Separate association from a defensible causal interpretation.",
+    "uncertainty": "A before/after change could reflect secular trends.",
+    "next_action": "Compare the inspected design with the peer's independent appraisal when available.",
+    "dependency": "synthetic-request-design-review version 1",
+    "negative_result": "The inspected methods provide no concurrent comparison.",
+    "pause": "Wait on the existing peer request; no plan-refresh calls are needed."
+  },
+  "illustrative_revision": {
+    "changed_evidence": "The peer agrees about the absent comparator but dissents on whether residual evidence is sufficient.",
+    "decision": "Retain the dissent and report an association with the design limitation; make further causal appraisal an explicit follow-up if useful.",
+    "completion": "A qualified answer distinguishes the observed change from the unsupported causal claim."
+  },
+  "execution_boundary": "save_plan/read_plan preserve structured intent and exact revisions; propose_work/revise_work/peer_request/wait_for_dependencies own execution and communication."
+}

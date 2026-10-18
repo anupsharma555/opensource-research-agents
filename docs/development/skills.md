@@ -7,12 +7,20 @@ for research-run diagnostics across stages (with runtime-specific inspection
 guidance), [`os-eval-testing`](../../.agents/skills/os-eval-testing/SKILL.md)
 for realistic natural-language tasks and progressive evaluation across conditions,
 [`os-run-details`](../../.agents/skills/os-run-details/SKILL.md) for an end-to-end
-saved-run account in chat,
+saved-run account in chat or a requested private report, with numbered steps,
+diagnostics and linked technical evidence,
+[`os-quick-run`](../../.agents/skills/os-quick-run/SKILL.md) for one immediate,
+bounded live API case followed by that saved-run account,
 [`os-groq-usage`](../../.agents/skills/os-groq-usage/SKILL.md) for daily Groq token
 accounting by credential profile and dated quota observations, and
 [`os-review-atlas`](../../.agents/skills/os-review-atlas/SKILL.md) for visual
 review against exact saved records. These are not instructions loaded into
-research agents.
+research agents. The project-local
+[`build-with-exa`](../../.agents/skills/build-with-exa/SKILL.md) supplies upstream
+Exa API development guidance plus a short OSRA integration reference; use it
+when changing the Exa adapter, not when running an ordinary research query.
+Its source revision and local additions are recorded in its `UPSTREAM.json`.
+
 
 This package supplies a small, runnable role-to-skill skeleton. It is separate from Codex development skills and does not implement nine independent runtimes. The nine names in `roles/roles.json` match Section 7 of the current Linear research plan, read on 2026-10-08. Role manifests keep stable IDs, names, plan sections and skill references; they do not copy shared collaboration rules. The central `ora.contracts.models.EvidencePacket` is the input schema authority. The [module map](modules.md) identifies the callers and ownership of the runtime, model adapter, app and shared development commands.
 
@@ -32,7 +40,7 @@ The `source_read_by_id` and `study_appraisal` capability names are host-facing r
 
 `evidence-linking` v1.0.3 is shared by **Evidence preparation and synthesis** and **Independent methods reviewer and critic**. It requires an exact source locator, preserves source-copy identity and access surface, distinguishes support, challenge and context, and leaves semantic entailment pending. Its instructions now require a final claim-by-claim comparison with inspected source text, including design/timing labels, derived categories and operational judgments. A source-reading tool confirms access to text, not semantic support. `study-appraisal` v1.0.3 belongs to the critic role. It asks the agent to choose a design-appropriate method and keep reporting completeness, risk of bias, applicability and precision separate for one outcome/comparison/time point. The helpers check presence and lineage; they do **not** choose a method or certify study validity. The examples remain synthetic and helper behavior is unchanged.
 
-`general-web-discovery` v1.0.0 supplies short default guidance for all nine roles. It distinguishes discovery leads from inspected sources, honors task limits on external search, and lets the agent select Groq browser search when useful. It reuses the project-owned claim-link helper only for its downstream inspected-evidence example; it adds no executing helper or automatic provider routing. Richer guidance is available through `read_skill_resource`. Its model usefulness has not been established by the package tests.
+`general-web-discovery` v2.0.0 supplies short default guidance for all nine roles. It distinguishes targeted `search_web(mode="quick")` lookups from broader `research` rounds, directs agents to read or cancel existing operations, and keeps discovery candidates separate from inspected source passages. The backend implements Exa-first retrieval and configured fallbacks; the skill supplies guidance, not a separate search executor. Agents can explicitly select Groq browsing or render a page after ordinary extraction. Richer guidance is available through `read_skill_resource`. Package tests verify instructions and contracts, not natural model choice or scientific usefulness; historical runs retain the pinned v1 package.
 
 Each package has concise and richer instructions, a simulated input/output example,
 and a manifest with stable ID/version, file hashes, input description, required
@@ -49,10 +57,12 @@ The [selected-model comparison](model-fit.md) tested v1.0.0 concise/rich variant
 
 ## Integration and versioning
 
-`task-planning` v1.0.0 is optional guidance for every research role. It helps
+`task-planning` v2.0.0 is optional guidance for every research role. It helps
 agents frame and revise complex work while leaving simple questions lightweight.
-Its `save_plan` and `read_plan` tools use the existing versioned working-note
-store and deferred capability selection. This instruction-only package has no
+Its `save_plan` (create), `modify_plan` (targeted revision) and `read_plan` tools
+use the existing versioned working-note store and deferred capability selection.
+A first planning-tool selection or use also delivers the optional concise
+template once; explicit activation remains available for persistent guidance. This instruction-only package has no
 executable helper; existing helper-backed manifests keep their provenance
 requirements. See [runtime planning](stage4-planning.md) for state, churn,
 source-use and proof boundaries.

@@ -1,0 +1,97 @@
+{
+  "$defs": {
+    "JsonValue": {}
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "availableResults": {
+      "items": {
+        "additionalProperties": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "type": "object"
+      },
+      "title": "Availableresults",
+      "type": "array"
+    },
+    "continuationCursor": {
+      "minimum": 0,
+      "title": "Continuationcursor",
+      "type": "integer"
+    },
+    "failed": {
+      "minimum": 0,
+      "title": "Failed",
+      "type": "integer"
+    },
+    "hasMore": {
+      "default": false,
+      "description": "More results are already saved after this cursor; pending work may still add results later.",
+      "title": "Hasmore",
+      "type": "boolean"
+    },
+    "operationRef": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "title": "Operationref",
+      "type": "object"
+    },
+    "pending": {
+      "minimum": 0,
+      "title": "Pending",
+      "type": "integer"
+    },
+    "reuseStatus": {
+      "anyOf": [
+        {
+          "enum": [
+            "new",
+            "reused",
+            "refreshed"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "For a search start, whether it created an operation, reused saved work, or explicitly refreshed it. The operation_ref identifies that work.",
+      "title": "Reusestatus"
+    },
+    "schemaVersion": {
+      "const": "ora.web_search.result.v1",
+      "default": "ora.web_search.result.v1",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "pending",
+        "completed",
+        "failed",
+        "cancelled",
+        "uncertain"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "waitRequested": {
+      "default": false,
+      "title": "Waitrequested",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "operationRef",
+    "status",
+    "availableResults",
+    "continuationCursor",
+    "pending",
+    "failed"
+  ],
+  "title": "SearchOperationResult",
+  "type": "object"
+}

@@ -2,14 +2,13 @@
 
 import hashlib
 import json
-import subprocess
 from io import BytesIO
 from urllib.error import HTTPError
 from urllib.request import HTTPRedirectHandler, HTTPSHandler
 
 import pytest
 
-from ora.evidence import EvidenceLibrary, OversizedSourceError
+from ora.evidence import EvidenceLibrary, OversizedSourceError, intake
 from ora.evidence.intake import IntakeService, PublicSourceHTTPError, fetch_public_source
 from ora.retrieval.discovery import available_routes, run_discovery_page
 from ora.retrieval.providers import HTTPResult
@@ -160,7 +159,7 @@ def test_html_and_xml_keep_sections_and_exact_selected_text(tmp_path):
     )
     assert saved_xml["classification"] == "passage"
     assert len(saved_xml["passage_refs"]) == 2
-    assert store.get(**saved_xml["quality_ref"])["body"]["parser"] == "stdlib-elementtree"
+    assert store.get(**saved_xml["quality_ref"])["body"]["parser"] == intake.XML_PARSER_VERSION
 
 
 def test_restricted_copy_keeps_only_locator_and_no_model_text(tmp_path):
@@ -993,12 +992,15 @@ def test_bad_selection_is_omission_without_discarding_good_selection(tmp_path):
 def test_mime_sniff_and_namespaced_xml_keep_actual_source_identity(tmp_path, monkeypatch):
     store, _, service, publication = setup(tmp_path)
 
-    def fake_pdf_run(*args, **kwargs):
-        return subprocess.CompletedProcess(
-            args[0], 0, b"DOI: 10.1234/target.\nResults\nThe difference was -2.5 points.\f", b""
-        )
+    def fake_pdf_run(_content, *options):
+        if options == ("-layout",):
+            return b"DOI: 10.1234/target.\nResults\nThe difference was -2.5 points.\f"
+        if options == ("-bbox-layout",):
+            return (b'<html xmlns="http://www.w3.org/1999/xhtml">'
+                    b'<page width="612" height="792"/></html>')
+        raise AssertionError(f"Unexpected PDF extraction options: {options}")
 
-    monkeypatch.setattr("ora.evidence.intake.subprocess.run", fake_pdf_run)
+    monkeypatch.setattr("ora.evidence.pdf_content._run", fake_pdf_run)
     saved_pdf = inspect(
         service,
         publication,

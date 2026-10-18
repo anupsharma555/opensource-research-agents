@@ -3,6 +3,10 @@
  * @minItems 1
  */
 export type Agentids = [string, ...string[]];
+/**
+ * Explicitly permit auxiliary Groq Qwen figure-reading calls for this follow-up; permission is not inherited.
+ */
+export type Allowvision = boolean;
 export type Credentialprofile = ("primary" | "backup") | null;
 export type Parentrunid = string;
 export type Parentsnapshotid = string;
@@ -15,6 +19,7 @@ export type Targetversion = number;
 
 export interface LiveFollowupRequest {
   agentIds: Agentids;
+  allowVision?: Allowvision;
   credentialProfile?: Credentialprofile;
   parentRunId: Parentrunid;
   parentSnapshotId: Parentsnapshotid;

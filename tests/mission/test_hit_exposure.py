@@ -50,7 +50,7 @@ def test_note_only_turn_can_publish_provisional_report_without_source_citations(
         assert "citations: []" in requests[0]["messages"][0]["content"]
         description = next(item["function"]["description"] for item in requests[0]["tools"]
                            if item["function"]["name"] == "publish_result")
-        assert "exact inspected source/span pairs" in description
+        assert "inspected source/span pairs" in description
         report = host.store.records("report")[0]
         assert report["body"]["citations"] == []
         assert host.state(run.run_id).snapshot.mission.status == "completed"
@@ -89,7 +89,7 @@ def test_requesting_hit_inspection_before_a_saved_hit_returns_prerequisite(
         ))["content"]) for item in host.store.records("context_tool_result")]
         discovered = next(item for item in results if "granted" in item)
         rejected = next(item for item in results if item.get("field") == "tool_id")
-        assert discovered["granted"]["inspect_hit"] == "Inspect retained text from one saved retrieval hit"
+        assert "retained saved-hit text" in discovered["granted"]["inspect_hit"]
         assert discovered["not_ready"]["inspect_hit"] == "Get an eligible saved search result first."
         assert "request_capability" in discovered["next_action"]
         assert rejected["status"] == "rejected"

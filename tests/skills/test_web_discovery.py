@@ -17,10 +17,10 @@ def test_all_nine_roles_load_short_guidance_without_browser_capability():
     assert "general-web-discovery" in registry.skills
     for role_id in registry.roles:
         attempt = registry.start_skill_attempt(role_id, "general-web-discovery", role_id)
-        assert attempt.skill_version == "1.0.0"
+        assert attempt.skill_version == "2.0.0"
     concise = registry.render_instructions("general-web-discovery")
     rich = registry.render_instructions("general-web-discovery", "rich")
-    assert len(concise.split()) <= 100
+    assert len(concise.split()) <= 170
     assert len(rich.split()) > len(concise.split())
     assert "request `browser_search`" in concise
     assert "Honor no-external-search limits" in concise

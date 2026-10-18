@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "cursor": {
+      "default": 0,
+      "description": "Saved candidate sequence; never a provider pagination offset.",
+      "minimum": 0,
+      "title": "Cursor",
+      "type": "integer"
+    },
+    "limit": {
+      "default": 10,
+      "maximum": 20,
+      "minimum": 1,
+      "title": "Limit",
+      "type": "integer"
+    },
+    "operationId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Operationid",
+      "type": "string"
+    },
+    "wait": {
+      "default": false,
+      "description": "Wait for new saved results without model polling when none are available.",
+      "title": "Wait",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "operationId"
+  ],
+  "title": "ReadSearchResultsInput",
+  "type": "object"
+}

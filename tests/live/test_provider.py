@@ -91,6 +91,7 @@ def test_serial_tool_call_round_trip_and_safe_output(
     assert first == {
         "content": None, "tool_calls": calls,
         "usage": {"prompt_tokens": 100, "completion_tokens": 200, "total_tokens": 300},
+        "cache_observation": {"status": "not_reported"},
         "model": live.MODEL, "elapsed_seconds": first["elapsed_seconds"],
         "finish_reason": "tool_calls", "estimated_usd": 0.000135,
     }
@@ -119,6 +120,23 @@ def test_serial_tool_call_round_trip_and_safe_output(
     assert "reasoning" not in json.dumps(sent[1]["messages"])
     assert "synthetic-test-token" not in json.dumps(sent)
     assert "private" not in json.dumps(first)
+
+
+def test_legacy_provider_preserves_reported_cache_and_reasoning_usage(tmp_path, monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "synthetic-test-token")
+    raw = response()
+    raw["usage"]["prompt_tokens_details"] = {"cached_tokens": 40, "other": "omit"}
+    raw["usage"]["completion_tokens_details"] = {"reasoning_tokens": 30}
+    monkeypatch.setattr(live.urllib.request, "urlopen",
+                        lambda _request, timeout: FakeResponse(raw))
+    result = live.GroqProvider(tmp_path).complete([{"role": "user", "content": "Question"}])
+    assert result["usage"] == {
+        "prompt_tokens": 100, "completion_tokens": 200, "total_tokens": 300,
+        "prompt_tokens_details": {"cached_tokens": 40},
+        "completion_tokens_details": {"reasoning_tokens": 30},
+    }
+    assert result["cache_observation"] == {"status": "reported_hit", "cached_tokens": 40}
+    assert "private" not in json.dumps(result)
 
 
 def test_estimate_is_key_free_and_respects_configured_cap(

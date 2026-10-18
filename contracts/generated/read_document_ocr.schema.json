@@ -1,0 +1,127 @@
+{
+  "$defs": {
+    "OCRRegion": {
+      "additionalProperties": false,
+      "description": "Selected rectangle on the rendered PDF page or EXIF-oriented image.",
+      "properties": {
+        "height": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Height",
+          "type": "number"
+        },
+        "width": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Width",
+          "type": "number"
+        },
+        "x": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Y",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "title": "OCRRegion",
+      "type": "object"
+    },
+    "PublicDocumentRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "public_document_fetch",
+          "title": "Kind",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "version"
+      ],
+      "title": "PublicDocumentRef",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "documentRef": {
+      "$ref": "#/$defs/PublicDocumentRef"
+    },
+    "layout": {
+      "default": "auto",
+      "description": "Auto: whole-page layout, or one block for a region. Block: one text block. Sparse: separated labels, without reliable reading order. OCR is unverified transcription, not figure interpretation.",
+      "enum": [
+        "auto",
+        "block",
+        "sparse"
+      ],
+      "title": "Layout",
+      "type": "string"
+    },
+    "limit": {
+      "default": 3000,
+      "description": "Maximum OCR characters returned; use next_request to read more.",
+      "maximum": 4000,
+      "minimum": 1,
+      "title": "Limit",
+      "type": "integer"
+    },
+    "offset": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Offset",
+      "type": "integer"
+    },
+    "pageNumber": {
+      "description": "One selected PDF page, or 1 for a saved PNG/JPEG. Local OCR; no model API call.",
+      "maximum": 200,
+      "minimum": 1,
+      "title": "Pagenumber",
+      "type": "integer"
+    },
+    "region": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/OCRRegion"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional rectangle x/y/width/height in 0\u20131 fractions from top-left of the rendered PDF page or EXIF-oriented image. Use known coordinates to isolate text; omitted reads the page."
+    }
+  },
+  "required": [
+    "documentRef",
+    "pageNumber"
+  ],
+  "title": "ReadDocumentOCRInput",
+  "type": "object"
+}

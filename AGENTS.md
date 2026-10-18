@@ -39,9 +39,11 @@ are unavailable; do not turn a sample UI or contract fixture into an uptime clai
 and dependencies, choose next actions, revise from evidence or peer feedback,
 and recognize completion or a useful pause. Simple tasks can skip planning.
 Peers discover it through the normal capability catalog and `discover_capabilities`,
-then load it with `activate_skill`. Its deferred `save_plan` and `read_plan` tools
-provide exact versioned checkpoints; either tool can also be requested separately
-through `request_capability`. Plans guide choices without scheduling work or
+then load it with `activate_skill`. Its deferred tools separate creation
+(`save_plan`), targeted revision (`modify_plan`) and retrieval (`read_plan`); each
+can also be requested through `request_capability`. The first planning-tool
+selection or use delivers the pinned optional template once through its result,
+with durable replay protection; explicit activation suppresses that insertion. Plans guide choices without scheduling work or
 requiring a fixed pipeline.
 
 This file instructs repository developers; it is not the research model's prompt.

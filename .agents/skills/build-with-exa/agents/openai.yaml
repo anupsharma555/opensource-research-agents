@@ -1,0 +1,4 @@
+interface:
+  display_name: "Build with Exa (OSRA)"
+  short_description: "Develop Exa search integrations in OSRA"
+  default_prompt: "Use $build-with-exa to review or implement OSRA's Exa search integration using its existing runtime and evidence contracts."

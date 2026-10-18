@@ -70,7 +70,7 @@ def _drive_until(host, run_id, predicate):
 
 
 @pytest.mark.parametrize("agent_id,catalog_count", [
-    ("agent-synthesis", 45), ("agent-critique", 45),
+    ("agent-synthesis", 54), ("agent-critique", 54),
 ])
 def test_simple_completion_keeps_full_catalog_and_needs_no_plan(
     tmp_path, monkeypatch, agent_id, catalog_count,
@@ -82,7 +82,8 @@ def test_simple_completion_keeps_full_catalog_and_needs_no_plan(
         packets.append(packet)
         catalog = _index(packet["messages"][0]["content"])
         assert len(catalog["tools"]) == catalog_count
-        assert {"save_plan", "read_plan", "browser_search", "calculate", "propose_work"} <= set(catalog["tools"])
+        assert {"save_plan", "read_plan", "browser_search", "calculate", "propose_work",
+                "search_web", "read_document_ocr", "inspect_figure"} <= set(catalog["tools"])
         assert {"save_plan", "read_plan"}.isdisjoint(_attached(packet))
         assert catalog["skills"]["task-planning"]["state"] == "available_to_activate"
         return answer("A concise provisional response is sufficient for this synthetic task.", 1)
@@ -136,7 +137,7 @@ def test_plan_revision_peer_links_compaction_and_restart_preserve_execution_auth
         if step == 1:
             assert {"save_plan", "read_plan"}.isdisjoint(names)
             return tool("activate_skill", {"skill_id": "task-planning"}, step)
-        assert {"save_plan", "read_plan"} <= names
+        assert {"save_plan" if step == 2 else "modify_plan", "read_plan"} <= names
         if step == 2:
             plans.append(_plan(links=[proposal, source, peer_request]))
             return tool("save_plan", {"plan": plans[-1], "expected_version": 0}, step)
@@ -162,9 +163,13 @@ def test_plan_revision_peer_links_compaction_and_restart_preserve_execution_auth
             revised["steps"][1]["linked_refs"] = [window_ref]
             revised["revision_reason"] = "The inspected source window changes the next comparison"
             plans.append(revised)
-            return tool("save_plan", {"plan": revised, "expected_version": 1}, step)
+            return tool("modify_plan", {"expected_version": 1,
+                "revision_reason": revised["revision_reason"], "changes": {"update_steps": [
+                    {"id": revised["steps"][0]["id"], "status": "done"},
+                    {"id": revised["steps"][1]["id"], "status": "in_progress", "linked_refs": [window_ref]},
+                ]}}, step)
         if step == 5:
-            assert name == "save_plan" and result["note_ref"]["version"] == 2
+            assert name == "modify_plan" and result["note_ref"]["version"] == 2
             return tool("request_capability", {"tool_id": "compact_conversation"}, step)
         if step == 6:
             assert "compact_conversation" in names
@@ -190,9 +195,11 @@ def test_plan_revision_peer_links_compaction_and_restart_preserve_execution_auth
             completed["revision_reason"] = "The bounded comparison is ready for a provisional report"
             plans.append(completed)
             completed_saved = True
-            return tool("save_plan", {"plan": completed, "expected_version": 2}, step)
-        assert completed_saved and name in {"save_plan", "review_peer_answer"}
-        if name == "save_plan":
+            return tool("modify_plan", {"expected_version": 2,
+                "revision_reason": completed["revision_reason"], "changes": {"status": "completed",
+                    "update_steps": [{"id": completed["steps"][1]["id"], "status": "done"}]}}, step)
+        assert completed_saved and name in {"modify_plan", "review_peer_answer"}
+        if name == "modify_plan":
             assert result["planning_status"] == "advisory_not_task_completion"
             context = json.loads(packet["messages"][-1]["content"])
             disposition = next(item for item in context["request_dispositions"] if item["ref"]["id"] == peer_request["id"])
@@ -424,16 +431,19 @@ def test_plan_churn_rejection_leaves_publication_usable(tmp_path, monkeypatch):
         packet = json.loads(request.data)
         packets.append(packet)
         step = len(packets)
-        assert _index(packet["messages"][0]["content"])["skills"]["task-planning"]["state"] == "available_to_activate"
+        assert "task-planning" in _index(packet["messages"][0]["content"])["skills"]
         if step == 1:
-            return tool("request_capability", {"tool_id": "save_plan"}, step)
-        assert "save_plan" in _attached(packet) and "read_plan" not in _attached(packet)
+            return tool("activate_skill", {"skill_id": "task-planning"}, step)
+        assert ("save_plan" if step == 2 else "modify_plan") in _attached(packet)
         if 2 <= step <= 5:
             plan = _plan(goal=f"Substantive synthetic plan revision {step}")
-            return tool("save_plan", {"plan": plan, "expected_version": step - 2}, step)
+            return (tool("save_plan", {"plan": plan}, step) if step == 2 else
+                    tool("modify_plan", {"expected_version": step - 2,
+                        "revision_reason": plan["revision_reason"],
+                        "changes": {"goal": plan["goal"]}}, step))
         assert step == 6
         name, result = _last_tool(packet)
-        assert name == "save_plan" and result["status"] == "rejected"
+        assert name == "modify_plan" and result["status"] == "rejected"
         assert "allowance exhausted" in result["reason"]
         return tool("publish_result", {
             "title": "Bounded source-free result", "text": "A provisional contribution completes this small task.",

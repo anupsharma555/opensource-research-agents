@@ -1,13 +1,26 @@
 """Only checked exact passages from one permitted copy reach a model packet."""
 
 import hashlib
-import subprocess
 
 import pytest
 
 import ora.evidence.intake as intake_module
 from ora.evidence import EvidenceError, EvidenceLibrary, IntakeService, checked_model_text
 from ora.state import StateStore
+
+
+def _mock_pdf_text(monkeypatch, text):
+    geometry = (b'<html xmlns="http://www.w3.org/1999/xhtml">'
+                b'<page width="612" height="792"/></html>')
+
+    def run(_content, *options):
+        if options == ("-layout",):
+            return text
+        if options == ("-bbox-layout",):
+            return geometry
+        raise AssertionError(f"Unexpected PDF extraction options: {options}")
+
+    monkeypatch.setattr("ora.evidence.pdf_content._run", run)
 
 
 def _library(tmp_path):
@@ -44,9 +57,8 @@ def test_checked_text_packet_keeps_original_copy_and_selected_passage(
     tmp_path, monkeypatch, mime, content, surface, selection, expected
 ):
     if mime == "application/pdf":
-        monkeypatch.setattr("ora.evidence.intake.subprocess.run", lambda *a, **k:
-            subprocess.CompletedProcess(a[0], 0,
-                b"DOI: 10.1234/model-text.\nResults\nSymptoms fell by -3 points.\f", b""))
+        _mock_pdf_text(monkeypatch,
+                       b"DOI: 10.1234/model-text.\nResults\nSymptoms fell by -3 points.\f")
     library, publication = _library(tmp_path)
     saved = _copy(library, publication, "source", content, mime, surface, [selection])
     assert saved["classification"] == expected
@@ -118,9 +130,8 @@ def test_each_format_rejects_a_saved_passage_that_differs_from_its_source(
     tmp_path, monkeypatch, mime, content, surface
 ):
     if mime == "application/pdf":
-        monkeypatch.setattr("ora.evidence.intake.subprocess.run", lambda *a, **k:
-            subprocess.CompletedProcess(a[0], 0,
-                b"DOI: 10.1234/model-text.\nResults\nSymptoms fell by -3 points.\f", b""))
+        _mock_pdf_text(monkeypatch,
+                       b"DOI: 10.1234/model-text.\nResults\nSymptoms fell by -3 points.\f")
     library, publication = _library(tmp_path)
     saved = _copy(library, publication, "tamper", content, mime, surface, ["-3 points"])
     original = library.store.get(**saved["passage_refs"][0])["body"]
@@ -155,9 +166,8 @@ def test_current_source_use_revocation_blocks_packet(tmp_path):
 
 
 def test_multipassage_pdf_packet_extracts_its_copy_once(tmp_path, monkeypatch):
-    monkeypatch.setattr("ora.evidence.intake.subprocess.run", lambda *a, **k:
-        subprocess.CompletedProcess(a[0], 0,
-            b"DOI: 10.1234/model-text.\nResults\nGroup A n=40; score -3 points; P<.01.\f", b""))
+    _mock_pdf_text(monkeypatch,
+                   b"DOI: 10.1234/model-text.\nResults\nGroup A n=40; score -3 points; P<.01.\f")
     library, publication = _library(tmp_path)
     saved = _copy(library, publication, "pdf-multiple", b"%PDF-1.4\nsynthetic bytes",
                   "application/pdf", "full_text", ["Group A n=40", "-3 points", "P<.01"])
