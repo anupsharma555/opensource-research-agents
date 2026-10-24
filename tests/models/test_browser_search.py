@@ -154,9 +154,9 @@ def test_browser_search_and_local_function_share_one_hashed_collect_request(tmp_
     assert "response_format" not in prepared.body
     assert prepared.request_sha256 != prepare(adapter, tools=(LOCAL,)).request_sha256
     ordinary = prepare(adapter, tools=(LOCAL,))
-    assert ordinary.body["reasoning_effort"] == "high"
+    assert ordinary.body["reasoning_effort"] == "medium"
     assert ordinary.manifest()["reasoning_effort_basis"] == "selected_configuration"
-    assert ordinary.manifest()["effective_reasoning_effort"] == "high"
+    assert ordinary.manifest()["effective_reasoning_effort"] == "medium"
     text = "Snippet 〖2†L6-L10〗 https://example.org/article. More text."
     payload = response(text)
     payload["choices"][0]["message"]["annotations"] = [{"marker": "〖2†L6-L10〗"}]
@@ -205,7 +205,7 @@ def test_browser_search_effort_is_per_call_and_saved_body_round_trips(tmp_path: 
         messages=[{"role": "user", "content": "Inspect the lead"}], tools=(LOCAL,),
     )
     assert search.body["reasoning_effort"] == "low"
-    assert followup.body["reasoning_effort"] == "high"
+    assert followup.body["reasoning_effort"] == "medium"
     assert followup.manifest()["reasoning_effort_basis"] == "selected_configuration"
     assert search.configuration_sha256 == followup.configuration_sha256 == CONFIG.configuration_sha256
     assert search.credential_profile == followup.credential_profile
@@ -219,8 +219,27 @@ def test_browser_search_effort_is_per_call_and_saved_body_round_trips(tmp_path: 
         parent_call_id=followup.call_id, task_category="final", phase="final",
         messages=[{"role": "user", "content": "Finish"}], schema_name="result", schema=schema,
     )
-    assert final.body["reasoning_effort"] == "high"
+    assert final.body["reasoning_effort"] == "medium"
     assert final.manifest()["reasoning_effort_basis"] == "selected_configuration"
+
+
+def test_explicit_high_configuration_restores_after_browser_low_override(tmp_path: Path):
+    adapter = GroqSelectedAdapter(tmp_path)
+    older = replace(CONFIG, reasoning_effort="high")
+    browser = adapter.prepare(
+        older, call_id="old-browser", attempt_id="old-browser-attempt",
+        task_category="collect", phase="collect",
+        messages=[{"role": "user", "content": "Find a lead"}], tools=(SEARCH, LOCAL),
+    )
+    ordinary = adapter.prepare(
+        older, call_id="old-ordinary", attempt_id="old-ordinary-attempt",
+        parent_call_id=browser.call_id, task_category="collect", phase="collect",
+        messages=[{"role": "user", "content": "Inspect the lead"}], tools=(LOCAL,),
+    )
+    assert browser.body["reasoning_effort"] == "low"
+    assert browser.manifest()["reasoning_effort_basis"] == "browser_search"
+    assert ordinary.body["reasoning_effort"] == "high"
+    assert ordinary.manifest()["reasoning_effort_basis"] == "selected_configuration"
 
 
 def test_literal_url_leads_save_metadata_only_hits_with_exact_provenance(tmp_path: Path):

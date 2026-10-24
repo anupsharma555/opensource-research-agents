@@ -12,6 +12,7 @@ import math
 import threading
 import time
 from concurrent.futures import Future
+from concurrent.futures import TimeoutError as FutureTimeoutError
 
 from ora.coordination.board import ref
 from ora.coordination.executor import ConcurrentExecutor
@@ -48,6 +49,7 @@ class MissionDispatchDriver:
         self._last_input: dict[str, tuple] = {}
         self._next_due: dict[str, float] = {}
         self._closed = False
+        self._draining = False
         self._started = threading.Event()
         self._thread = threading.Thread(
             target=self._run_loop, name="ora-mission-dispatch", daemon=True
@@ -124,6 +126,7 @@ class MissionDispatchDriver:
             if (
                 future is None
                 and pending
+                and not self._draining
                 and (
                     input_signature != self._last_input.get(mission_id)
                     or now >= self._next_due.get(mission_id, 0)
@@ -146,6 +149,29 @@ class MissionDispatchDriver:
                 "observed": observed,
                 "next_wake": next_wake,
             }
+
+    def drain_active(self, *, timeout: float = 5.0) -> bool:
+        """Stop scheduling new drains and await callbacks already in flight.
+
+        The caller must stop creating new work first. False means an active
+        drain did not settle in time; ``close`` will then record uncertainty.
+        """
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("Drain timeout must be positive and finite")
+        with self._lock:
+            if self._closed:
+                raise DispatchError("Dispatch driver is closed")
+            self._draining = True
+            futures = list(self._futures.values())
+        deadline = time.monotonic() + timeout
+        for future in futures:
+            try:
+                future.result(timeout=max(0, deadline - time.monotonic()))
+            except FutureTimeoutError:
+                return False
+            except Exception as exc:
+                raise DispatchError("Background executor drain failed") from exc
+        return True
 
     def close(self, *, timeout: float = 5.0) -> bool:
         """Cancel drains and await executor uncertainty recording before loop stop.

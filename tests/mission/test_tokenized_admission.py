@@ -8,6 +8,7 @@ from dataclasses import asdict
 
 import pytest
 
+import ora.mission.service as service_module
 from ora.contracts.models import LiveStartRequest
 from ora.coordination.board import ref
 from ora.models import ModelSession, SessionError
@@ -53,10 +54,14 @@ def test_tokenized_complete_request_retains_source_and_reserved_completion(
         "observed_limit_tokens": 8000, "target_fraction": 0.70,
     })
     try:
-        run = host.start(LiveStartRequest(
-            request_id="tokenized-admission", question="Assess the supplied comparison.",
-            evidence_text=evidence, agent_ids=["agent-synthesis"],
-        ))
+        # Reproduce a pre-default-change run: v1/v2 tokenizer bases only
+        # accepted high-effort requests and must remain exact on replay.
+        with monkeypatch.context() as prior_default:
+            prior_default.setattr(service_module, "DEFAULT_REASONING_EFFORT", "high")
+            run = host.start(LiveStartRequest(
+                request_id="tokenized-admission", question="Assess the supplied comparison.",
+                evidence_text=evidence, agent_ids=["agent-synthesis"],
+            ))
         drain(host, run.run_id, limit=10)
         assert len(requests) == 2
         assert host.state(run.run_id).snapshot.mission.status == "completed"

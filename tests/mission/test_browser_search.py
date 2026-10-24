@@ -73,7 +73,7 @@ def test_native_browser_discovery_retains_metadata_lead_then_scoped_result(tmp_p
             assert "not a local function" in catalog_text
             assert "Never emit a function call named browser_search" not in catalog_text
             assert {"type": "browser_search"} not in packet["tools"]
-            assert packet["reasoning_effort"] == "high"
+            assert packet["reasoning_effort"] == "medium"
             return tool("request_capability", {"tool_id": "browser_search"}, step)
         if step == 2:
             assert packet["tools"] == [{"type": "browser_search"}]
@@ -83,7 +83,7 @@ def test_native_browser_discovery_retains_metadata_lead_then_scoped_result(tmp_p
             assert "Groq may run browser.search and browser.open internally" in instructions
             return _native_result(step)
         assert {"type": "browser_search"} not in packet["tools"]
-        assert packet["reasoning_effort"] == "high"
+        assert packet["reasoning_effort"] == "medium"
         assert "Never emit a function call named browser_search" not in packet["messages"][0]["content"]
         assert "read_browser_search_result" in {
             item["function"]["name"] for item in packet["tools"]
@@ -362,10 +362,19 @@ def test_browser_html_fetch_without_public_use_basis_remains_unreadable(
         ))
         drain(host, run.run_id, limit=35)
         assert host._run(run.run_id)["body"]["status"] == "completed"
-        assert host.store.records("public_document_fetch")
+        if scenario in {"missing_auth", "authenticated"}:
+            # Shared public retrieval rejects these receipts before retaining
+            # bytes for reuse. Keep the failed attempt, with no source grant.
+            assert host.store.records("public_document_fetch") == []
+            failed = host.store.records("shared_public_fetch")[0]["body"]
+            assert failed["phase"] == "failed"
+            assert failed["reason"] == "invalid_public_fetch_receipt"
+            assert "blob" not in failed
+        else:
+            assert host.store.records("public_document_fetch")
         assert host.store.records("source_copy") == []
         assert host.store.records("source_use") == []
-        if scenario == "unsupported_type":
+        if scenario in {"unsupported_type", "missing_auth", "authenticated"}:
             assert host.store.records("intake_quality") == []
         else:
             quality = host.store.records("intake_quality")[0]["body"]
@@ -612,7 +621,7 @@ def test_saved_native_browser_400_repairs_legacy_label_into_fresh_native_turn(
             )
         if step == 3:
             assert {"type": "browser_search"} not in packet["tools"]
-            assert packet["reasoning_effort"] == "high"
+            assert packet["reasoning_effort"] == "medium"
             assert "Never emit a function call named browser_search" not in (
                 packet["messages"][0]["content"]
             )
@@ -627,7 +636,7 @@ def test_saved_native_browser_400_repairs_legacy_label_into_fresh_native_turn(
             return _native_result(step)
         assert step == 5
         assert {"type": "browser_search"} not in packet["tools"]
-        assert packet["reasoning_effort"] == "high"
+        assert packet["reasoning_effort"] == "medium"
         return tool("publish_result", {
             "title": "Bounded discovery lead", "text": "A candidate URL was returned.",
             "citations": [], "limitations": ["No source passage was inspected"],

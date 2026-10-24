@@ -169,6 +169,9 @@ def test_close_cancels_dispatched_callback_and_keeps_uncertain_effect(tmp_path):
         work = next(item for item in executor._work("mission-a")
                     if item["body"]["spec"]["work_id"] == "slow")
         spec = executor._spec_from(work)
+        assert driver.drain_active(timeout=0.01) is False
+        submit("mission-b", "other")
+        assert driver.poll("mission-b")["active"] is False
         assert driver.close(timeout=4)
         assert capacity.get(executor._capacity_id(spec))["phase"] == "uncertain"
         assert store.get("board_proposal", spec.proposal_ref["id"])["body"]["status"] == "open"

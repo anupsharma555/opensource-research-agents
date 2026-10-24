@@ -134,6 +134,69 @@ def test_latest_observation_remains_historical_even_after_retry_time():
         "local_planning_headroom_ignoring_cache_and_unobserved_usage"] == 199_880
 
 
+def test_quota_table_separates_retry_assumed_reset_and_unknown_confirmed_reset():
+    saved = call()
+    saved["quota_observation"] = {
+        "observed_at": "2026-01-15T15:00:00Z", "limit": 200_000,
+        "used": 199_000, "requested": 2500, "headroom_at_observation": 1000,
+        "retry_not_before": "2026-01-15T15:00:10Z", "full_reset_at": None,
+    }
+    result = report([saved])  # Observed after the retry time; capacity stays unknown.
+    text = usage.markdown(result)
+    assert "Full daily allowance available at" in text
+    assert ("| backup | Jan 15, 2026 10:00:00 AM EST | 199,000 / 200,000 | "
+            "Jan 15, 2026 10:00:10 AM EST | Jan 16, 2026 10:00:00 AM EST (assumed) |") in text
+    assert "| primary | Unknown — no observation |" in text
+    assert result["latest_provider_daily_quota_observations"]["backup"]["full_reset_at"] is None
+    assert result["current_account_wide_remaining_tokens"] is None
+    estimate = result["assumed_full_reset_estimates"]["backup"]
+    assert estimate["assumed_full_reset_at"] == "2026-01-16T15:00:00+00:00"
+    assert estimate["provider_confirmed"] is False
+
+
+@pytest.mark.parametrize("used,profile,has_estimate", [
+    (189_999, "primary", False), (190_000, "primary", True),
+    (200_000, "backup", True), (200_000, "unknown", False),
+])
+def test_assumed_reset_requires_near_limit_provider_observation(used, profile, has_estimate):
+    saved = call(profile=profile)
+    saved["quota_observation"] = {
+        "observed_at": saved["observed_at"], "limit": 200_000, "used": used,
+        "headroom_at_observation": 200_000 - used,
+    }
+    assert bool(report([saved])["assumed_full_reset_estimates"][profile]) == has_estimate
+    assert report([call(profile="primary")])["assumed_full_reset_estimates"]["primary"] is None
+
+
+def test_assumed_reset_uses_latest_observation_and_elapsed_is_not_capacity():
+    earlier, later = call("earlier"), call("later", at="2026-01-15T16:00:00Z")
+    for item in [earlier, later]:
+        item["quota_observation"] = {
+            "observed_at": item["observed_at"], "limit": 200_000, "used": 195_000,
+            "headroom_at_observation": 5000,
+        }
+    result = report([later, earlier], at="2026-01-17T17:00:00Z", day=date(2026, 1, 17))
+    estimate = result["assumed_full_reset_estimates"]["backup"]
+    assert estimate["assumed_full_reset_at"] == "2026-01-16T16:00:00+00:00"
+    assert estimate["status"] == "elapsed_unverified"
+    assert "assumed; elapsed, unverified" in usage.markdown(result)
+    assert result["current_account_wide_remaining_tokens"] is None
+
+
+def test_quota_table_formats_distinct_reset_timestamp_in_report_timezone():
+    saved = call(at="2026-07-15T15:00:00Z")
+    saved["quota_observation"] = {
+        "observed_at": saved["observed_at"], "limit": 200_000,
+        "used": 199_000, "requested": 2500, "headroom_at_observation": 1000,
+        "retry_not_before": "2026-07-15T15:00:10Z",
+        # Synthetic rendering input; the real 429 parser does not supply this.
+        "full_reset_at": "2026-07-16T04:00:00Z",
+    }
+    text = usage.markdown(report([saved], at="2026-07-15T17:00:00Z",
+                                 day=date(2026, 7, 15)))
+    assert "Jul 15, 2026 11:00:10 AM EDT | Jul 16, 2026 12:00:00 AM EDT" in text
+
+
 def test_database_revisions_use_first_capture_and_live_wal_without_rewriting(tmp_path):
     db = sqlite3.connect(tmp_path / "state.sqlite3")
     db.execute("PRAGMA journal_mode=WAL")

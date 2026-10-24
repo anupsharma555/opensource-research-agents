@@ -213,7 +213,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=["bootstrap", "setup", "doctor", "check", "generate", "ui", "desktop", "inspect", "live", "mission"],
+        choices=["bootstrap", "setup", "doctor", "check", "generate", "ui", "desktop", "inspect", "live", "mission", "reasoning-export", "corpus"],
     )
     parser.add_argument(
         "--offline", action="store_true", help="Use cached dependencies only during setup"
@@ -224,7 +224,7 @@ def main():
     )
     parser.add_argument("--view", choices=["findings", "sources", "diagnostics"], default="sources")
     args, remaining = parser.parse_known_args()
-    if args.command not in {"live", "mission"} and remaining:
+    if args.command not in {"live", "mission", "reasoning-export", "corpus"} and remaining:
         parser.error("unrecognized arguments: " + " ".join(remaining))
     if args.observability and args.command != "setup":
         parser.error("--observability is available only with setup")
@@ -246,6 +246,16 @@ def main():
             run(command, node_environment())
             verify_locks(before)
             doctor()
+            return
+        if args.command == "corpus":
+            if not PYTHON.exists():
+                raise SetupError("Project Python is unavailable. Run scripts/dev setup first.")
+            run([PYTHON, ROOT / "scripts/validate_bheb_corpus.py", *sys.argv[2:]])
+            return
+        if args.command == "reasoning-export":
+            if not PYTHON.exists():
+                raise SetupError("Project Python is unavailable. Run scripts/dev setup first.")
+            run([PYTHON, ROOT / "scripts/export_reasoning_traces.py", *sys.argv[2:]])
             return
         doctor()
         env = node_environment()

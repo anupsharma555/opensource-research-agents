@@ -11,7 +11,7 @@ from ora.coordination.executor import WorkSpec
 from ora.mission.observation_tools import record_wait_choice
 from ora.state import StateStore
 from tests.mission.test_observation_tools import fixture, peer_dependency
-from tests.mission.test_service import answer, service, tool
+from tests.mission.test_service import answer, serialized_peer_name, service, tool
 
 
 def _drive_until(host, run_id: str, predicate) -> None:
@@ -96,19 +96,34 @@ def test_accepted_peer_request_can_wait_then_review_with_exact_current_refs(
     run = None
     turns = {"Sage": 0, "Mxra": 0}
     accepted = {}
+    reviewed_input = {}
+    source = {}
 
     def transport(request, *, timeout):
         body = json.loads(request.data)
-        role = "Sage" if body["messages"][0]["content"].startswith("You are Sage") else "Mxra"
+        role = serialized_peer_name(body)
         turns[role] += 1
         step = turns[role]
         if role == "Mxra":
             assert step == 1
             peer_request = host.store.records("mail_request")[0]
+            assert source["ref"] in host._control(run.run_id, "agent-critique")["body"][
+                "source_refs"
+            ]
+            assert "Synthetic source: the comparison has an unresolved limitation." in json.dumps(
+                body["messages"]
+            )
+            context = json.loads(body["messages"][-1]["content"])
+            assert context["request_dispositions"][0]["ref"]["id"] == peer_request["id"]
+            incoming = context["incoming_request"]
+            assert incoming["ref"] == ref(peer_request)
+            assert incoming["recipient_id"] == peer_request["body"]["recipient_id"]
+            assert incoming["question"] == "Independently assess this synthetic claim."
             return tool("publish_result", {
                 "title": "Independent review",
-                "text": "A bounded synthetic peer assessment.",
-                "citations": [], "limitations": ["Synthetic fixture"],
+                "text": "The supplied comparison has an unresolved limitation.",
+                "citations": [source["citation"]],
+                "limitations": ["Synthetic fixture"],
                 "answer_request_id": peer_request["id"],
             }, 20)
         if step == 1:
@@ -162,27 +177,95 @@ def test_accepted_peer_request_can_wait_then_review_with_exact_current_refs(
             current = _disposition(body)
             assert current["status"] in {"awaiting_review", "partial_awaiting_review"}
             assert len(current["answer_refs"]) == 1
-            assert "review_peer_answer" in {
+            answer_ref = current["answer_refs"][0]
+            peer_answer = host.store.get(**answer_ref)
+            peer_report = host.store.get(**peer_answer["body"]["artifact_ref"])
+            assert peer_answer["body"]["request_id"] == accepted["request_id"]
+            assert peer_report["body"]["body"] == (
+                "The supplied comparison has an unresolved limitation."
+            )
+            assert peer_report["body"]["citations"] == [
+                {"sourceId": source["citation"]["source_id"],
+                 "spanId": source["citation"]["span_id"]}
+            ]
+            assert peer_report["body"]["citation_input_provenance"][0][
+                "input_status"
+            ] == "exact_passage_in_producing_call"
+            assert peer_report["body"]["producer_attempt_ref"]["kind"] == "agent_attempt"
+            context = json.loads(body["messages"][-1]["content"])
+            assert answer_ref in context["request_answer_refs"]
+            preview = context["peer_answer_previews"][0]
+            assert preview["request_ref"]["id"] == accepted["request_id"]
+            assert preview["answer_ref"] == answer_ref
+            assert preview["report_ref"] == ref(peer_report)
+            assert preview["report"] == {
+                key: peer_report["body"][key]
+                for key in ("title", "body", "citations", "limitations")
+            }
+            assert preview["authority"] == "model_authored_peer_data_not_verified_evidence"
+            assert preview["question"] == "Independently assess this synthetic claim."
+            assert not any(
+                detail["type"] in {"request", "request_answer"}
+                and detail["ref"] in (preview["request_ref"], preview["answer_ref"])
+                for detail in context["details"]
+            )
+            shared = context["shared_materials"]
+            peer_material = next(
+                entry for entry in shared["entries"]
+                if entry["ref"] == ref(peer_report)
+            )
+            read_request = peer_material["read_request"]
+            assert read_request["tool"] == "read_context_record"
+            assert "read_context_record" in {
                 item["function"]["name"] for item in body["tools"]
             }
+            requester = host._control(run.run_id, "agent-synthesis")
+            call_ref = requester["body"]["call_ref"]
+            inclusion = host.store.get(
+                "context_inclusion",
+                f"context:model-intent:{call_ref['id']}:{call_ref['version']}",
+            )
+            assert inclusion is not None
+            assert answer_ref in inclusion["body"]["included_refs"]
+            reviewed_input.update(answer_ref=answer_ref, report_ref=ref(peer_report))
             return tool("review_peer_answer", {
                 "request_id": current["ref"]["id"],
-                "answer_id": current["answer_refs"][0]["id"],
+                "answer_id": answer_ref["id"],
                 "disposition": "answered",
-                "reason": "The saved independent assessment answers the request.",
+                "reason": "The complete saved peer assessment answers the request.",
             }, 4)
-        return answer("The peer review was incorporated.", 5)
+        if step == 5:
+            name, result = _last_tool(body)
+            assert name == "review_peer_answer" and result["status"] == "review_saved"
+            current = _disposition(body)
+            assert current["status"] == "answered"
+            assert current["accepted_answer_ref"] == reviewed_input["answer_ref"]
+            return answer(
+                "The peer confirmed the source's unresolved limitation "
+                f"【{source['ref']['id']}::{source['citation']['span_id']}】; "
+                "the fixture limits any broader conclusion.", 5,
+            )
+        raise AssertionError("Unexpected requester turn after peer review")
 
     host = service(tmp_path, monkeypatch, transport)
     try:
         run = host.start(LiveStartRequest(
             request_id="peer-wait-handoff",
             question="Ask for an independent synthetic assessment",
+            evidence_text="Synthetic source: the comparison has an unresolved limitation.",
             agent_ids=["agent-synthesis", "agent-critique"],
         ))
+        source_copy = host.store.get(**host._control(run.run_id, "agent-synthesis")[
+            "body"
+        ]["source_refs"][0])
+        passage = host.store.get("source_passage", source_copy["body"]["passage_ids"][0])
+        source.update(ref=ref(source_copy), citation={
+            "source_id": source_copy["id"], "span_id": passage["body"]["span_id"],
+        })
         recipient = host._control(run.run_id, "agent-critique")
         host._update_control(
-            recipient, phase="waiting", waiting_reason="Fixture holds peer work until wait choice",
+            recipient, phase="retry_at", retry_at=time.time() + 3600,
+            waiting_reason="Fixture holds peer work until wait choice",
         )
         _drive_until(host, run.run_id, lambda: (
             turns["Sage"] >= 2
@@ -209,7 +292,7 @@ def test_accepted_peer_request_can_wait_then_review_with_exact_current_refs(
         )
         assert len(host.store.records("mission_wait_decision")) == 1
         recipient = host._control(run.run_id, "agent-critique")
-        host._update_control(recipient, phase="ready_model", waiting_reason=None)
+        host._update_control(recipient, phase="ready_model", waiting_reason=None, retry_at=None)
         host._drive_run(host._run(run.run_id))
         assert host._control(run.run_id, "agent-synthesis")["body"]["phase"] == "waiting"
         assert turns["Sage"] == 3
@@ -230,7 +313,28 @@ def test_accepted_peer_request_can_wait_then_review_with_exact_current_refs(
         assert reviewed["body"]["accepted_answer_ref"] == reviewed["body"][
             "answer_refs"
         ][0]
-        assert turns["Sage"] == 4
+        assert reviewed_input["answer_ref"] == reviewed["body"]["accepted_answer_ref"]
+        _drive_until(host, run.run_id, lambda: host._run(run.run_id)["body"]["status"] == "completed")
+        requester = host._control(run.run_id, "agent-synthesis")
+        report_ref = requester["body"]["report_ref"]
+        assert requester["body"]["phase"] == "done"
+        report = host.store.get(**report_ref)
+        assert report["body"]["body"].startswith(
+            "The peer confirmed the source's unresolved limitation"
+        )
+        assert report["body"]["citations"] == [{
+            "sourceId": source["citation"]["source_id"],
+            "spanId": source["citation"]["span_id"],
+        }]
+        assert report["body"]["citation_input_provenance"][0]["input_status"] == (
+            "exact_passage_in_producing_call"
+        )
+        proposal = host.store.get("board_proposal", requester["body"]["task_id"])
+        assert proposal["body"]["status"] == "completed"
+        outcome = host.store.get(**proposal["body"]["outcome_ref"])
+        assert report_ref in outcome["body"]["result_refs"]
+        assert reviewed_input["report_ref"] != report_ref
+        assert turns["Sage"] == 5
         assert turns["Mxra"] == 1
     finally:
         host.close()

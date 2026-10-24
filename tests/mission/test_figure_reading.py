@@ -289,7 +289,7 @@ def test_figure_usage_must_reconcile_and_length_finish_is_visible(tmp_path, monk
         "prompt_tokens": 2048, "completion_tokens": 10, "total_tokens": 2058,
     }
     assert store.get(**outcome.response_ref)["body"]["cache_observation"] == {
-        "status": "not_reported",
+        "status": "not_reported", "field_presence": "details_absent",
     }
     assert visible["finish_reason"] == "length"
     assert visible["output_truncated"] is True
@@ -316,7 +316,9 @@ def test_figure_receipt_marks_malformed_optional_cache_without_losing_totals(tmp
     outcome = reader.invoke_capture(intent, allow_live_calls=False)
     receipt = store.get(**outcome.response_ref)["body"]
     assert receipt["status"] == "generated_unverified"
-    assert receipt["cache_observation"] == {"status": "malformed"}
+    assert receipt["cache_observation"] == {
+        "status": "malformed", "field_presence": "cached_tokens_invalid",
+    }
     assert receipt["usage"] == {
         "prompt_tokens": 2048, "completion_tokens": 10, "total_tokens": 2058,
     }

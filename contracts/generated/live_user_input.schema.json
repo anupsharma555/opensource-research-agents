@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Authenticated local input for one exact open task and agent instance.",
+  "properties": {
+    "expectedTaskVersion": {
+      "minimum": 1,
+      "title": "Expectedtaskversion",
+      "type": "integer"
+    },
+    "kind": {
+      "enum": [
+        "direction",
+        "unverified_pasted_evidence"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "requestId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Requestid",
+      "type": "string"
+    },
+    "runId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Runid",
+      "type": "string"
+    },
+    "targetAgentId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Targetagentid",
+      "type": "string"
+    },
+    "taskId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Taskid",
+      "type": "string"
+    },
+    "text": {
+      "maxLength": 100000,
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Text",
+      "type": "string"
+    }
+  },
+  "required": [
+    "requestId",
+    "runId",
+    "taskId",
+    "targetAgentId",
+    "expectedTaskVersion",
+    "kind",
+    "text"
+  ],
+  "title": "LiveUserInputRequest",
+  "type": "object"
+}

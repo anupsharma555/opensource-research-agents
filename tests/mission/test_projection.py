@@ -752,6 +752,33 @@ def test_deferred_control_has_its_own_saved_task_status(tmp_path, monkeypatch):
     assert snapshot["agents"][0]["status"] == "deferred"
 
 
+def test_cancelled_control_and_mission_have_distinct_saved_statuses(tmp_path, monkeypatch):
+    host = service(tmp_path, monkeypatch, lambda request, *, timeout: answer("No call needed.", 1))
+    receipt = host.start(LiveStartRequest(
+        request_id="projection-branch-cancel", question="Review separate work",
+        agent_ids=["agent-synthesis", "agent-critique"],
+    ))
+    run = host._run(receipt.run_id)
+    controls = host._controls(receipt.run_id)
+    cancelled = {**controls[0], "body": {**controls[0]["body"], "phase": "cancelled"}}
+    snapshot, *_ = build_snapshot(
+        host.store, run, [cancelled, controls[1]], snapshot_id="projection-one-cancelled"
+    )
+    tasks = {task["id"]: task for task in snapshot["tasks"]}
+    assert snapshot["mission"]["status"] == "active"
+    assert tasks[cancelled["body"]["task_id"]]["status"] == "cancelled"
+    assert tasks[cancelled["body"]["task_id"]]["activeOrWaiting"] == "cancelled"
+    assert tasks[controls[1]["body"]["task_id"]]["status"] != "cancelled"
+
+    closed_run = {**run, "body": {**run["body"], "status": "cancelled"}}
+    closed, *_ = build_snapshot(
+        host.store, closed_run, [cancelled, controls[1]], snapshot_id="projection-run-cancelled"
+    )
+    root = next(task for task in closed["tasks"] if task["id"] == run["body"]["root_task_id"])
+    assert closed["mission"]["status"] == "cancelled"
+    assert root["status"] == root["activeOrWaiting"] == "cancelled"
+
+
 def test_published_report_is_not_shown_as_a_waiting_tool(tmp_path, monkeypatch):
     def transport(request, *, timeout):
         return tool(

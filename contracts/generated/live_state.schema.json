@@ -655,6 +655,19 @@
           "default": null,
           "title": "Title"
         },
+        "version": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        },
         "waitingReason": {
           "anyOf": [
             {

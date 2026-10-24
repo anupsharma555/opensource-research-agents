@@ -88,7 +88,7 @@ def test_small_output_plan_requests_keep_full_catalog_and_exact_admission_across
             dispatch_bytes.append(raw)
             step = len(dispatch_bytes)
             assert packet["max_completion_tokens"] == output_cap
-            assert packet["reasoning_effort"] == "high"
+            assert packet["reasoning_effort"] == "medium"
             catalog = _index(packet["messages"][0]["content"])
             # Full current catalog includes web navigation and both document readers.
             assert len(catalog["tools"]) == 54
@@ -182,7 +182,7 @@ def test_small_output_plan_requests_keep_full_catalog_and_exact_admission_across
             assert by_hash[body["request_sha256"]] == raw
             assert hashlib.sha256(raw).hexdigest() == body["request_sha256"]
             estimate = estimate_request_tokens(raw)
-            assert estimate.basis == TOKENIZER_BASIS and estimate.basis.endswith(".v3")
+            assert estimate.basis == TOKENIZER_BASIS and estimate.basis.endswith(".v4")
             assert estimate.fallback_reason is None
             assert body["request_token_estimate"] == asdict(estimate)
             assert body["source_refs"] == body["context_source_dependency_refs"] == []

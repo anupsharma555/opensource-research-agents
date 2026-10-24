@@ -1,6 +1,7 @@
 """Unselected schemas yield to checked source text before a rate probe."""
 
 import json
+import math
 
 from ora.coordination.board import ref
 from ora.mission.source_context import plan_source_turn
@@ -36,8 +37,11 @@ def test_selected_source_packs_before_provider_feedback_probe(tmp_path, monkeypa
                 boundary = target
                 break
         assert boundary is not None, "Fixture must expose a schema-only fit gap"
+        # Keep the schema-only fit boundary after reserving the explicit rate
+        # estimator headroom; do not turn this into a probe-path test.
+        observed_limit = math.ceil((boundary + 6) / 0.90)
         host._update_control(control, input_budget={
-            "observed_limit_tokens": boundary + 6, "target_fraction": 0.70,
+            "observed_limit_tokens": observed_limit, "target_fraction": 0.70,
         })
         assert host._schedule_model(host._control(run.run_id, actor))
         prepared = host._control(run.run_id, actor)
@@ -65,7 +69,8 @@ def test_selected_source_packs_before_provider_feedback_probe(tmp_path, monkeypa
         assert not any(passage_text in (message.get("content") or "")
                        for message in packet["messages"] if message["role"] == "tool")
         assert copy_ref in intent["body"]["source_refs"]
-        assert estimate_request_tokens(raw).tokens + 6 <= boundary + 6
+        assert (estimate_request_tokens(raw).tokens + 6
+                + budget["rate_input_headroom_tokens"] <= observed_limit)
         assert packet["max_completion_tokens"] == 8192
         available = _index(packet["messages"][0]["content"])
         assert set(DEFERABLE_CORE_TOOLS) <= set(available["tools"])
@@ -100,6 +105,7 @@ def test_forecast_only_overflow_probes_selected_source_after_deferral(
         budget = host.store.get("mission_call_budget", call["id"])["body"]
         assert budget["source_turn_mode"] == "all_allowed_sources_fit"
         assert budget["rate_admission_policy"] == "provider_feedback_probe"
+        assert budget["rate_input_headroom_tokens"] == 0
         assert budget["deferred_core_tool_ids"]
         assert copy_ref in intent["body"]["source_refs"]
         assert intent["body"]["source_decisions"][0]["passage_refs"] == (

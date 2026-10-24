@@ -110,7 +110,7 @@ def test_native_500_restart_creates_fresh_ordinary_decision_with_current_source_
             assert resumed.state(run_id).snapshot.mission.status == "completed"
             assert len(packets) == 2
             assert {"type": "browser_search"} not in packets[1]["tools"]
-            assert packets[1]["reasoning_effort"] == "high"
+            assert packets[1]["reasoning_effort"] == "medium"
             visible = json.dumps(packets[1]["messages"])
             assert "provider_transient_failure" in visible
             assert "SYNTHETIC_RETAINED_TEXT" not in visible
@@ -130,7 +130,7 @@ def test_ordinary_503_restarts_with_distinct_intent_and_saved_backoff(tmp_path, 
         tmp_path, monkeypatch, status=503,
     )
     try:
-        assert packets[0]["reasoning_effort"] == "high"
+        assert packets[0]["reasoning_effort"] == "medium"
         assert host._repair_server_failure(control, work, cap)
         repaired = host._control(run_id, "agent-synthesis")
         assert repaired["body"]["phase"] == "retry_at"

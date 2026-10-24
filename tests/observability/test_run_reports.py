@@ -158,6 +158,21 @@ def test_direct_wire_probe_keeps_reported_zero_distinct_from_unknown(tmp_path):
     assert report["timing"]["measured_http_seconds_sum"] == 1
 
 
+def test_comparison_report_uses_run_denominator_not_followup_percentage():
+    from ora.observability.prefix_reuse import analyze_local_prefix_reuse
+    from scripts.report_api_runs import local_reuse_text
+    from tests.observability.test_prefix_reuse import _candidate
+
+    reuse = analyze_local_prefix_reuse([_candidate(1, "Same"), _candidate(2, "Same")])
+    assert reuse["estimated_message_prefix_token_fraction"] == 1
+    text = local_reuse_text({"local_prefix_reuse": reuse})
+    assert "Local input reuse: 50.0%" in text
+    assert "first requests included" in text
+    assert "not a provider cache hit" in text
+    baseline = analyze_local_prefix_reuse([_candidate(1, "Same")])
+    assert "no comparable follow-up" in local_reuse_text({"local_prefix_reuse": baseline})
+
+
 def test_incomplete_pair_preserves_failed_403_and_single_later_response(tmp_path):
     parent = tmp_path / "pair"
     continuation = parent / "continuation1"

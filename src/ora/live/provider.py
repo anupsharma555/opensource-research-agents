@@ -18,6 +18,7 @@ from typing import Any
 from ora.credentials import GROQ_CREDENTIAL_ENV_NAMES, GroqCredentialProfiles
 
 MODEL = "openai/gpt-oss-120b"
+DEFAULT_REASONING_EFFORT = "medium"
 URL = "https://api.groq.com/openai/v1/chat/completions"
 USER_AGENT = "OpenSourceResearchAgents/0.1 live-provider"
 INPUT_USD_PER_M = 0.15
@@ -157,6 +158,8 @@ class GroqProvider:
             "model": self.model,
             "messages": _messages_for_request(messages),
             "max_completion_tokens": self.max_completion_tokens,
+            # The legacy host has no run-level effort pin. Preserve its existing
+            # behavior; new mission runs select DEFAULT_REASONING_EFFORT explicitly.
             "reasoning_effort": "high",
             "include_reasoning": False,
             "stream": False,

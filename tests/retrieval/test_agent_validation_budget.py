@@ -2,6 +2,7 @@
 
 import io
 import json
+import socket
 import urllib.error
 import urllib.request
 
@@ -69,6 +70,48 @@ def response(total=20):
                                 "choices": [{"message": {"content": "private answer"}}]}).encode())
 
 
+@pytest.mark.parametrize("effort", ["medium", "high"])
+def test_selected_effort_is_tokenized_reserved_and_capped_across_restart(tmp_path, effort):
+    from ora.models.groq import CallConfiguration, GroqSelectedAdapter
+    from ora.models.token_estimate import TOKENIZER_BASIS, estimate_request_tokens
+
+    config = CallConfiguration("synthetic-config", "a" * 64, "Use supplied evidence.",
+                               reasoning_effort=effort, max_completion_tokens=100)
+    prepared = GroqSelectedAdapter(tmp_path).prepare(
+        config, call_id="call", attempt_id="attempt", task_category="fixture",
+        phase="collect", messages=[{"role": "user", "content": "Read the fixture"}],
+        tools=({"type": "function", "function": {
+            "name": "read_fixture", "parameters": {"type": "object", "properties": {},
+                                                     "additionalProperties": False},
+        }},),
+    )
+    raw = json.dumps(prepared.body, ensure_ascii=False, sort_keys=True,
+                     separators=(",", ":")).encode()
+    estimate = estimate_request_tokens(raw)
+    assert estimate.basis == TOKENIZER_BASIS and estimate.fallback_reason is None
+    model_request = urllib.request.Request(URL, data=raw, method="POST")
+    path = tmp_path / "ledger.json"
+    sent = []
+
+    def opener(_self, value, **_kwargs):
+        pending = json.loads(path.read_text())
+        assert len(pending["model_attempts"]) == 1
+        entry = pending["model_attempts"][0]
+        assert entry["state"] == "attempted"
+        assert entry["estimated_input_tokens"] == estimate.tokens
+        assert entry["planned_tokens"] == estimate.tokens + 100
+        sent.append(json.loads(value.data)["reasoning_effort"])
+        return response()
+
+    with AgentBudget(path, model_limit=1, token_limit=20_000, retrieval_limit=0) as budget:
+        budget.open(opener, object(), model_request)
+        assert budget.data["planned_tokens"] == 20
+    with AgentBudget(path, model_limit=1, token_limit=20_000, retrieval_limit=0) as reopened:
+        with pytest.raises(BudgetStop, match="model_attempt_cap"):
+            reopened.open(opener, object(), model_request)
+    assert sent == [effort]
+
+
 def test_actual_usage_releases_unused_reservation_and_preserves_secrets(tmp_path):
     path = tmp_path / "ledger.json"
     calls = []
@@ -107,6 +150,58 @@ def test_token_and_call_caps_block_before_dispatch(tmp_path):
     with AgentBudget(path, model_limit=1) as budget:
         budget.open(opener, object(), request())
         with pytest.raises(BudgetStop, match="model_attempt_cap"):
+            budget.open(opener, object(), request())
+    assert len(sent) == 1
+
+
+def test_token_only_budget_counts_past_eight_and_keeps_ceiling_after_restart(tmp_path):
+    from ora.models.token_estimate import estimate_request_tokens
+
+    path = tmp_path / "token-only.json"
+    packet = request(cap=100)
+    reservation = estimate_request_tokens(packet.data).tokens + 100
+    options = dict(model_limit=None, token_limit=reservation + 180, retrieval_limit=0)
+    sent = []
+
+    def opener(_self, _url, **_kwargs):
+        saved = json.loads(path.read_text())
+        assert saved["model_attempts"][-1]["state"] == "attempted"
+        assert saved["planned_tokens"] <= options["token_limit"]
+        sent.append(1)
+        return response(total=20)
+
+    with AgentBudget(path, **options) as budget:
+        for _ in range(9):
+            budget.open(opener, object(), packet)
+        assert budget.data["planned_tokens"] == 180
+        assert budget.data["limits"]["model"] is None
+    with AgentBudget(path, **options) as budget:
+        # Equal-to-budget admission is valid; the following call would reserve
+        # more than the remaining token allowance and must never reach HTTP.
+        budget.open(opener, object(), packet)
+        with pytest.raises(BudgetStop, match="token_cap"):
+            budget.open(opener, object(), packet)
+    assert len(sent) == 10
+    with pytest.raises(BudgetStop, match="token_cap"):
+        with AgentBudget(path, **options):
+            pytest.fail("reopened an exhausted token allowance")
+
+
+def test_token_only_budget_still_denies_retrieval_and_stops_unknown_usage(tmp_path):
+    options = dict(model_limit=None, token_limit=1000, retrieval_limit=0)
+    sent = []
+
+    def opener(_self, _url, **_kwargs):
+        sent.append(1)
+        return Response(b'{"choices": []}')
+
+    with AgentBudget(tmp_path / "retrieval.json", **options) as budget:
+        with pytest.raises(BudgetStop, match="retrieval_attempt_cap"):
+            budget.open(opener, object(), "https://example.org/source")
+    assert not sent
+    with AgentBudget(tmp_path / "unknown.json", **options) as budget:
+        budget.open(opener, object(), request())
+        with pytest.raises(BudgetStop, match="unknown_model_usage"):
             budget.open(opener, object(), request())
     assert len(sent) == 1
 
@@ -195,6 +290,81 @@ def test_uncertain_transport_is_durable_and_cannot_restart(tmp_path):
     with pytest.raises(BudgetStop, match="uncertain_transport"):
         with AgentBudget(path):
             pytest.fail("replayed uncertain request")
+
+
+@pytest.mark.parametrize(("failure", "category"), [
+    (urllib.error.URLError(socket.gaierror(8, "private DNS hostname")), "dns"),
+    (urllib.error.URLError(TimeoutError("private timeout target")), "timeout"),
+    (urllib.error.URLError(ConnectionRefusedError("private endpoint")), "connection"),
+    (urllib.error.URLError("private opaque failure"), "other"),
+])
+def test_uncertain_opening_records_only_sanitized_failure_category(
+    tmp_path, failure, category,
+):
+    path = tmp_path / "ledger.json"
+    calls = []
+
+    def failed(_self, _url, **_kwargs):
+        calls.append(1)
+        raise failure
+
+    with AgentBudget(path) as budget:
+        with pytest.raises(BudgetStop, match="uncertain_transport"):
+            budget.open(failed, object(), request())
+        entry = budget.data["model_attempts"][0]
+        assert entry["state"] == "uncertain"
+        assert entry["failure_stage"] == "opening"
+        assert entry["failure_category"] == category
+        assert budget.data["planned_tokens"] == entry["planned_tokens"]
+        assert "actual_tokens" not in entry
+    with pytest.raises(BudgetStop, match="uncertain_transport"):
+        with AgentBudget(path):
+            pytest.fail("replayed uncertain request")
+    assert calls == [1]
+    saved = path.read_text()
+    assert "private" not in saved
+    assert "Bearer" not in saved
+
+
+@pytest.mark.parametrize(("http_error", "category"), [
+    (False, "timeout"), (True, "connection"),
+])
+def test_response_read_failure_is_uncertain_capture_without_body_or_replay(
+    tmp_path, http_error, category,
+):
+    path = tmp_path / "ledger.json"
+    calls = []
+
+    class BrokenRead(Response):
+        def read(self, *_args, **_kwargs):
+            failure = (ConnectionResetError("private response and URL") if http_error
+                       else TimeoutError("private response and URL"))
+            raise failure
+
+    def failed(_self, _url, **_kwargs):
+        calls.append(1)
+        if http_error:
+            raise urllib.error.HTTPError(
+                URL, 503, "private HTTP reason", {}, BrokenRead(b"private response"),
+            )
+        return BrokenRead(b"private response")
+
+    with AgentBudget(path) as budget:
+        with pytest.raises(BudgetStop, match="uncertain_transport"):
+            budget.open(failed, object(), request())
+        entry = budget.data["model_attempts"][0]
+        assert entry["state"] == "uncertain"
+        assert entry["failure_stage"] == "capture"
+        assert entry["failure_category"] == category
+        assert budget.data["stop_reason"] == "uncertain_transport"
+        assert budget.data["planned_tokens"] == entry["planned_tokens"]
+        assert "response_sha256" not in entry
+        assert "actual_tokens" not in entry
+    with pytest.raises(BudgetStop, match="uncertain_transport"):
+        with AgentBudget(path):
+            pytest.fail("replayed uncertain response")
+    assert calls == [1]
+    assert "private" not in path.read_text()
 
 
 def test_missing_model_usage_latches_before_next_request(tmp_path):

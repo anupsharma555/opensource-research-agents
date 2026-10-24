@@ -73,6 +73,105 @@ def test_two_connections_compete_for_last_permit_and_allowance(tmp_path):
     assert left.get(winner["operation_id"])["reservation"] is True
 
 
+def test_unknown_model_token_limit_uses_one_atomic_startup_probe(tmp_path):
+    clock = Clock()
+    left = make(tmp_path, clock, model=2)
+    right = make(tmp_path, clock, model=2)
+    queue(left, "a", tokens=3000)
+    queue(left, "b", tokens=3000)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(
+            lambda pair: pair[0].admit(pair[1], "model"),
+            [(left, "one"), (right, "two")],
+        ))
+    assert sum(result is not None for result in results) == 1
+    first = next(result for result in results if result)
+    left.dispatched(first["operation_id"], first["owner"], first["generation"])
+    assert right.admit("two", "model") is None
+
+    left.observe_rate_headers(
+        "provider/model/account",
+        {"x-ratelimit-limit-tokens": "8000",
+         "x-ratelimit-remaining-tokens": "5000",
+         "x-ratelimit-reset-tokens": "60s"},
+        source_operation_id=first["operation_id"],
+        observation_id="startup-response", observed_at=clock(),
+    )
+    second = right.admit("two", "model")
+    assert second is not None and second["operation_id"] != first["operation_id"]
+    assert len(left.get(first["operation_id"])["attempts"]) == 1
+    assert left.get(second["operation_id"])["attempts"] == []
+
+
+def test_unknown_limit_429_wait_survives_restart_without_duplicate_dispatch(tmp_path):
+    clock = Clock()
+    scheduler = make(tmp_path, clock, model=2)
+    queue(scheduler, "first", tokens=6000)
+    queue(scheduler, "second", tokens=6000)
+    first = scheduler.admit("one", "model")
+    assert first["operation_id"] == "first"
+    scheduler.dispatched("first", "one", first["generation"])
+    assert make(tmp_path, clock, model=2).admit("two", "model") is None
+    scheduler.observe_rate_headers(
+        "provider/model/account",
+        {"x-ratelimit-limit-tokens": "8000",
+         "x-ratelimit-remaining-tokens": "0",
+         "x-ratelimit-reset-tokens": "30s"},
+        source_operation_id="first", observation_id="first-429",
+        observed_at=clock(),
+    )
+    scheduler.rate_limited("first", "one", first["generation"],
+                           scope="provider/model/account", retry_after=30)
+    reopened = make(tmp_path, clock, model=2)
+    assert reopened.admit("two", "model") is None
+    assert len(reopened.get("first")["attempts"]) == 1
+    clock.advance(30)
+    assert reopened.admit("two", "model") is None  # Unknown usage keeps its local reserve.
+    clock.advance(30)
+    retry = reopened.admit("two", "model")
+    assert retry["operation_id"] == "first"
+    assert len(reopened.get("first")["attempts"]) == 1
+    reopened.dispatched("first", "two", retry["generation"])
+    assert len(reopened.get("first")["attempts"]) == 2
+
+
+def test_unknown_limit_without_token_headers_releases_probe_after_result(tmp_path):
+    clock = Clock()
+    scheduler = make(tmp_path, clock, model=2)
+    queue(scheduler, "first")
+    queue(scheduler, "second")
+    first = scheduler.admit("one", "model")
+    assert scheduler.admit("two", "model") is None
+    scheduler.dispatched("first", "one", first["generation"])
+    scheduler.settle("first", "one", first["generation"],
+                     used_tokens=3, outcome="completed")
+    assert make(tmp_path, clock, model=2).admit("two", "model")["operation_id"] == "second"
+
+
+def test_unknown_limit_probe_is_per_domain_and_unused_admission_can_expire(tmp_path):
+    clock = Clock()
+    store = StateStore(tmp_path, clock=clock)
+    policy = CapacityPolicy(
+        permits={"model": 2, "retrieval": 1, "compute": 1},
+        quotas={"a": QuotaLimit(60), "b": QuotaLimit(60)},
+    )
+    scheduler = CapacityScheduler(store, policy)
+    for name, scope in (("a1", "a"), ("a2", "a"), ("b1", "b")):
+        scheduler.enqueue(name, task_id=name, lane=name, kind="model",
+                          quota_scopes=(scope,), estimated_tokens=3)
+    first = scheduler.admit("one", "model", lease_seconds=5)
+    assert first["operation_id"] == "a1"
+    other = CapacityScheduler(StateStore(tmp_path, clock=clock), policy)
+    assert other.admit("two", "model")["operation_id"] == "b1"
+    assert other.admit("three", "model") is None
+    clock.advance(5)
+    assert other.expire() == [{"operation_id": "a1", "phase": "queued"}]
+    replacement = other.admit("three", "model")
+    assert replacement["operation_id"] == "a2"
+    with pytest.raises(StateConflict):
+        scheduler.dispatched("a1", "one", first["generation"])
+
+
 def test_two_processes_share_final_request_allowance(tmp_path):
     clock = Clock()
     scheduler = make(tmp_path, clock, model=2, requests=1)
@@ -189,7 +288,7 @@ def test_cancel_queued_or_waiting_work_without_canceling_other_branch(tmp_path):
 
 def test_review_and_quiet_lane_progress_under_noisy_queue(tmp_path):
     clock = Clock()
-    s = make(tmp_path, clock, model=2)
+    s = make(tmp_path, clock, model=2, tokens=100)
     for i in range(8):
         queue(s, f"noise-{i}", lane="noise")
     queue(s, "quiet", lane="quiet")
@@ -340,6 +439,30 @@ def test_request_and_token_usage_reconciled_per_call_across_window(tmp_path):
     assert s.admit("host", "model") is None
     clock.advance(61)
     assert s.admit("host", "model")["operation_id"] == "repair"
+
+
+def test_confirmed_pre_dispatch_no_effect_uses_no_request_allowance(tmp_path):
+    clock = Clock()
+    scheduler = make(tmp_path, clock, requests=1, tokens=10)
+    intent_ref = {"kind": "model_request_intent", "id": "synthetic-intent", "version": 1}
+    scheduler.enqueue(
+        "no-effect", task_id="task-no-effect", lane="a", kind="model",
+        quota_scopes=("provider/model/account",), estimated_tokens=3,
+        request_token_estimate={"tokens": 3, "basis": "synthetic", "intent_ref": intent_ref},
+    )
+    admitted = scheduler.admit("host", "model")
+    assert admitted and admitted["operation_id"] == "no-effect"
+    scheduler.dispatched("no-effect", "host", admitted["generation"])
+    scheduler.transport_failure(
+        "no-effect", "host", admitted["generation"],
+        classification="terminal_no_effect",
+    )
+    first = scheduler.get("no-effect")
+    assert first["attempts"][-1]["charged_tokens"] == 0
+    assert first["attempts"][-1]["usage_known"] is True
+    queue(scheduler, "real-call", tokens=3)
+    second = scheduler.admit("host", "model")
+    assert second and second["operation_id"] == "real-call"
 
 
 def test_local_timeout_keeps_external_capacity_until_confirmed_no_effect(tmp_path):
@@ -746,7 +869,7 @@ def test_distinct_provider_and_shared_account_scopes(tmp_path):
         permits={"model": 3, "retrieval": 1, "compute": 1},
         quotas={"provider-a": QuotaLimit(60, requests=1),
                 "provider-b": QuotaLimit(60, requests=2),
-                "account": QuotaLimit(60, requests=2)},
+                "account": QuotaLimit(60, requests=2, tokens=100)},
     )
     s = CapacityScheduler(store, policy)
     for name, scopes in (("a", ("provider-a", "account")),

@@ -22,8 +22,13 @@ from ora.coordination.board import ref
 from ora.credentials import CredentialProfileError, GroqCredentialProfiles
 from ora.evidence.library import EvidenceError
 from ora.live.provider import URL, USER_AGENT, CredentialUnavailable, GroqProvider
+from ora.models.reasoning_artifacts import (
+    export_receipt_reasoning,
+    record_export_failure,
+)
 from ora.models.token_estimate import estimate_context_tokens
 from ora.models.usage import normalize_groq_usage, observe_groq_cache
+from ora.retrieval.redact import redact_text
 from ora.state import StateError, StateStore
 from ora.state.store import Transaction, canonical
 
@@ -407,6 +412,9 @@ class FigureReader:
             raise FigureDispatchUncertain("Figure response exceeded the capture limit")
         raw_hash = _digest(raw)
         text, model, usage, finish_reason = None, None, None, None
+        reasoning_text = None
+        reasoning_status = "not_requested"
+        response_id = None
         cache_observation: dict[str, str | int] = {"status": "unavailable"}
         if http_status == 200:
             try:
@@ -415,8 +423,15 @@ class FigureReader:
                 choice = parsed["choices"][0]
                 message = choice["message"]
                 text = message.get("content")
+                returned_reasoning = message.get("reasoning")
+                if isinstance(returned_reasoning, str) and returned_reasoning:
+                    reasoning_text = returned_reasoning
+                elif returned_reasoning is not None:
+                    # An unrecognized provider shape is not evidence of absent text.
+                    reasoning_status = "unknown"
                 observed_finish = choice.get("finish_reason")
                 finish_reason = observed_finish if isinstance(observed_finish, str) else None
+                response_id = parsed.get("id") if isinstance(parsed.get("id"), str) else None
                 usage = normalize_groq_usage(parsed.get("usage"))
                 if (model != VISION_MODEL or not isinstance(text, str) or not text.strip()
                         or usage is None
@@ -446,11 +461,37 @@ class FigureReader:
                 pass
         status = ("generated_unverified" if text is not None else
                   "rate_limited" if http_status == 429 else "known_rejection")
+        if reasoning_text is not None:
+            reasoning_status = "truncated" if finish_reason == "length" else "returned"
+        safe_reasoning, redacted = (redact_text(reasoning_text)
+                                    if reasoning_text is not None else (None, False))
+        reasoning_blob = (self.store.put_blob(safe_reasoning.encode("utf-8"))
+                          if safe_reasoning is not None else None)
+        raw_reasoning_blob = (self.store.put_blob(reasoning_text.encode("utf-8"))
+                              if reasoning_text is not None else None)
+        reasoning_ref = {"kind": "restricted_reasoning",
+                         "id": f"figure-reasoning:{intent['id']}", "version": 1}
+        raw_reasoning_ref = ({"kind": "restricted_reasoning_raw",
+                              "id": f"figure-raw-reasoning:{intent['id']}", "version": 1}
+                             if raw_reasoning_blob is not None else None)
+        reasoning_body = {
+            "schema": "ora.reasoning.v1", **scope,
+            "intent_ref": intent_ref, "request_sha256": body["request_sha256"],
+            "status": reasoning_status, "blob": reasoning_blob,
+            "raw_ref": raw_reasoning_ref, "redacted": bool(redacted),
+            "origin": "provider_returned", "access": "restricted_diagnostics",
+        }
         receipt_body = {
             "schema": "ora.figure_response_receipt.v1", **scope,
             "intent_ref": intent_ref, "dispatch_ref": marked["dispatch_ref"],
             "request_sha256": body["request_sha256"], "response_sha256": raw_hash,
-            "model": model, "status": status, "http_status": http_status,
+            "provider": "groq", "model": model,
+            "selected_model": body["model"], "returned_model": model,
+            "response_id": response_id,
+            "operation_id": body["operation_id"],
+            "effective_reasoning_effort": "none",
+            "reasoning_status": reasoning_status, "reasoning_ref": reasoning_ref,
+            "status": status, "http_status": http_status,
             "interpretation": text, "usage": usage,
             "cache_observation": cache_observation,
             "finish_reason": finish_reason,
@@ -472,14 +513,37 @@ class FigureReader:
             if (marker is None or marker["body"].get("intent_ref") != intent_ref
                     or marker["body"].get("request_sha256") != body["request_sha256"]):
                 raise FigureReadingError("Figure dispatch marker changed before capture")
+            raw_record = None
+            if raw_reasoning_ref is not None:
+                raw_record = tx.put("restricted_reasoning_raw", raw_reasoning_ref["id"], {
+                    "schema": "ora.reasoning_raw.v1", **scope,
+                    "intent_ref": intent_ref,
+                    "request_sha256": body["request_sha256"],
+                    "blob": raw_reasoning_blob, "origin": "provider_returned",
+                    "access": "restricted_diagnostics",
+                })
+                if ref(raw_record) != raw_reasoning_ref:
+                    raise FigureReadingError("Raw figure reasoning reference changed")
+            reasoning_record = tx.put("restricted_reasoning", reasoning_ref["id"],
+                                      reasoning_body)
+            if ref(reasoning_record) != reasoning_ref:
+                raise FigureReadingError("Restricted figure reasoning reference changed")
+            if raw_record is not None:
+                tx.link(reasoning_record, raw_record, "has_exact_provider_text")
             receipt = tx.put("figure_response_receipt", receipt_id, receipt_body)
             tx.link(receipt, intent, "responds_to")
+            tx.link(receipt, reasoning_record, "has_restricted_reasoning")
             return ref(receipt)
 
         receipt_ref = self.store.transact(
             f"figure-capture:{intent['id']}", {"response_sha256": raw_hash}, capture,
             mission_id=scope["mission_id"],
         )
+        try:
+            export_receipt_reasoning(self.store, receipt_ref)
+        except Exception as exc:
+            # Export is a repairable local view; keep the accepted provider receipt.
+            record_export_failure(self.store, receipt_ref, exc)
         return FigureOutcome(receipt_ref, status, usage["total_tokens"] if usage else None,
                              rate_headers, retry_after)
 

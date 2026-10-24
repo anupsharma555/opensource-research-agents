@@ -11,7 +11,8 @@ from ora.models import token_estimate
 from ora.state.store import canonical
 
 
-def request_bytes(*, text: str = "Read the checked source.", output_cap: object = 8192) -> bytes:
+def request_bytes(*, text: str = "Read the checked source.", output_cap: object = 8192,
+                  effort: str = "high") -> bytes:
     return canonical({
         "model": "openai/gpt-oss-120b",
         "messages": [
@@ -24,7 +25,7 @@ def request_bytes(*, text: str = "Read the checked source.", output_cap: object 
             {"role": "tool", "name": "read_source_window", "tool_call_id": "call-1",
              "content": '{"text":"One checked sentence."}'},
         ],
-        "reasoning_effort": "high", "include_reasoning": True,
+        "reasoning_effort": effort, "include_reasoning": True,
         "max_completion_tokens": output_cap, "stream": False,
         "tools": [{"type": "function", "function": {
             "name": "publish_result", "description": "Save a result",
@@ -63,7 +64,33 @@ def test_exact_canonical_request_and_context_text_use_verified_local_asset(
     assert token_estimate.estimate_request_tokens(
         raw, basis=token_estimate.TOKENIZER_BASIS_V2,
     ).tokens == estimate.tokens
+    assert token_estimate.estimate_request_tokens(
+        raw, basis=token_estimate.TOKENIZER_BASIS_V3,
+    ).tokens == estimate.tokens
     assert not (tmp_path / "must-not-be-created").exists()
+
+
+def test_new_medium_uses_pinned_tokenizer_while_saved_v3_remains_high_only():
+    medium = request_bytes(effort="medium")
+    current = token_estimate.estimate_request_tokens(medium)
+    assert current.basis == token_estimate.TOKENIZER_BASIS
+    assert current.fallback_reason is None
+    assert current.asset_sha256 == token_estimate.ASSET_SHA256
+    assert current.tokens == token_estimate.estimate_context_tokens(medium.decode())
+    assert token_estimate.estimate_request_tokens(
+        medium, basis=token_estimate.TOKENIZER_BASIS,
+    ) == current
+    with pytest.raises(token_estimate.TokenEstimateUnavailable,
+                       match="unsupported_reasoning_or_stream"):
+        token_estimate.estimate_request_tokens(
+            medium, basis=token_estimate.TOKENIZER_BASIS_V3,
+        )
+    historical = request_bytes(effort="high")
+    old_count = token_estimate.estimate_request_tokens(
+        historical, basis=token_estimate.TOKENIZER_BASIS_V3,
+    )
+    assert old_count.basis == token_estimate.TOKENIZER_BASIS_V3
+    assert old_count.tokens == token_estimate.estimate_request_tokens(historical).tokens
 
 
 def test_native_unfamiliar_and_noncanonical_requests_keep_legacy_basis():
@@ -135,6 +162,9 @@ def test_bounded_output_caps_count_exact_bytes_without_repricing_old_bases(outpu
     assert current.basis == token_estimate.TOKENIZER_BASIS
     assert current.fallback_reason is None
     assert current.tokens == token_estimate.estimate_context_tokens(raw.decode())
+    assert token_estimate.estimate_request_tokens(
+        raw, basis=token_estimate.TOKENIZER_BASIS_V3,
+    ).tokens == current.tokens
     for basis, allowance in (
         (token_estimate.TOKENIZER_BASIS_V1, 128),
         (token_estimate.TOKENIZER_BASIS_V2, 0),

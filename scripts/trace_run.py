@@ -155,6 +155,7 @@ def _usage(usage: dict) -> dict:
             "reported_hit_calls": fraction["reported_hit_calls"],
             "reported_miss_calls": fraction["reported_miss_calls"],
         },
+        "cache_fraction_confirmed_of_reported_input": usage["cache_fraction_confirmed"],
     }
 
 
@@ -166,13 +167,21 @@ def _loops(metrics: dict, kind: str = "model") -> list[dict]:
         usage = item["usage"]
         rows.append({
             "call_id": item.get("call_id", item.get("intent_id")), "status": item["status"],
+            "dispatch_recorded": item["dispatch_recorded"],
+            "dispatch_created_at": item.get("dispatch_created_at"),
+            "response_created_at": item.get("response_created_at"),
             "input": usage["prompt_tokens"],
             "output": usage["completion_tokens"],
             "reasoning_output_subset": usage["reasoning"],
             "cache_read_input_subset": usage["cache_read"],
             "cache_observation": item["cache_observation"],
+            "token_measurement": item.get("token_measurement", {}),
         })
-    return rows
+    # Preparation order can differ from dispatch order when peers wait for
+    # capacity. Number the actual request sequence, leaving unknown times last.
+    return sorted(rows, key=lambda row: (row.get("dispatch_created_at")
+                                        or row.get("response_created_at") or "~",
+                                        row["call_id"] or ""))
 
 
 def _project(store: StateStore, mission_id: str, run_id: str,
@@ -309,6 +318,94 @@ def inspect(args: argparse.Namespace) -> dict:
     }
 
 
+def _local_input_reuse_markdown(result: dict) -> list[str]:
+    """Render the same saved-request comparison used by runtime metric snapshots."""
+    reuse = result["local_prefix_reuse"]
+    if "structural_coverage_status" not in reuse:
+        return []
+    def count(value):
+        return f"{value:,}" if value is not None else "unknown"
+    def percent(value):
+        return f"{100 * value:.1f}%" if value is not None else "unavailable"
+    state = reuse["structural_coverage_status"]
+    lines = ["## Local input reuse across steps", "",
+             f"- **Run-level local input reuse:** {percent(reuse['local_structural_input_reuse_fraction'])} "
+             f"— {count(reuse['repeated_local_structural_input_tokens'])} repeated / "
+             f"{count(reuse['local_structural_input_tokens'])} measured local input tokens.",
+             f"- **Coverage:** {state.replace('_', ' ')}; "
+             f"{reuse['structural_measured_calls']}/{reuse['structural_candidate_calls']} "
+             f"request records measured, {reuse['structural_unavailable_calls']} unavailable, "
+             f"{reuse['structural_overlap_skipped_calls']} overlapping comparisons excluded.",
+             f"- **Follow-up message-prefix reuse:** "
+             f"{percent(reuse['estimated_message_prefix_token_fraction'])}; "
+             f"{reuse['measured_pairs']}/{reuse['eligible_pairs']} comparable follow-up pairs.",
+             "- **Comparison scope:** Same run, agent, task, provider, model and credential profile. "
+             "Compare each request with its preceding completed request in that scope.",
+             "- **Method:** Unchanged opening message tokens plus identical whole tool definitions, "
+             "divided by locally tokenized messages and tool definitions. The run total includes "
+             "each scope's first request at zero local reuse. Missing and overlapping comparisons "
+             "are excluded and reduce coverage; they are not zeroes.",
+             "- **Interpretation:** Input-structure reuse, not provider cache hits or billing savings. "
+             "Unchanged text after the first difference and partially changed tool schemas are not "
+             "counted. Request settings and image tokens are outside this measure.", ""]
+    if state == "baseline_only":
+        lines.extend(["Only first requests in separate scopes were captured. Their baseline rows "
+                      "do not establish a 0% provider cache rate or a repeat-request comparison.", ""])
+    observed_loops = [loop for loop in result['loops']
+                      if loop['dispatch_recorded'] or loop['status'] == 'captured']
+    identities = Counter(loop['call_id'] for loop in observed_loops)
+    numbered = {row['call_id']: number for number, row in enumerate(observed_loops, 1)
+                if identities[row['call_id']] == 1}
+    if any(count > 1 for count in identities.values()):
+        lines.extend(["Ambiguous duplicate call IDs have no request number (—); "
+                      "they are not silently assigned to one occurrence.", ""])
+    lines.extend(["| Request | Prior request | Comparison | Repeated prefix | Unchanged tools | "
+                  "Measured input | Local reuse |",
+                  "| ---: | ---: | --- | ---: | ---: | ---: | ---: |"])
+    for row in reuse["structural_input_calls"]:
+        status = row['status'].replace('_', ' ')
+        if row['status'] in {'unavailable', 'overlap_skipped'}:
+            status += ": " + row['reason'].replace('_', ' ')
+        number = numbered.get(row['call_id'], '—')
+        prior = numbered.get(row['prior_call_id'], '—')
+        lines.append(f"| {number} | {prior} | {status} | "
+                     f"{count(row['unchanged_leading_message_tokens'])} | "
+                     f"{count(row['unchanged_whole_schema_tokens'])} | "
+                     f"{count(row['local_structural_input_tokens'])} | "
+                     f"{percent(row['repeated_input_fraction'])} |")
+    if not reuse['structural_input_calls']:
+        lines.append("| — | — | No comparable captured text requests | — | — | — | — |")
+    changed_pairs = reuse.get("changed_schema_measured_pairs", 0)
+    changed_unavailable = reuse.get("changed_schema_unavailable_pairs", 0)
+    if changed_pairs or changed_unavailable:
+        lines.extend([
+            "", "### Unchanged definitions within changed tool lists", "",
+            f"- **Exact tool-definition overlap:** "
+            f"{percent(reuse.get('changed_schema_exact_shared_definition_fraction'))} "
+            f"— {count(reuse.get('changed_schema_exact_shared_definition_tokens'))} / "
+            f"{count(reuse.get('changed_schema_current_individual_definition_tokens'))} "
+            f"separately tokenized definition tokens across {changed_pairs} changed-list pairs; "
+            f"{changed_unavailable} pairs unavailable.",
+            "- **Meaning:** Counts exact individual definitions that survived a tool-list change, "
+            "regardless of order. This explains reusable content hidden by the stricter whole-list "
+            "measure; it does not change the run-level reuse percentage or establish cache hits.",
+            "", "| Request | Prior request | Exact definitions retained | Definition-token overlap |",
+            "| ---: | ---: | ---: | ---: |",
+        ])
+        for row in reuse['structural_input_calls']:
+            if row.get("tool_definition_overlap_status") != "measured_changed_schema":
+                continue
+            lines.append(
+                f"| {numbered.get(row['call_id'], '—')} | "
+                f"{numbered.get(row['prior_call_id'], '—')} | "
+                f"{count(row['exact_shared_tool_definition_count'])} / "
+                f"{count(row['current_tool_definition_count'])} | "
+                f"{count(row['exact_shared_tool_definition_tokens'])} / "
+                f"{count(row['current_individual_tool_definition_tokens'])} |"
+            )
+    return [*lines, ""]
+
+
 def _markdown(result: dict) -> str:
     lines = [f"# Saved trace: {result['run_id']}", "",
              f"Mission status: **{result['mission_status']}**. "
@@ -331,22 +428,79 @@ def _markdown(result: dict) -> str:
     def percent(value):
         return f"{value * 100:.1f}%" if value is not None else "unknown"
 
+    def count(value):
+        return f"{value:,}" if value is not None else "unknown"
+
     mix = usage["token_mix"]
     cache = usage["cache_fraction"]
+    confirmed_cache = usage.get("cache_fraction_confirmed")
     local_prefix = result["local_prefix_reuse"]
     local_tokens = local_prefix["estimated_repeated_message_tokens"]
     reasoning = usage["reasoning_fraction"]
+    if isinstance(confirmed_cache, dict):
+        paired = (f"{confirmed_cache['cache_reported_calls']}/"
+                  f"{confirmed_cache['input_reported_calls']} input-reporting calls")
+        if confirmed_cache["value"] is None:
+            cache_summary = (
+                f"Confirmed cached share of all reported input: **unknown**; "
+                f"{paired} with cache detail. Missing cache detail is not a reported zero."
+            )
+        else:
+            qualifier = (
+                "confirmed minimum; omitted cache detail remains unknown"
+                if confirmed_cache["status"] == "minimum"
+                else "complete cache detail for reported input"
+            )
+            cache_summary = (
+                f"Confirmed cached share of all reported input: "
+                f"**{percent(confirmed_cache['value'])}** "
+                f"({count(confirmed_cache['cached_tokens'])} of "
+                f"{count(confirmed_cache['reported_input_tokens'])} tokens; "
+                f"{paired} with cache detail; {qualifier})."
+            )
+        without_input = cache['total_calls'] - confirmed_cache['input_reported_calls']
+        prepared_only = activity['prepared_only_count']
+        cache_records = f"Cache record context: {cache['total_calls']} saved request records; "
+        if without_input:
+            if 0 <= prepared_only <= without_input:
+                other = without_input - prepared_only
+                cache_records += (
+                    f"{prepared_only} preparation-only and "
+                    f"{other} other {'record' if other == 1 else 'records'} "
+                    "without reported input."
+                )
+            else:
+                cache_records += f"{without_input} without reported input."
+        else:
+            cache_records += "all have reported input."
+        evaluation = result.get('evaluation')
+        if evaluation is not None:
+            unreported_http = (evaluation['model_http_attempts']
+                               - confirmed_cache['input_reported_calls'])
+            if unreported_http > 0:
+                cache_records += (
+                    f" {unreported_http} ledger-counted model HTTP "
+                    f"{'attempt' if unreported_http == 1 else 'attempts'} lacked "
+                    "reported input; input usage remains unknown."
+                )
+        cache_lines = [cache_summary, "", cache_records, ""]
+    else:
+        cache_lines = [
+            f"Cached-input share on reporting calls: **{percent(cache['value'])}** "
+            f"({cache['coverage_status']} coverage). "
+            f"Covered saved request records: {cache['covered_calls']}/{cache['total_calls']}; "
+            f"covered share of reported input tokens: "
+            f"{percent(cache['eligible_input_coverage_fraction'])}. "
+            "Percentages use summed tokens from matching reporting calls.", "",
+        ]
     lines.extend([
         f"Whole-run token split: **{percent(mix['input_fraction'])} input / "
         f"{percent(mix['output_fraction'])} output**, with "
-        f"{mix['covered_calls']}/{mix['total_calls']} calls covered. "
+        f"{mix['covered_calls']}/{mix['total_calls']} saved request records with both fields. "
         f"Reasoning accounts for **{percent(reasoning['value'])} of reported output** "
-        f"on {reasoning['covered_calls']}/{reasoning['total_calls']} reporting calls.", "",
-        f"Cached-input share on reporting calls: **{percent(cache['value'])}** "
-        f"({cache['coverage_status']} coverage). "
-        f"Covered calls: {cache['covered_calls']}/{cache['total_calls']}; "
-        f"covered share of reported input tokens: {percent(cache['eligible_input_coverage_fraction'])}. "
-        "Percentages use summed tokens from matching reporting calls, not averaged call percentages.", "",
+        f"on {reasoning['covered_calls']}/{reasoning['total_calls']} saved request records.", "",
+        *cache_lines,
+        *_local_input_reuse_markdown(result),
         f"Local exact-prefix reuse proxy: **{local_prefix['status']}**; "
         f"{local_prefix['measured_pairs']}/{local_prefix['eligible_pairs']} comparable "
         "same-run, same-actor/task/provider/model/profile request pairs measured. "
@@ -356,7 +510,8 @@ def _markdown(result: dict) -> str:
         f"Unchanged tool schemas: {local_prefix['stable_tool_schema_pairs']} pairs. "
         "This is local request structure, "
         "not Groq's rendered prefix, cached tokens, a cache hit, or a billing discount.", "",
-        f"Cache reports: {cache['reported_hit_calls']} hits; {cache['reported_miss_calls']} reported zeros; "
+        f"Cache-field states across {cache['total_calls']} saved request records: "
+        f"{cache['reported_hit_calls']} reported hits; {cache['reported_miss_calls']} reported zeros; "
         f"{usage['cache_read']['not_reported_calls']} provider-omitted; "
         f"{usage['cache_read']['invalid_calls']} invalid; "
         f"{usage['cache_read']['legacy_uncertain_calls']} legacy captures without field-level diagnostics; "
@@ -369,7 +524,19 @@ def _markdown(result: dict) -> str:
         f"{activity['error_or_unresolved_count']}. Largest reported input: "
         f"{usage['peak_reported_input_tokens'] if usage['peak_reported_input_tokens'] is not None else 'unknown'} "
         f"tokens. Time through last saved activity: {activity['observed_elapsed_seconds']} seconds.", "",
+        "Prepared intents, dispatch markers and unresolved lineage are local request records, "
+        "not additional or failed provider HTTP attempts. Use the validation transport ledger "
+        "above when available for actual HTTP counts.", "",
     ])
+    presence = usage.get("cache_field_presence_counts", {})
+    if presence:
+        lines.extend([
+            "Saved cache-field presence: "
+            + ", ".join(f"{name.replace('_', ' ')} {count}"
+                        for name, count in sorted(presence.items()))
+            + ". These are numeric-field-shape observations at decode, not a provider explanation "
+            "for cache behavior. Older receipts without this detail remain unknown.", "",
+        ])
     retrieval = result["retrieval"]
     lines.extend([
         f"Saved retrieval attempts: {retrieval['recorded_attempt_count']}; "
@@ -393,32 +560,61 @@ def _markdown(result: dict) -> str:
         lines.append(f"| {label} | {values[0]} | {values[1]} |")
     cache = result["model"]["usage"]["cache_fraction_reported_subset"]
     ratio = f"{100 * cache['value']:.1f}%" if cache["value"] is not None else "unknown"
-    lines.extend(["", f"Model cache fraction: **{ratio}**, based on "
-                  f"{cache['covered_calls']}/{cache['total_calls']} calls with both fields. "
-                  "Missing provider detail is unknown, not zero. Reasoning is already included in output tokens.", "",
-                  "## Model turns", "",
-                  "| Turn | Saved status | Input | Output | Reasoning subset | Cached-input subset | Cache observation |",
+    legacy_cache_line = (
+        [f"Model cache fraction: **{ratio}**, based on "
+         f"{cache['covered_calls']}/{cache['total_calls']} saved request records "
+         "with both fields. Missing provider detail is unknown, not zero.", ""]
+        if confirmed_cache is None else []
+    )
+    lines.extend(["", *legacy_cache_line,
+                  "Reasoning is already included in output tokens.", "",
+                  "## Model requests with dispatch or response evidence", "",
+                  "Rows below have a matching saved dispatch marker or captured response. A dispatch "
+                  "marker alone does not prove an HTTP request reached the provider; use the transport "
+                  "ledger above when available. Numbering excludes preparation and unmatched records.", "",
+                  "| Request | Saved status | Input | Output | Reasoning subset | Cached-input subset | Cache observation |",
                   "| ---: | --- | ---: | ---: | ---: | ---: | --- |"])
-    for number, loop in enumerate(result["loops"], 1):
-        def tokens(field: dict) -> str:
-            return (f"{field['value']:,}" if field["status"] == "reported"
-                    else field["status"].replace("_", " "))
+    def tokens(field: dict) -> str:
+        return (f"{field['value']:,}" if field["status"] == "reported"
+                else field["status"].replace("_", " "))
 
+    requests = [loop for loop in result["loops"]
+                if loop["dispatch_recorded"] or loop["status"] == "captured"]
+    diagnostics = [loop for loop in result["loops"]
+                   if not (loop["dispatch_recorded"] or loop["status"] == "captured")]
+    for number, loop in enumerate(requests, 1):
         lines.append(f"| {number} | {loop['status']} | {tokens(loop['input'])} | "
                      f"{tokens(loop['output'])} | {tokens(loop['reasoning_output_subset'])} | "
                      f"{tokens(loop['cache_read_input_subset'])} | "
                      f"{loop['cache_observation']['status'].replace('_', ' ')} |")
-    if not result["loops"]:
-        lines.append("| — | No model turn recorded | — | — | — | — | — |")
+    if not requests:
+        lines.append("| — | No dispatch or captured response recorded | — | — | — | — | — |")
+    if diagnostics:
+        lines.extend(["", "## Preparation and unmatched call records", "",
+                      "These records are excluded from the model request table and provider usage. "
+                      "A call manifest without an intent is not evidence of a prepared request.", "",
+                      "| Record | Saved status | Evidence |", "| ---: | --- | --- |"])
+        descriptions = {
+            "manifest_without_intent": "No matching saved request intent",
+            "prepared_only": "Request intent saved; no verified dispatch or response",
+            "dispatch_lineage_mismatch": "Dispatch marker does not match the request intent",
+            "receipt_lineage_mismatch": "Response receipt does not match the request intent",
+        }
+        for number, loop in enumerate(diagnostics, 1):
+            lines.append(f"| {number} | {loop['status']} | "
+                         f"{descriptions.get(loop['status'], 'No verified dispatch or response')} |")
     tool_activity = result["tool_activity"]
     lines.extend(["", "## Tool activity by model loop", "",
                   "Selected tools are joined to saved execution records. Selecting a capability "
-                  "does not execute that capability. Timing below is executor active time, "
+                  "does not execute that capability. A peer_request completed from a verified "
+                  "saved request does not mean a peer answered. Timing below is executor active time, "
                   "separate from model HTTP time and provider waits. Tool-message delivery means a matching "
                   "tool message reached a later request with a captured response; a reference "
                   "or shortened message does not establish full passage delivery or scientific use. "
                   "Source text and references can also arrive through separate context packets; "
-                  "absence of a tool message does not establish absence of that source information.", "",
+                  "absence of a tool message does not establish absence of that source information. "
+                  "A dash under later delivery means the next captured request already carried "
+                  "the same result; it is not a second delivery.", "",
                   "| Loop | Selected tool | Execution / outcome | New or reused | Active time | Tool message in next model request | Later tool-message delivery |",
                   "| ---: | --- | --- | --- | ---: | --- | --- |"])
     for step in tool_activity["steps"]:
@@ -435,6 +631,12 @@ def _markdown(result: dict) -> str:
         next_delivery = step["next_delivery_status"].replace("_", " ")
         if step["next_model_loop_index"] is not None:
             next_delivery = f"Loop {step['next_model_loop_index']}: {next_delivery}"
+        if (step["delivery_status"] == "captured_later" and
+                (step["next_delivery_status"], step.get("delivery_form")) in {
+                    ("captured_with_exact_result", "exact_saved_message"),
+                    ("captured_with_projected_or_restricted_result", "host_projected_or_restricted"),
+                }):
+            delivery = "—"
         lines.append(
             f"| {step['loop_index']} | {selected} | "
             f"{step['execution_status']} / {step['outcome']} | "
@@ -451,6 +653,19 @@ def _markdown(result: dict) -> str:
                      for key in ("input", "output", "cache_read_input_subset")]
             lines.append(f"| {number} | {loop['status']} | {' | '.join(cells)} | "
                          f"{loop['cache_observation']['status'].replace('_', ' ')} |")
+    measured = [loop for loop in requests if loop.get("token_measurement")]
+    if measured:
+        lines.extend(["", "## Token measurement fidelity", "",
+                      "Local estimates, provider admission demand and successful-response input usage "
+                      "are separate measurements. Admission demand is not billed usage; absent values remain unknown.", "",
+                      "| Request | Local input estimate | Provider admission demand | Reported input usage |",
+                      "| ---: | ---: | ---: | ---: |"])
+        for number, loop in enumerate(requests, 1):
+            values = loop.get("token_measurement", {})
+            cells = [str(values.get(key, "unknown")) for key in (
+                "local_input_estimate", "provider_admission_tokens", "reported_input_tokens",
+            )]
+            lines.append(f"| {number} | {' | '.join(cells)} |")
     lines.extend(["", "## Context and integrity", "",
                   f"Verified inclusion receipts: {result['context']['verified_inclusion_receipts']}; "
                   f"exact reference reuse occurrences: {result['context']['reused_exact_ref_occurrences']}; "

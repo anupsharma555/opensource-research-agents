@@ -18,6 +18,7 @@ a writable host simply to read its state.
 | Did a provider request occur? | `model_dispatch_attempt` is a pre-provider marker. A captured response proves a returned result. A failed/uncertain request may lack usage. Reconcile with a runner's transport ledger when present; do not equate prepared, marked, captured and billed counts. |
 | What is final and continuing? | Check `report` plus accepted output references in the exact snapshot and current `mission_task_control` phases; a saved report, task completion and whole-run status are different boundaries. |
 | What did it cost and how long? | `model_response_receipt.usage` and exact call timestamps, plus runner attempts and saved waits. Cached input and reasoning completion are subsets of their parent totals. Missing or provider-unreported fields stay unknown. |
+| How much input was reused locally? | The selected run's saved `local_prefix_reuse` metadata and exact captured request bytes provide the local structural-input comparison. Compare only terminally captured calls in the same run, actor, task, provider, model and credential profile. Inspect per-call status and coverage; a first call is a zero-reuse baseline, not a measured follow-up pair. Local overlap is not provider cache evidence. |
 
 For a parent/update chain, inspect each run separately and then state what source
 copies and accepted parent output were inherited, what later evidence was added,
@@ -71,8 +72,20 @@ Report these tool fields in a compact table or integrate them into numbered step
   separate context packets: missing tool-message delivery does not establish
   missing source text. Inspect exact source inclusion separately when relevant.
 
-Keep provider-reported cached-input counts and coverage separate from the local
-exact-prefix reuse estimate. Missing cache fields are unknown, not zero; local
+For each captured inference, inspect the saved local structural-input comparison
+row and link it from the report's corresponding numbered step. Report the
+run-wide percentage as repeated structural tokens / measured structural tokens,
+plus both counts, call coverage and any baseline, overlap-skipped or unavailable
+rows. The measured denominator includes first-in-scope baseline calls with zero
+reuse; if no measured follow-up pair exists, the percentage remains Unknown.
+The comparison covers exact captured messages and tool definitions within the
+same run, actor, task, provider, model and credential profile. It is a local
+tokenized-structure estimate; do not label it as the full provider input or a
+cross-profile reuse estimate. The older follow-up message-prefix figure has a
+narrower denominator and must not be substituted for this run-wide measure.
+
+Keep provider-reported cached-input counts and reporting coverage separate from
+local structural reuse. Missing cache fields are unknown, not zero; local
 overlap is not a measured provider cache hit or a billing saving. Reasoning and
 cached-input counts are subsets, not additions to usage.
 

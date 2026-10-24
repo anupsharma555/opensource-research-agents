@@ -8,19 +8,26 @@ it separately checks permissions and executes the selected actions.
 
 from __future__ import annotations
 
-from ora.agents.capabilities import content_hash
+from dataclasses import replace
+
+from ora.agents.capabilities import COMMON_SCHEMAS, Capability, content_hash
 from ora.contracts.models import (
     CancelSearchInput,
     FetchSourceAssetInput,
+    FetchSourceInput,
     InspectFigureInput,
     LegacySavePlanInput,
+    LegacySearchWebInput,
     ListSourceAssetsInput,
     ModifyPlanInput,
     ReadDocumentOCRInput,
     ReadPlanInput,
+    ReadResearchActivityInput,
     ReadSearchResultsInput,
     RenderSourceInput,
+    RetainEvidenceInput,
     SavePlanInput,
+    SearchEvidenceLibraryInput,
     SearchWebInput,
 )
 from ora.retrieval.catalog_tools import CATALOG_TOOL_DESCRIPTIONS, CATALOG_TOOL_SCHEMAS
@@ -54,6 +61,9 @@ CORE_INVITATION_TOOLS = frozenset(
 SOURCE_RECOVERY_TOOLS = frozenset({"read_source_inventory", "select_working_sources"})
 UNHANDLED_COMMON_TOOLS = frozenset({"claim_work", "peer_invite", "subscribe"})
 TOOL_PURPOSES = {
+    "read_research_activity": "See peer research questions, searches, progress and gaps before repeating work",
+    "retain_evidence": "Curate checked permitted evidence for reuse in later missions",
+    "search_evidence_library": "Search retained evidence metadata or select one entry for checked reading",
     "list_source_assets": "Discover source-linked figures from exact retained HTML/XML",
     "fetch_source_asset": "Fetch one discovered public figure image by exact asset reference",
     "read_document_ocr": "Local OCR of one scanned page/image; unverified text",
@@ -73,12 +83,13 @@ TOOL_PURPOSES = {
     "read_tool_result": "Page saved result under current permissions",
     "compact_conversation": "Archive exchanges with a continuation summary",
     "read_conversation_history": "Page archived exchanges under current permissions",
-    "board_read": "List open proposals and optional work",
+    "board_read": "List open proposals, optional work and registered peers when available",
     "claim_work": "Low-level host claim; executor owns claims",
     "discover_capabilities": "List tools, purposes and access",
     "evidence_lookup": "Find current copy's passage IDs and URL",
     "peer_invite": "Low-level invite; use invite_peer",
     "peer_request": "Ask a registered peer",
+    "decline_peer_request": "Decline one directed request addressed to this peer",
     "request_capability": "Select permitted tool for next turn",
     "subscribe": "Low-level host subscription",
     "defer_work": "Defer exact optional proposal",
@@ -100,6 +111,8 @@ TOOL_PURPOSES = {
     "revise_work": "Revise exact current proposal",
     "search_notes": "Find own task notes",
     "search_scholarly": "Scholarly databases or exact DOI/PMID",
+    "search_bheb_corpus": "Optional private behavioral-health corpus search; score ranks leads, not evidence quality",
+    "inspect_bheb_hit": "Check one exact private corpus hit for attributable, permitted source text",
     "write_note": "Save or revise own task note",
     "save_plan": "Create first optional task plan",
     "modify_plan": "Edit existing plan fields/steps",
@@ -119,10 +132,71 @@ ROUTE_ALIASES = {
     "exa": "exa.search",
 }
 MAX_MISSION_SOURCE_WINDOW_CHARS = 16000
+ACTION_PURPOSE_TOOL_IDS = frozenset({"peer_request", "request_capability"})
+ACTION_PURPOSE_FIELD = {
+    "type": ["string", "null"], "maxLength": 160,
+    "description": "Public intended benefit; omit or use null if unavailable. Do not claim results.",
+}
+BOARD_READ_V1_DESCRIPTION = (
+    "List open proposal refs, optional work and current registered peer IDs when available, "
+    "without report or source text. No arguments; topic is unused."
+)
+
+
+def mission_board_read_capability(item: Capability) -> Capability:
+    """Offer argument-free board reads on new mission calls; keep common v1 intact."""
+    if item.tool_id != "board_read":
+        return item
+    if item.version != "1" or item.schema != COMMON_SCHEMAS["board_read"]:
+        raise ValueError("Mission board read needs the exact common v1 tool schema")
+    return replace(item, version="2", schema={
+        "type": "object", "properties": {}, "required": [],
+        "additionalProperties": False,
+    })
+
+
+ACTION_PURPOSE_FIELD_V3 = {
+    "type": ["string", "null"], "maxLength": 512,
+    "description": (
+        "Brief public intended benefit, ideally one or two sentences; omit or use null "
+        "if unavailable. Do not claim results."
+    ),
+}
+
+def mission_action_purpose_capability(item: Capability) -> Capability:
+    """Add a bounded optional action purpose only to new mission call manifests."""
+    if item.tool_id not in ACTION_PURPOSE_TOOL_IDS:
+        return item
+    if item.version != "1" or item.schema != COMMON_SCHEMAS[item.tool_id]:
+        raise ValueError("Mission action purpose needs the exact common v1 tool schema")
+    return replace(item, version="2", schema={
+        **item.schema,
+        "properties": {**item.schema["properties"], "purpose": dict(ACTION_PURPOSE_FIELD)},
+    })
+
+
+def mission_action_purpose_v3_capability(item: Capability) -> Capability:
+    """Widen only new-run common action purposes; keep the v2 contract intact."""
+    if item.tool_id not in ACTION_PURPOSE_TOOL_IDS:
+        return item
+    expected_v2 = {
+        **COMMON_SCHEMAS[item.tool_id],
+        "properties": {
+            **COMMON_SCHEMAS[item.tool_id]["properties"],
+            "purpose": ACTION_PURPOSE_FIELD,
+        },
+    }
+    if item.version != "2" or item.schema != expected_v2:
+        # A historical no-purpose catalog can still be constructed for saved calls.
+        return item
+    return replace(item, version="3", schema={
+        **item.schema,
+        "properties": {**item.schema["properties"], "purpose": dict(ACTION_PURPOSE_FIELD_V3)},
+    })
 
 
 def tool_contract_matches(current: dict, saved: dict) -> bool:
-    """Allow prose-only updates without changing a saved tool's executable contract."""
+    """Match pinned contracts, including narrowly declared additive legacy forms."""
     def without_descriptions(schema: dict) -> dict:
         result = {key: value for key, value in schema.items() if key != "description"}
         if isinstance(result.get("properties"), dict):
@@ -154,11 +228,54 @@ def tool_contract_matches(current: dict, saved: dict) -> bool:
         current_contract, saved_contract = contract(current), contract(saved)
         if current_contract == saved_contract:
             return True
+        if current_contract.get("tool_id") in ACTION_PURPOSE_TOOL_IDS:
+            tool_id = current_contract["tool_id"]
+            version = current_contract.get("version")
+            purpose_schema = without_descriptions(
+                ACTION_PURPOSE_FIELD_V3 if version == "3" else ACTION_PURPOSE_FIELD
+            )
+            expected_current = {
+                **COMMON_SCHEMAS[tool_id],
+                "properties": {
+                    **COMMON_SCHEMAS[tool_id]["properties"], "purpose": purpose_schema,
+                },
+            }
+            return bool(
+                version in {"2", "3"}
+                and current_contract["schema"] == expected_current
+                and saved_contract in (
+                    [{**current_contract, "version": "1", "schema": COMMON_SCHEMAS[tool_id]}]
+                    + ([{**current_contract, "version": "2", "schema": {
+                        **COMMON_SCHEMAS[tool_id],
+                        "properties": {
+                            **COMMON_SCHEMAS[tool_id]["properties"],
+                            "purpose": without_descriptions(ACTION_PURPOSE_FIELD),
+                        },
+                    }}] if version == "3" else [])
+                )
+            )
+        if current_contract.get("tool_id") == "activate_skill":
+            expected_current = {
+                **LEGACY_ACTIVATE_SKILL_SCHEMA,
+                "properties": {
+                    **LEGACY_ACTIVATE_SKILL_SCHEMA["properties"],
+                    "purpose": without_descriptions(ACTION_PURPOSE_FIELD),
+                },
+            }
+            return bool(
+                current_contract.get("version") == "2"
+                and current_contract["schema"] == expected_current
+                and saved_contract == {
+                    **current_contract,
+                    "version": "1",
+                    "schema": LEGACY_ACTIVATE_SKILL_SCHEMA,
+                }
+            )
+        if current_contract.get("tool_id") != "search_web":
+            return False
         # Saved search_web calls before optional refresh was introduced keep
         # their exact old argument schema. The current handler defaults it to
         # false; all other descriptor fields and schema fields must still match.
-        if current_contract.get("tool_id") != "search_web":
-            return False
         schema = current_contract["schema"]
         if (schema.get("properties", {}).get("refresh") != {
                 "title": "Refresh", "type": "boolean",
@@ -183,6 +300,11 @@ def _schema(fields: dict[str, dict], required: list[str]) -> dict:
     }
 
 
+LEGACY_ACTIVATE_SKILL_SCHEMA = _schema(
+    {"skill_id": {"type": "string", "minLength": 1}}, ["skill_id"],
+)
+
+
 def _plan_schema(model) -> dict:
     """Inline canonical plan definitions for the existing bounded tool validator."""
     schema = model.model_json_schema(by_alias=False)
@@ -202,6 +324,10 @@ def _plan_schema(model) -> dict:
 
 
 LEGACY_SAVE_PLAN_SCHEMA = _plan_schema(LegacySavePlanInput)
+PARALLEL_TOOLS = frozenset({"read_research_activity", "retain_evidence", "search_evidence_library"})
+PARALLEL_FETCH_SOURCE_SCHEMA = _plan_schema(FetchSourceInput)
+PARALLEL_SEARCH_WEB_SCHEMA = _plan_schema(SearchWebInput)
+PARALLEL_SEARCH_PURPOSE = "Exa-first web search: quick for one targeted lookup; research for multiple complementary queries. Check peer activity; identical requests share work within this mission."
 LEGACY_SAVE_PLAN_DESCRIPTION = (
     "Save or revise this peer's optional plan. Use expected_version 0 to create "
     "or the current revision to replace the complete plan. No work is scheduled."
@@ -209,12 +335,15 @@ LEGACY_SAVE_PLAN_DESCRIPTION = (
 
 
 TOOL_SCHEMAS = {
+    "read_research_activity": _plan_schema(ReadResearchActivityInput),
+    "retain_evidence": _plan_schema(RetainEvidenceInput),
+    "search_evidence_library": _plan_schema(SearchEvidenceLibraryInput),
     "list_source_assets": _plan_schema(ListSourceAssetsInput),
     "fetch_source_asset": _plan_schema(FetchSourceAssetInput),
     "read_document_ocr": _plan_schema(ReadDocumentOCRInput),
     "inspect_figure": _plan_schema(InspectFigureInput),
     "render_source": _plan_schema(RenderSourceInput),
-    "search_web": _plan_schema(SearchWebInput),
+    "search_web": _plan_schema(LegacySearchWebInput),
     "read_search_results": _plan_schema(ReadSearchResultsInput),
     "cancel_search": _plan_schema(CancelSearchInput),
     "save_plan": _plan_schema(SavePlanInput),
@@ -251,7 +380,13 @@ TOOL_SCHEMAS = {
          "projection_sha256": {"type": "string"}},
         ["archive_id", "cursor", "limit", "projection_sha256"],
     ),
-    "activate_skill": _schema({"skill_id": {"type": "string", "minLength": 1}}, ["skill_id"]),
+    "activate_skill": {
+        **LEGACY_ACTIVATE_SKILL_SCHEMA,
+        "properties": {
+            **LEGACY_ACTIVATE_SKILL_SCHEMA["properties"],
+            "purpose": dict(ACTION_PURPOSE_FIELD),
+        },
+    },
     "release_skill": _schema({"skill_id": {"type": "string", "minLength": 1}}, ["skill_id"]),
     "release_capability": _schema({"tool_id": {"type": "string", "minLength": 1}}, ["tool_id"]),
     "read_tool_result": _schema(
@@ -298,6 +433,25 @@ TOOL_SCHEMAS = {
             },
         },
         ["route", "limit"],
+    ),
+    "search_bheb_corpus": _schema(
+        {"query": {"type": "string", "minLength": 1, "maxLength": 1000},
+         "refresh": {"type": "boolean", "description": "Request a new retrieval instead of reusing an identical saved query. Different query text or filters already create separate searches."},
+         "limit": {"type": "integer", "minimum": 1, "maximum": 10},
+         "filters": {"type": "object", "additionalProperties": False,
+                     "properties": {
+                         **{key: {"type": "string", "minLength": 1, "maxLength": 120}
+                            for key in ("access_posture", "condition", "evidence_axis",
+                                        "evidence_role", "source_type")},
+                         "publication_year": {"type": "integer", "minimum": 1900,
+                                              "maximum": 2100},
+                     }}},
+        ["query"],
+    ),
+    "inspect_bheb_hit": _schema(
+        {"hit_id": {"type": "string", "minLength": 1},
+         "search_operation_id": {"type": "string", "minLength": 1}},
+        ["hit_id", "search_operation_id"],
     ),
     "inspect_hit": _schema({"hit_id": {"type": "string"}}, ["hit_id"]),
     "fetch_source": _schema({"hit_id": {"type": "string"}}, ["hit_id"]),
@@ -388,6 +542,14 @@ TOOL_SCHEMAS = {
             ), "type": ["object", "null"]},
         },
         ["title", "text", "citations", "limitations"],
+    ),
+    "decline_peer_request": _schema(
+        {
+            "request_id": {"type": "string", "minLength": 1},
+            "request_version": {"type": "integer", "minimum": 1},
+            "reason": {"type": "string", "minLength": 1, "maxLength": 500},
+        },
+        ["request_id", "request_version", "reason"],
     ),
     "review_peer_answer": _schema(
         {
@@ -486,6 +648,9 @@ TOOL_SCHEMAS.update(CATALOG_TOOL_SCHEMAS)
 TOOL_SCHEMAS.update(OBSERVATION_TOOL_SCHEMAS)
 
 TOOL_DESCRIPTIONS = {
+    "read_research_activity": "Read a paged snapshot of this mission's peer questions, planned/running searches, progress and remaining gaps. Use it to complement peers' work; this starts no external retrieval. Follow next_request for omitted entries.",
+    "retain_evidence": "Retain selected checked, permitted source copies with a brief relevance note for later missions. This curates evidence; it does not certify scientific conclusions. Candidate search snippets cannot be retained as checked sources.",
+    "search_evidence_library": "Search the local evidence library by query for metadata only, or provide one returned entry_id to select a source for reading. Selection rechecks current permissions and returns exact reader references; it does not fetch the web or send source text automatically.",
     "list_source_assets": "List figure or table images authored in the exact retained HTML/XML source copy. Supply its source_id and source_version. Captions and links are untrusted source content; this makes no network or model call. Only a selected same-task, currently permitted copy can be used.",
     "fetch_source_asset": "Fetch one authored PNG/JPEG by exact asset_ref from list_source_assets. Returns an image document_ref and page-1 reader actions. Request a deferred reader with request_capability first if its schema is not attached. No arbitrary URL; current parent and image use are rechecked.",
     "read_document_ocr": "Recover printed text from one saved PDF page or PNG/JPEG. Supply document_ref from fetch_source or fetch_source_asset and page_number (1 for an image). Optional region isolates known coordinates; layout selects page, block or sparse labels. Preserve next_request when paging. OCR is unverified transcription, not a checked citation or figure interpretation; no vision call occurs.",
@@ -507,12 +672,15 @@ TOOL_DESCRIPTIONS = {
     "current task state and stale-reference markers. No arguments reads the current "
     "plan. The note text contains its structured JSON when current source use permits. "
     "A plan is a continuation aid, not accepted evidence or permission to execute work.",
-    "board_read": "List open proposal refs and optional work, without report or source text. "
-    "No arguments; topic is unused.",
+    "board_read": "List open proposal refs, optional work and current registered peer IDs when available, without report or source text. "
+    "No arguments.",
     "discover_capabilities": "List this role's tools, purposes and current access. Does not enable tools.",
-    "request_capability": "Select an exact request-first tool_id for the next turn; does not execute it. browser_search is native.",
+    "request_capability": "Select an exact request-first local tool_id absent from this request's attached schemas for next turn; call attached tools directly. Does not execute; browser_search is native.",
     "peer_request": "Ask a registered peer by exact instance ID or unique alias/name. "
     "Include brief context and saved refs. Invite absent roles first.",
+    "decline_peer_request": "Decline a directed request addressed to you when you cannot answer it. "
+    "Use the exact request ID and version from incoming_request, and give a brief reason. "
+    "The requester receives your stated reason and chooses how to continue; this does not finish your task.",
     "evidence_lookup": "Look up one inspected source_id among this task's selected source "
     "copies. Returns saved passage IDs and the source URL, without passage text. "
     "Use read_source_window to read the source; report IDs are not source IDs.",
@@ -528,6 +696,8 @@ TOOL_DESCRIPTIONS = {
     "release_capability": "Release exact selected tool_id next turn; core/active-skill tools and saved work remain.",
     "read_tool_result": "Page this task's saved result_id without rerunning it. Follow next_request; empty projection_sha256 starts at offset zero under current permissions.",
     "search_scholarly": "Choose route/limit. Search uses query; exact PMID/DOI uses selected_id; exa.contents uses selected_url. pubmed.abstract returns available text, pubmed.pmid metadata. Europe PMC pages by cursor; PubMed/Crossref by offset. Inspect before citing.",
+    "search_bheb_corpus": "Search the configured private BHEB corpus when relevant to behavioral health, digital interventions, product comparisons, or research/reporting guidance. Coverage is selective; inspect the corpus summary. Query by meaning; filter only on populated attributes. Identical queries reuse saved results; changed queries or filters search separately. Use refresh=true for fresh retrieval. Scores rank leads, not evidence quality. Use inspect_bheb_hit to check source text. No generation call.",
+    "inspect_bheb_hit": "Inspect an exact hit_id and search_operation_id returned by search_bheb_corpus in this task. A vector match is not a citation; checked source passages are returned only if exact source bytes, identity and current model-use permission can be verified. Otherwise treat it as a lead and seek original source text.",
     "inspect_hit": "Inspect retained text by exact hit_id, not source ID, PMID or DOI. Does not fetch missing text. For metadata-only hits use source_text_options or fetch_source. Returns checked passages only when permitted.",
     "fetch_source": "Fetch public HTML/PDF/XML/text by hit_id, not URL. Read selectable text with read_source_window; OCR scans; inspect_figure handles authorized visual questions. Download alone grants no source use.",
     "read_source_window": "Read selectable text from a permitted source copy, including text PDFs; PNG/JPEG images have no text windows. For image labels use read_document_ocr; for a visual question use opt-in inspect_figure. Request either reader with request_capability first if its schema is not attached. Follow next_request for more text.",

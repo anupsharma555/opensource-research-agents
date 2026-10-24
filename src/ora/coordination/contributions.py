@@ -25,7 +25,7 @@ _DISPOSITIONS = {"considered", "used", "challenged", "deferred", "inaccessible"}
 # Uptake is visible to other mission peers. The diagnostic projection defines
 # inspectable record kinds; a few records with a narrow diagnostic projection
 # are nevertheless private inputs rather than shareable scientific references.
-_PRIVATE_REFS = {"restricted_reasoning", "agent_configuration", "agent_call",
+_PRIVATE_REFS = {"restricted_reasoning", "restricted_reasoning_raw", "agent_configuration", "agent_call",
                  "model_request_intent", "model_response_receipt",
                  "model_dispatch_attempt", "agent_handoff"}
 _EVENT_REFS = ("proposal_ref", "dissent_ref", "claim_ref", "outcome_ref",

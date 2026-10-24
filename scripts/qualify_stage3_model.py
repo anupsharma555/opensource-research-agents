@@ -19,6 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from ora.live.provider import DEFAULT_REASONING_EFFORT  # noqa: E402
 from ora.models import CallConfiguration, GroqSelectedAdapter, SourceUse  # noqa: E402
 
 PRIVATE_ROOT = ROOT / ".local" / "stage3" / "model"
@@ -56,7 +57,7 @@ def main() -> int:
                               uuid.uuid4().hex[:8])
     run_dir.mkdir(mode=0o700)
     cfg_hash = hashlib.sha256(json.dumps({"instructions": INSTRUCTIONS,
-        "model": "openai/gpt-oss-120b", "reasoning_effort": "high",
+        "model": "openai/gpt-oss-120b", "reasoning_effort": DEFAULT_REASONING_EFFORT,
         "include_reasoning": True, "max_completion_tokens": MAX_OUTPUT_TOKENS_EACH,
     }, sort_keys=True).encode()).hexdigest()
     config = CallConfiguration("stage3-model-protocol-v1", cfg_hash, INSTRUCTIONS,

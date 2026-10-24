@@ -82,7 +82,7 @@ def test_dependent_tool_turns_keep_settings_ids_and_returned_reasoning(tmp_path:
         sources=(source(),),
     )
     assert second_prepared.body["tools"] == initial.body["tools"]
-    assert second_prepared.body["reasoning_effort"] == "high"
+    assert second_prepared.body["reasoning_effort"] == "medium"
     assert second_prepared.body["include_reasoning"] is True
     assert second_prepared.body["parallel_tool_calls"] is False
     assert second_prepared.body["messages"][-2]["reasoning"] == "Returned reasoning"
@@ -129,6 +129,28 @@ def test_provider_usage_keeps_observed_reasoning_and_cache_breakdowns(tmp_path: 
     assert outcome.usage["prompt_tokens_details"] == {"cached_tokens": 12}
     assert outcome.usage["completion_tokens_details"] == {"reasoning_tokens": 28}
     assert outcome.usage["total_tokens"] == 70  # Breakdowns are subsets, not extra usage.
+    assert outcome.cache_observation == {"status": "reported_hit", "cached_tokens": 12}
+
+
+@pytest.mark.parametrize(("details", "expected"), [
+    ("absent", {"status": "not_reported", "field_presence": "details_absent"}),
+    (None, {"status": "not_reported", "field_presence": "details_null"}),
+    ({}, {"status": "not_reported", "field_presence": "cached_tokens_absent"}),
+    ({"cached_tokens": None}, {"status": "malformed", "field_presence": "cached_tokens_null"}),
+    ("invalid", {"status": "malformed", "field_presence": "details_not_object"}),
+    ({"cached_tokens": -1}, {"status": "malformed", "field_presence": "cached_tokens_invalid"}),
+    ({"cached_tokens": 0}, {"status": "reported_zero", "cached_tokens": 0}),
+])
+def test_decode_records_cache_field_shape_before_usage_normalization(
+    tmp_path: Path, details, expected,
+) -> None:
+    response = reply(calls=[call("tool_1", "A")])
+    if details != "absent":
+        response["usage"]["prompt_tokens_details"] = details
+    adapter = GroqSelectedAdapter(tmp_path)
+    outcome = adapter.decode(prepare(adapter), response)
+    assert outcome.cache_observation == expected
+    assert ("prompt_tokens_details" in outcome.usage) == (details == {"cached_tokens": 0})
 
 
 @pytest.mark.parametrize("value", [None, -1, True, "12", 71])
@@ -151,6 +173,7 @@ def test_reported_zero_usage_details_are_not_treated_as_missing(tmp_path: Path) 
     response["usage"]["prompt_tokens_details"] = {"cached_tokens": 0}
     outcome = adapter.decode(prepare(adapter), response)
     assert outcome.usage["prompt_tokens_details"] == {"cached_tokens": 0}
+    assert outcome.cache_observation == {"status": "reported_zero", "cached_tokens": 0}
     assert "completion_tokens_details" not in outcome.usage
 
 
@@ -189,7 +212,7 @@ def test_unknown_copy_metadata_only_policy_never_sends_bytes(tmp_path: Path) -> 
 
 @pytest.mark.parametrize("change", [
     {"model_id": "other"}, {"endpoint": "https://other.example/v1"},
-    {"reasoning_effort": "medium"}, {"include_reasoning": False},
+    {"reasoning_effort": "low"}, {"include_reasoning": False},
     {"max_completion_tokens": 0},
 ])
 def test_selected_settings_fail_before_dispatch(tmp_path: Path, change: dict) -> None:
@@ -207,6 +230,33 @@ def test_unsupported_reasoning_setting_is_known_at_preflight(tmp_path: Path) -> 
                         call_id="c", attempt_id="a", task_category="collect", phase="collect",
                         messages=[{"role": "user", "content": "Question"}], tools=TOOLS)
     assert rejected.value.reasoning_status == "unsupported"
+
+
+@pytest.mark.parametrize("effort", ["medium", "high"])
+def test_selected_effort_is_serialized_without_changing_explicit_saved_choice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, effort: str,
+) -> None:
+    monkeypatch.setenv("GROQ_API_KEY", "synthetic-token")
+    sent = []
+
+    def fake_open(request, timeout):
+        sent.append(json.loads(request.data))
+        return FakeResponse(reply(content="Synthetic answer", finish="stop"))
+
+    adapter = GroqSelectedAdapter(tmp_path, transport=fake_open)
+    selected = replace(config(), reasoning_effort=effort)
+    prepared = adapter.prepare(
+        selected, call_id=f"call-{effort}", attempt_id=f"attempt-{effort}",
+        task_category="collect", phase="collect",
+        messages=[{"role": "user", "content": "Question"}], tools=TOOLS,
+    )
+    assert prepared.body["reasoning_effort"] == effort
+    assert prepared.manifest()["effective_reasoning_effort"] == effort
+    assert prepared.manifest()["reasoning_effort_basis"] == "selected_configuration"
+    assert adapter.invoke(prepared).status == "complete"
+    assert len(sent) == 1
+    assert sent[0]["reasoning_effort"] == effort
+    assert sent[0]["include_reasoning"] is True
 
 
 def test_phase_and_schema_preflight(tmp_path: Path) -> None:

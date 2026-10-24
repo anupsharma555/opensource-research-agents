@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import unicodedata
 from typing import Callable
 
 from ora.agents.json_shapes import JsonShapeError, finite_json
@@ -17,6 +18,17 @@ from ora.state.store import identifier
 
 class BoardError(StateError):
     """One board action needs repair; other branches remain usable."""
+
+
+def _prose(value: object, field: str) -> None:
+    """Accept ordinary multiline work text while retaining strict IDs."""
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or any(unicodedata.category(char) == "Cc" and char not in "\t\n\r"
+               for char in value)
+    ):
+        raise BoardError(f"{field} needs nonempty text without unsafe controls")
 
 
 def ref(record: dict) -> dict:
@@ -47,6 +59,17 @@ def require_ref(tx: Transaction, mission_id: str, pointer: dict) -> dict:
     if owner != mission_id and not (owner is None and pointer["kind"] in global_kinds):
         raise BoardError("Reference belongs to another mission")
     return record
+
+
+def _reject_cancelled_run_tx(tx: Transaction, mission_id: str) -> None:
+    """Fence only new board work in a mission with a saved operator run stop."""
+    row = tx.db.execute(
+        "SELECT 1 FROM records r JOIN heads h USING(kind,id,version) "
+        "WHERE r.kind='mission_run_cancellation' "
+        "AND json_extract(r.body,'$.mission_id')=? LIMIT 1", (mission_id,),
+    ).fetchone()
+    if row:
+        raise StateConflict("Run was cancelled before board revision")
 
 
 class ProposalBoard:
@@ -100,9 +123,14 @@ class ProposalBoard:
         request.pop("self")
 
         def action(tx: Transaction) -> dict:
+            _reject_cancelled_run_tx(tx, mission_id)
             actor = require_actor(tx, mission_id, actor_id)
-            for value in (proposal_id, objective, expected_artifact, next_action):
-                identifier(value)
+            identifier(proposal_id)
+            for field, value in (
+                ("objective", objective), ("expected_artifact", expected_artifact),
+                ("next_action", next_action),
+            ):
+                _prose(value, field)
             if status not in {"open", "deferred"}:
                 raise BoardError("New work must be open or deferred")
             if tx.get(self.KIND, proposal_id):
@@ -117,6 +145,8 @@ class ProposalBoard:
             branch = tx.get(self.KIND, branch_of) if branch_of else None
             if branch_of and (branch is None or branch["body"]["mission_id"] != mission_id):
                 raise BoardError("Alternative branch target is unavailable")
+            if branch and branch["body"].get("status") == "cancelled":
+                raise BoardError("Cancelled parent cannot open new branch work")
             body = {"mission_id": mission_id, "actor_ref": ref(actor), "objective": objective,
                     "expected_artifact": expected_artifact, "next_action": next_action,
                     "status": status, "prerequisite_refs": [ref(p) for p in prerequisites],
@@ -143,17 +173,20 @@ class ProposalBoard:
         request = {key: value for key, value in locals().items() if key != "self"}
 
         def action(tx: Transaction) -> dict:
+            _reject_cancelled_run_tx(tx, mission_id)
             actor = require_actor(tx, mission_id, actor_id)
             old = tx.get(self.KIND, proposal_id)
             if old is None or old["body"]["mission_id"] != mission_id:
                 raise BoardError("Proposal is unavailable")
+            if old["body"].get("status") == "cancelled":
+                raise BoardError("Cancelled work cannot be revised or reopened")
             identifier(reason)
             if status is not None and status not in {"open", "deferred"}:
                 raise BoardError("Revision state must be open or deferred")
             if objective is not None:
-                identifier(objective)
+                _prose(objective, "objective")
             if next_action is not None:
-                identifier(next_action)
+                _prose(next_action, "next_action")
             evidence = [require_ref(tx, mission_id, p) for p in evidence_refs or []]
             body = {**old["body"], "objective": objective or old["body"]["objective"],
                     "next_action": next_action or old["body"]["next_action"],
@@ -206,13 +239,14 @@ class ProposalBoard:
         request = {key: value for key, value in locals().items() if key != "self"}
 
         def action(tx: Transaction) -> dict:
+            _reject_cancelled_run_tx(tx, mission_id)
             sender = require_actor(tx, mission_id, sender_id)
             recipient = require_actor(tx, mission_id, recipient_id)
             proposal = tx.get(self.KIND, proposal_id)
             if proposal is None or proposal["body"]["mission_id"] != mission_id:
                 raise BoardError("Invitation proposal is unavailable")
-            for value in (objective, expected_artifact):
-                identifier(value)
+            _prose(objective, "objective")
+            _prose(expected_artifact, "expected_artifact")
             prerequisites = [require_ref(tx, mission_id, p) for p in prerequisite_refs or []]
             saved = tx.put("board_invitation", invitation_id, {
                 "mission_id": mission_id, "proposal_ref": ref(proposal),
@@ -238,6 +272,7 @@ class ProposalBoard:
         request = {key: value for key, value in locals().items() if key != "self"}
 
         def action(tx: Transaction) -> dict:
+            _reject_cancelled_run_tx(tx, mission_id)
             require_actor(tx, mission_id, recipient_id)
             old = tx.get("board_invitation", invitation_id)
             if old is None or old["body"]["mission_id"] != mission_id:
@@ -433,17 +468,20 @@ class ProposalBoard:
         request = {key: value for key, value in locals().items() if key != "self"}
 
         def action(tx: Transaction) -> dict:
+            _reject_cancelled_run_tx(tx, mission_id)
             actor = require_actor(tx, mission_id, actor_id)
             affected = require_ref(tx, mission_id, affected_ref)
             contradiction = require_ref(tx, mission_id, contradiction_ref)
             identifier(reason)
-            identifier(next_action)
+            _prose(next_action, "next_action")
             ids = self._affected_proposal_ids(tx, mission_id, affected, reason)
             reopened = []
             for proposal_id in ids:
                 old = tx.get(self.KIND, proposal_id)
                 if old is None or old["body"]["mission_id"] != mission_id:
                     continue
+                if old["body"].get("status") == "cancelled":
+                    continue  # A contradiction cannot undo trusted operator cancellation.
                 saved = tx.put(self.KIND, proposal_id, {
                     **old["body"], "status": "open", "outcome_ref": None,
                     "next_action": next_action,

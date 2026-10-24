@@ -1484,6 +1484,9 @@ class IntakeService:
             "ordinary_document_ref": fetched.get("ordinary_document_ref"),
             "blob": blob,
         }
+        for field in ("shared_fetch_ref", "shared_extraction_ref"):
+            if fetched.get(field) is not None:
+                body[field] = fetched[field]
         record_id = f"public-document-fetch:{operation_id}"
 
         def save(tx: Any) -> dict[str, Any]:
@@ -1552,7 +1555,16 @@ class IntakeService:
         parse_failure = None
         if actual_type in text_types:
             try:
-                blocks, parser = extract_blocks(content, actual_type)
+                shared_extraction_ref = body.get("shared_extraction_ref")
+                if shared_extraction_ref is not None:
+                    from .shared_fetch import checked_extraction
+
+                    blocks, parser, parse_failure = checked_extraction(
+                        self.store, shared_extraction_ref, content, actual_type,
+                        body.get("representation", "ordinary_html"),
+                    )
+                else:
+                    blocks, parser = extract_blocks(content, actual_type)
             except EvidenceError as exc:
                 parse_failure = str(exc)
         visible_text = "\n".join(item.text for item in blocks)

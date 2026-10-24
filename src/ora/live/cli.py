@@ -18,7 +18,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 
-from ora.contracts.models import LiveFollowupRequest, LiveStartRequest
+from ora.contracts.models import (
+    LiveBranchCancelRequest,
+    LiveFollowupRequest,
+    LiveRunCancelRequest,
+    LiveStartRequest,
+    LiveUserInputRequest,
+)
 from ora.credentials import GROQ_CREDENTIAL_ENV_NAMES
 
 CONNECT_STATE_TIMEOUT_SECONDS = 45
@@ -53,10 +59,10 @@ def configure(parser):
 def configure_mission(parser):
     """Expose the same durable commands used by Atlas to terminal callers."""
     actions = parser.add_subparsers(dest="mission_action", required=True)
-    for action in ("start", "followup", "status", "calls"):
+    for action in ("start", "followup", "cancel-branch", "cancel-run", "input", "status", "calls"):
         command = actions.add_parser(action)
         command.add_argument("--state-dir", type=Path, default=Path(".local/live"))
-        if action in {"start", "followup"}:
+        if action in {"start", "followup", "cancel-branch", "cancel-run", "input"}:
             command.add_argument("--input", type=Path, required=True,
                                  help="Saved JSON command with a stable requestId")
         else:
@@ -71,12 +77,24 @@ def mission_main(args, root):
         return main(args, root)
     state_dir = args.state_dir.resolve()
     connection = _connection(state_dir)
-    model = LiveStartRequest if args.mission_action == "start" else LiveFollowupRequest
+    model = {
+        "start": LiveStartRequest,
+        "followup": LiveFollowupRequest,
+        "cancel-branch": LiveBranchCancelRequest,
+        "cancel-run": LiveRunCancelRequest,
+        "input": LiveUserInputRequest,
+    }[args.mission_action]
     try:
         command = model.model_validate_json(args.input.read_text(encoding="utf-8"))
     except ValueError:
         raise ValueError("Invalid mission command; check the saved JSON fields and requestId.") from None
-    path = "/api/live/start" if args.mission_action == "start" else "/api/live/followups"
+    path = {
+        "start": "/api/live/start",
+        "followup": "/api/live/followups",
+        "cancel-branch": "/api/live/branch-cancellations",
+        "cancel-run": "/api/live/run-cancellations",
+        "input": "/api/live/user-inputs",
+    }[args.mission_action]
     request = urllib.request.Request(
         connection["origin"] + path,
         data=command.model_dump_json(by_alias=True).encode(),

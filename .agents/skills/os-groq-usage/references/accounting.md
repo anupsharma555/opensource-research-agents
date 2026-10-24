@@ -49,6 +49,27 @@ to extract daily quota numbers. It returns neither raw error text nor organizati
 IDs. Missing, oversized or invalid error objects leave daily observations unknown.
 It never reads successful model response, reasoning, source or snapshot objects.
 
+## Retry versus full allowance availability
+
+The latest-quota table shows each profile's observed daily limit and usage,
+the timestamp of that evidence, its earliest suggested retry, and a separate
+**Full daily allowance available at** date/time in the selected report timezone.
+The current 429 collector does not receive a full-reset timestamp, so it keeps
+`full_reset_at: null`. The user-requested planning rule adds 24 hours to the latest
+provider observation only when usage is at least 95% of its observed daily limit.
+This means 190K for a 200K limit; it does not use local usage sums or Retry-After.
+The table labels that date **assumed**, while `assumed_full_reset_estimates`
+records its basis, exact observation, threshold, limit, time and unverified status.
+No observation, unknown profile or usage below the threshold yields no estimate.
+Passing the assumed time does not promote it to confirmed capacity, and later
+usage can invalidate it. A future provider-confirmed reset takes display precedence.
+
+Rechecked 22 October 2026: [Groq's rate-limit documentation](https://console.groq.com/docs/rate-limits)
+confirms GPT-OSS-120B's base 200K tokens/day allowance and describes retry headers,
+but does not establish midnight versus a full reset 24 hours after approaching
+the limit. The 24-hour rule here is an explicit planning assumption, not a claim
+that the online review verified it. Updating reports does not schedule a retry.
+
 ## Standalone calls
 
 `--supplement` accepts the repository's existing

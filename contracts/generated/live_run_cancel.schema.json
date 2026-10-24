@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Trusted local operator request to stop one exact saved run.",
+  "properties": {
+    "expectedRunVersion": {
+      "minimum": 1,
+      "title": "Expectedrunversion",
+      "type": "integer"
+    },
+    "reason": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Reason",
+      "type": "string"
+    },
+    "requestId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Requestid",
+      "type": "string"
+    },
+    "runId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Runid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "requestId",
+    "runId",
+    "expectedRunVersion",
+    "reason"
+  ],
+  "title": "LiveRunCancelRequest",
+  "type": "object"
+}

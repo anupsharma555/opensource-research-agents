@@ -88,7 +88,7 @@ the completed snapshot. Older runs lacking the cutoff retain their existing
 behavior; the host does not invent an opening order for them.
 
 The saved run profile and call fix the selected Groq model, endpoint, output
-settings, high reasoning setting, tool descriptors, role instructions, skill
+settings, saved reasoning effort, tool descriptors, role instructions, skill
 versions, and exact input references.
 When a source or registered tool view changes, a new configuration points to
 its predecessor and records the reason; model and reasoning settings stay
@@ -310,7 +310,16 @@ request or answer can reopen the affected peer task, while unaffected peers
 continue. The requesting peer reviews a saved answer explicitly. Peers can save
 a rough latency category without a deadline, or wait on exact unresolved peer
 and proposal dependencies. A changed dependency, explicit wait cycle, or
-stranded wait returns the affected peer to model-directed work. A peer may also
+stranded wait returns the affected peer to model-directed work. An empty saved
+dependency list is inspected too: when no work, timer, search wait or operator
+hold can wake that control, it receives the exact wait diagnosis once. The
+transaction rechecks the control version and run cancellation before releasing
+the wait. It never chooses the scientific continuation. Offline integration
+tests in `tests/mission/test_stranded_wait_resume.py` verify delivery in the next
+serialized model input, restart, a healthy sibling and concurrent holds or
+cancellation. Test fixtures that deliberately pause a peer must use a real saved
+hold or future timer, rather than accidentally constructing this stranded state.
+A peer may also
 choose a positive review interval for its latency expectation. When that interval
 elapses, the host saves one neutral, task-scoped diagnostic for the exact
 expectation version with the current work phase and wait. It does not change the

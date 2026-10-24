@@ -7,7 +7,7 @@ import json
 import pytest
 
 from ora.contracts.models import LiveStartRequest
-from tests.mission.test_service import answer, drain, service, tool
+from tests.mission.test_service import answer, drain, serialized_peer_name, service, tool
 
 
 @pytest.mark.parametrize("publication_mode", ["direct_text", "publish_tool"])
@@ -20,8 +20,8 @@ def test_prepared_guidance_explains_shared_outcome_and_keeps_direct_completion(
         packet = json.loads(request.data)
         packets.append(packet)
         instructions = packet["messages"][0]["content"]
-        assert "publish_result ends your peer task" in instructions
-        assert "required work still governs run closure" in instructions
+        assert "publish_result saves your contribution and closes current work" in instructions
+        assert "Required work still governs run closure" in instructions
         assert "Honor requested roles/outcomes" in instructions
         assert "Read useful peer contributions or seek review" in instructions
         assert "complementary perspective" in instructions
@@ -52,8 +52,7 @@ def test_prepared_guidance_explains_shared_outcome_and_keeps_direct_completion(
         ))
         drain(host, run.run_id)
         assert len(packets) == 2
-        assert len({packet["messages"][0]["content"].split("\n\n")[0]
-                    for packet in packets}) == 2
+        assert {serialized_peer_name(packet) for packet in packets} == {"Sage", "Mxra"}
         assert host._run(run.run_id)["body"]["status"] == "completed"
         assert all(item["body"]["phase"] == "done" for item in host._controls(run.run_id))
         assert len(host.store.records("report")) == 2

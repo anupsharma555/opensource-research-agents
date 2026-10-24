@@ -21,6 +21,14 @@ class HTTPResult:
     headers: dict[str, str]
 
 
+class HTTPDispatchBlocked(RuntimeError):
+    """A local transport guard stopped this request before any HTTP dispatch."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__(reason)
+
+
 def http_transport(
     method: str,
     url: str,

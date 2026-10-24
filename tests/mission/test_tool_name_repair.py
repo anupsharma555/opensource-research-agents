@@ -108,7 +108,7 @@ def test_saved_route_name_400_recovers_through_registered_pmid_tool(tmp_path, mo
             assert discovery_calls[0][0] == "GET"
             assert "id=12345" in discovery_calls[0][1]
             assert {(item["model"], item["reasoning_effort"]) for item in model_requests} == {
-                (MODEL, "high")
+                (MODEL, "medium")
             }
 
             assert resumed.store.get(**ref(failed)) == failed

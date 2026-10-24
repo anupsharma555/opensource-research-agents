@@ -132,7 +132,9 @@ def inspect_waits(store: StateStore, mission_id: str, *, now: float | None = Non
             body.get("phase") == "waiting"
             and not body.get("work_id")
             and body.get("retry_at") is None
-            and body.get("scope_status") != "deferred"
+            and not body.get("operator_credential_hold")
+            and not body.get("search_wait")
+            and body.get("scope_status") not in {"deferred", "cancelled"}
         )
 
     for control in sorted(controls.values(), key=lambda item: item["id"]):
@@ -267,8 +269,8 @@ def inspect_waits(store: StateStore, mission_id: str, *, now: float | None = Non
                 )
                 continue
             if (
-                target["body"].get("phase") in {"done", "deferred"}
-                or target["body"].get("scope_status") == "deferred"
+                target["body"].get("phase") in {"done", "deferred", "cancelled"}
+                or target["body"].get("scope_status") in {"deferred", "cancelled"}
             ):
                 stale.append(
                     {
@@ -306,6 +308,21 @@ def inspect_waits(store: StateStore, mission_id: str, *, now: float | None = Non
         if phase not in {"waiting", "retry_at", "pending_model", "pending_tool"}:
             continue
         pointer = _ref(control)
+        if body.get("operator_credential_hold"):
+            normal.append({
+                "control_ref": pointer,
+                "actor_id": body.get("actor_id"),
+                "kind": "operator_credential_hold",
+            })
+            continue
+        if phase == "waiting" and body.get("search_wait"):
+            normal.append({
+                "control_ref": pointer,
+                "actor_id": body.get("actor_id"),
+                "kind": "saved_search_wait",
+                "operation_ref": body["search_wait"].get("operation_ref"),
+            })
+            continue
         retry_at = body.get("retry_at")
         if (
             phase == "retry_at"

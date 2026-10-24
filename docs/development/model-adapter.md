@@ -9,8 +9,11 @@ manifest, restricted returned reasoning, and outcome under the corresponding
 attempt.
 
 The selected endpoint is `https://api.groq.com/openai/v1/chat/completions` with
-`openai/gpt-oss-120b`. Both phases explicitly send `reasoning_effort=high` and
-`include_reasoning=true`; neither sends `reasoning_format`. A collection request
+`openai/gpt-oss-120b`. New research runs default to `reasoning_effort=medium`;
+both phases send the exact saved effort and `include_reasoning=true`, without
+`reasoning_format`. Existing high-effort configurations remain supported and are
+not rewritten on replay or continuation. Follow-ups inherit their parent's saved
+effort. A collection request
 provides local function definitions, `tool_choice=auto`, and
 `parallel_tool_calls=false`. One response may request one tool. Collection may
 use SSE streaming with `stream_options.include_usage=true`; the adapter assembles
@@ -143,6 +146,53 @@ still owns admission and uncertain-effect reconciliation; a new request requires
 an explicit linked attempt rather than reusing a marked intent. An already
 captured intent returns its saved receipt only when the exact reference and
 request digest match.
+
+## Private provider-reasoning files
+
+For new captured model responses, the host saves the provider-returned reasoning
+for each inference step as an exact UTF-8 text artifact alongside a JSON metadata
+file under the private state directory. These files are separate from the
+redacted `restricted_reasoning` record used by ordinary inspection. A step whose
+response contains no returned reasoning gets JSON metadata with its recorded
+status; no text is inferred or synthesized. Truncated returned reasoning remains
+labelled `truncated` and is only the returned prefix. Provider reasoning describes
+the model's returned text, not verified scientific support for its answer.
+
+To export every saved inference step for an existing mission run, including
+dispatches without a captured response, use an exact run ID and state directory:
+
+```sh
+scripts/dev reasoning-export --state-dir .local/research --run-id RUN_ID
+```
+
+This opens SQLite read-only. It does not start the host, read `.env`, invoke the
+model, or send anything to LangSmith. The default export root is
+`STATE_DIR/reasoning/`; `--output-dir LOCAL_DIRECTORY` selects another local
+filesystem destination. Existing symbolic-link destinations are rejected. The
+command prints only statuses, counts, and paths. It writes a combined
+`reasoning_trace.md` for human inspection, plus `reasoning_trace.json` and
+`reasoning_trace.txt` under the selected run directory. Each saved step has its own
+`reasoning_trace.json` and a text file only when returned text is saved. The
+per-receipt UTF-8 text file preserves the saved bytes; the Markdown file adds
+formatting for reading and must not be used for byte-level comparisons. Read
+these files locally from the private destination when authorized to inspect
+returned reasoning. Authorized private operator run reports can embed the matching
+step text and link the combined Markdown, as defined by `os-run-details`. Keep it
+out of model prompts, public reports, tracked examples, and cloud trace exports.
+
+The JSON includes the saved text when present and identifies the exact run and
+response receipt, agent, provider, model, timestamp, reasoning status, and
+capture fidelity. Treat it as equally private as the text files.
+`provider_exact` marks text captured before redaction; `saved_unredacted` and
+`saved_redacted` describe historical records. An export cannot recover words that
+an older capture already redacted. `unavailable` means there is no saved text to
+reconstruct. `absent`, `unknown`, `unsupported`, `not_requested`, and
+`not_captured` remain distinct from returned
+text. `receipt_count` counts captured responses, while `dispatch_only_count`
+counts local dispatch markers with no captured response; a marker alone does not
+establish an HTTP attempt. `exported_count` counts their
+combined metadata steps. The CLI's `complete`, `partial`, and `no_receipts`
+labels describe export coverage, not research quality or provider success.
 
 ## Verification and live protocol recipe
 

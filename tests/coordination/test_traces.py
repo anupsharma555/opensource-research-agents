@@ -65,6 +65,31 @@ def test_usage_receipts_have_distinct_units_and_are_not_double_counted(tmp_path)
     assert store.get(**summary)["body"]["kind"] == "derived_explanation"
 
 
+def test_exact_provider_reasoning_cannot_enter_ordinary_trace_references(tmp_path):
+    store, journal, context = fixture(tmp_path)
+    blob = store.put_blob(b"Synthetic provider-only reasoning; not a research finding.")
+    raw = store.transact("raw-reasoning-fixture", {}, lambda tx: tx.put(
+        "restricted_reasoning_raw", "raw-reasoning", {
+            "mission_id": "mission", "run_id": "run", "blob": blob,
+            "origin": "provider_returned", "access": "restricted_diagnostics",
+        }), mission_id="mission")
+    pointer = {key: raw[key] for key in ("kind", "id", "version")}
+    for key in ("inputs", "outputs"):
+        with pytest.raises(StateError, match="restricted lookup"):
+            journal.append(f"raw-{key}", context=context, category="model",
+                           status="recorded", action="Record response",
+                           summary="Only public receipt metadata is allowed.",
+                           **{key: [pointer]})
+    with pytest.raises(StateError, match="restricted"):
+        journal.append("raw-relationship", context=context, category="model",
+                       status="recorded", action="Record response", summary="Metadata only.",
+                       relationships=[{"relation": "input_consumed", "reference": pointer}])
+    with pytest.raises(ValueError):
+        journal.summarize("raw-summary", mission_id="mission", summary="Metadata only.",
+                          source_refs=[pointer])
+    assert not store.records("coordination_trace")
+
+
 def test_disconnected_viewer_does_not_hold_writers_and_reconnect_pages_exactly(tmp_path):
     store, journal, context = fixture(tmp_path)
     def append(index):

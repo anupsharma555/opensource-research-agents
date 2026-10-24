@@ -1,0 +1,84 @@
+{
+  "$defs": {
+    "SavedRecordRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "version"
+      ],
+      "title": "SavedRecordRef",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Durable acceptance; an in-flight remote effect may remain unresolved.",
+  "properties": {
+    "cancellationRef": {
+      "$ref": "#/$defs/SavedRecordRef"
+    },
+    "requestId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Requestid",
+      "type": "string"
+    },
+    "reused": {
+      "default": false,
+      "title": "Reused",
+      "type": "boolean"
+    },
+    "runId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Runid",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "cancelled",
+        "cancellation_requested"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "taskId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Taskid",
+      "type": "string"
+    },
+    "taskRef": {
+      "$ref": "#/$defs/SavedRecordRef"
+    }
+  },
+  "required": [
+    "requestId",
+    "runId",
+    "taskId",
+    "status",
+    "cancellationRef",
+    "taskRef"
+  ],
+  "title": "LiveBranchCancelReceipt",
+  "type": "object"
+}

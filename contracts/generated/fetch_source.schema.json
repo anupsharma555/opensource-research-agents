@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "hitId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Hitid",
+      "type": "string"
+    },
+    "refresh": {
+      "default": false,
+      "description": "Request a fresh source version instead of reusing compatible saved bytes.",
+      "title": "Refresh",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "hitId"
+  ],
+  "title": "FetchSourceInput",
+  "type": "object"
+}

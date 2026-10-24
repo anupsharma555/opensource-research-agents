@@ -105,6 +105,17 @@ def service(tmp_path: Path, monkeypatch, transport) -> MissionService:
     )
 
 
+def serialized_peer_name(packet: dict, names=("Sage", "Mxra")) -> str:
+    """Identify the one role paragraph in a serialized developer message."""
+    paragraphs = packet["messages"][0]["content"].split("\n\n")
+    identities = [part for part in paragraphs if part.startswith("You are ")]
+    assert len(identities) == 1
+    for name in names:
+        if identities[0].startswith(f"You are {name},"):
+            return name
+    raise AssertionError("Serialized request has an unexpected peer identity")
+
+
 def drain(host: MissionService, run_id: str, limit: int = 12) -> None:
     for _ in range(limit * 20):
         changed, wake = host._drive_run(host._run(run_id))
@@ -302,7 +313,7 @@ def test_explicit_backup_is_pinned_and_followup_inherits_or_changes_profile(
         assert saved_backup["modelSettings"]["credential_profile"] == "backup"
         assert saved_backup["modelSettings"]["quota_domain"] == "groq-selected"
         assert saved_backup["selectedModel"] == host._run(primary.run_id)["body"]["profile"]["selectedModel"]
-        assert saved_backup["reasoningSettings"]["reasoning_effort"] == "high"
+        assert saved_backup["reasoningSettings"]["reasoning_effort"] == "medium"
         drain(host, backup.run_id)
         assert host._run(backup.run_id)["body"]["status"] == "completed"
         receipts = [
@@ -367,9 +378,9 @@ def test_new_role_names_are_defaults_while_saved_identity_and_role_stay_separate
             name = actor["body"]["display_name"]
             assert name == expected[role_id]
             assert not any(letter in name.lower() for letter in "fl")
-            assert host._configuration(control)["body"]["instructions"].startswith(
-                f"You are {name}, a {role_id.replace('_', ' ')} peer."
-            )
+            paragraphs = host._configuration(control)["body"]["instructions"].split("\n\n")
+            assert sum(part.startswith("You are ") for part in paragraphs) == 1
+            assert f"You are {name}, a {role_id.replace('_', ' ')} peer." in paragraphs
             saved[alias] = name
         summary = next(item for item in host.state(created.run_id).runs if item.id == created.run_id)
         assert summary.requested_agent_names == saved
@@ -392,9 +403,9 @@ def test_new_role_names_are_defaults_while_saved_identity_and_role_stay_separate
         assert host.start(legacy_request).reused is True
         assert host._control(historical.run_id, critic_alias)["body"]["actor_id"] == old_id
         assert host.store.get("agent_instance", old_id, 1)["body"]["display_name"] == "Mira"
-        assert host._configuration(old_control)["body"]["instructions"].startswith(
-            "You are Mira, a independent methods reviewer critic peer."
-        )
+        old_paragraphs = host._configuration(old_control)["body"]["instructions"].split("\n\n")
+        assert sum(part.startswith("You are ") for part in old_paragraphs) == 1
+        assert "You are Mira, a independent methods reviewer critic peer." in old_paragraphs
         recipient, requested = host.work._recipient(
             host._run(historical.run_id), critic_alias, "synthetic-invitation"
         )
@@ -746,7 +757,7 @@ def test_two_model_tool_turns_use_saved_result_and_new_permits(tmp_path, monkeyp
     assert len(host.store.records("executor_receipt")) == 4  # model and tool each settle
     assert len(snapshot.artifacts) == 1
     assert requests[0]["model"] == requests[1]["model"] == MODEL
-    assert requests[0]["reasoning_effort"] == requests[1]["reasoning_effort"] == "high"
+    assert requests[0]["reasoning_effort"] == requests[1]["reasoning_effort"] == "medium"
     assert any(
         item["role"] == "tool" and "discover_capabilities" in item["content"]
         for item in requests[1]["messages"]
@@ -818,7 +829,7 @@ def test_fast_peer_next_model_turn_proceeds_while_sibling_call_is_held(tmp_path,
     def transport(request, *, timeout):
         nonlocal sage_calls
         body = json.loads(request.data)
-        if "Mxra" in body["messages"][0]["content"]:
+        if serialized_peer_name(body) == "Mxra":
             slow_started.set()
             assert release_slow.wait(5)
             return answer("Mxra's independent contribution.", 30)
@@ -836,6 +847,11 @@ def test_fast_peer_next_model_turn_proceeds_while_sibling_call_is_held(tmp_path,
         ROOT, tmp_path, model_session=session, execution_mode="offline_test", start_supervisor=True
     )
     try:
+        host.capacity.observe_headers(
+            "groq-selected", remaining_requests=100, remaining_tokens=50000,
+            token_limit=50000, reset_after=60,
+            observation_id="known-parallel-headroom",
+        )
         receipt = host.start(
             LiveStartRequest(
                 request_id="mission-fast-while-slow",
@@ -1149,7 +1165,7 @@ def test_requested_tool_exposure_survives_host_restart(tmp_path, monkeypatch):
     assert resumed.state(receipt.run_id).snapshot.mission.status == "completed"
     assert "write_note" in {item["function"]["name"] for item in requests[2]["tools"]}
     assert requests[2]["model"] == requests[0]["model"]
-    assert requests[2]["reasoning_effort"] == requests[0]["reasoning_effort"] == "high"
+    assert requests[2]["reasoning_effort"] == requests[0]["reasoning_effort"] == "medium"
     assert resumed.store.get("working_note", "selected-tool-note") is not None
 
 
@@ -1161,9 +1177,7 @@ def test_bad_tool_action_is_local_and_other_peer_can_finish(tmp_path, monkeypatc
     def transport(request, *, timeout):
         body = json.loads(request.data)
         requests.append(body)
-        instructions = body["messages"][0]["content"]
-        assert instructions.startswith(("You are Sage,", "You are Mxra,"))
-        role = "critique" if instructions.startswith("You are Mxra,") else "synthesis"
+        role = "critique" if serialized_peer_name(body) == "Mxra" else "synthesis"
         with lock:
             counts[role] += 1
             count = counts[role]
@@ -1671,7 +1685,7 @@ def test_window_preview_pressure_still_prepares_exact_checked_source_input(
         ]
         call = host.store.get(**prepared_call)
         assert call["body"]["model_id"] == requests[0]["model"]
-        assert call["body"]["reasoning_settings"]["reasoning_effort"] == "high"
+        assert call["body"]["reasoning_settings"]["reasoning_effort"] == "medium"
     finally:
         host.close()
 
@@ -2314,12 +2328,12 @@ def test_explicit_peer_wait_resumes_for_answer_review(tmp_path, monkeypatch):
     def transport(request, *, timeout):
         nonlocal reviewed
         body = json.loads(request.data)
-        role = "Sage" if "Sage" in body["messages"][0]["content"] else "Mxra"
+        role = serialized_peer_name(body)
         with lock:
             counts[role] += 1
             count = counts[role]
         if role == "Mxra":
-            release_mira.wait(5)
+            assert release_mira.wait(30), "Sage did not reach its saved dependency wait"
             return tool(
                 "publish_result",
                 {
@@ -2400,6 +2414,11 @@ def test_explicit_peer_wait_resumes_for_answer_review(tmp_path, monkeypatch):
         )
 
     host = service(tmp_path, monkeypatch, transport)
+    host.capacity.observe_headers(
+        "groq-selected", remaining_requests=100, remaining_tokens=50000,
+        token_limit=50000, reset_after=60,
+        observation_id="peer-wait-parallel-headroom",
+    )
     receipt = host.start(
         LiveStartRequest(
             request_id="mission-explicit-peer-wait",
@@ -2408,14 +2427,24 @@ def test_explicit_peer_wait_resumes_for_answer_review(tmp_path, monkeypatch):
         )
     )
     try:
-        for _ in range(250):
+        # The independent executor may finish after several host polls under
+        # full-suite load; wait for the saved dependency, not a poll count.
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
             host._drive_run(host._run(receipt.run_id))
             sage = host._control(receipt.run_id, "agent-synthesis")
             if sage["body"]["phase"] == "waiting" and sage["body"].get("wait_for"):
                 break
-            time.sleep(0.01)
+            time.sleep(0.05)
         else:
-            pytest.fail("Sage did not save an exact dependency wait")
+            sage = host._control(receipt.run_id, "agent-synthesis")
+            work = host._work_for(sage) if sage["body"].get("work_id") else None
+            pytest.fail(
+                "Sage did not save an exact dependency wait: "
+                f"control_version={sage['version']}, phase={sage['body']['phase']}, "
+                f"work_phase={work['body']['phase'] if work else None}, "
+                f"model_calls={counts}, mail_requests={len(host.store.records('mail_request'))}"
+            )
         assert len(host.store.records("mission_wait_decision")) == 1
         assert host._run(receipt.run_id)["body"]["status"] == "active"
     finally:
@@ -2688,7 +2717,7 @@ def test_late_peer_request_reopens_recipient_and_requester_reviews_answer(tmp_pa
 
     def transport(request, *, timeout):
         body = json.loads(request.data)
-        role = "Sage" if "Sage" in body["messages"][0]["content"] else "Mxra"
+        role = serialized_peer_name(body)
         with lock:
             counts[role] += 1
             index = counts[role]
@@ -2703,7 +2732,13 @@ def test_late_peer_request_reopens_recipient_and_requester_reviews_answer(tmp_pa
             )
         if role == "Mxra" and index == 2:
             context = json.loads(body["messages"][-1]["content"])
-            assert any(item["type"] == "request" for item in context["details"])
+            saved_request = host.store.records("mail_request")[0]
+            incoming = context["incoming_request"]
+            assert incoming["ref"] == ref(saved_request)
+            assert incoming["recipient_id"] == host._control(
+                receipt.run_id, "agent-critique",
+            )["body"]["actor_id"]
+            assert incoming["question"] == "Check the provisional answer"
             return tool(
                 "publish_result",
                 {
@@ -2754,7 +2789,7 @@ def test_partly_answered_peer_request_gets_second_answer_and_review(tmp_path, mo
 
     def transport(request, *, timeout):
         body = json.loads(request.data)
-        role = "Sage" if "Sage" in body["messages"][0]["content"] else "Mxra"
+        role = serialized_peer_name(body)
         with lock:
             counts[role] += 1
             index = counts[role]
@@ -3062,7 +3097,7 @@ def test_length_cutoff_resumes_saved_work_without_publishing_fragments(
     drain(resumed, receipt.run_id, limit=20)
     assert resumed._run(receipt.run_id)["body"]["status"] == "completed"
     assert len(calls) == cutoff_count + 1
-    assert all(item["model"] == MODEL and item["reasoning_effort"] == "high" for item in calls)
+    assert all(item["model"] == MODEL and item["reasoning_effort"] == "medium" for item in calls)
     assert len(resumed.store.records("report")) == 1
     responses = resumed.store.records("model_response_receipt")
     assert sum(item["body"]["status"] == "partial" for item in responses) == cutoff_count
@@ -3406,7 +3441,7 @@ def test_restart_repairs_saved_413_with_observed_input_allowance(tmp_path, monke
 
 
 @pytest.mark.parametrize("with_limit_header", [True, False])
-def test_413_soft_target_escalation_needs_a_smaller_exact_request(
+def test_413_above_soft_escalation_needs_a_smaller_exact_request(
     tmp_path, monkeypatch, with_limit_header
 ):
     sent = []
@@ -3456,15 +3491,21 @@ def test_413_soft_target_escalation_needs_a_smaller_exact_request(
         rejected_input = host.store.read_blob(failed_intent["body"]["blob"]["sha256"])
         rejected_tokens = estimate_request_tokens(rejected_input).tokens
         assert 3200 < rejected_tokens < 8000
-        # Force an above-soft retry while retaining the exact 413 receipt.
+        # Force an above-soft repair while retaining the exact 413 receipt.
         host._update_control(
             repaired, phase="ready_model", retry_at=None,
             input_budget={**repaired["body"]["input_budget"], "target_fraction": .4},
         )
-        with pytest.raises(ContextOverflow):
-            host._schedule_model(host._control(receipt.run_id, "agent-synthesis"))
+        assert host._schedule_model(host._control(receipt.run_id, "agent-synthesis"))
         assert len(sent) == 1
-        assert len(host.store.records("model_request_intent")) == 1
+        intents = host.store.records("model_request_intent")
+        assert len(intents) == 2
+        candidate = next(item for item in intents if item["id"] != failed_intent["id"])
+        candidate_input = host.store.read_blob(candidate["body"]["blob"]["sha256"])
+        assert len(candidate_input) < len(rejected_input)
+        assert estimate_request_tokens(candidate_input).tokens < rejected_tokens
+        assert estimate_request_tokens(candidate_input).tokens < 8000
+        assert candidate["body"]["request_sha256"] != failed_intent["body"]["request_sha256"]
         assert host._control(receipt.run_id, "agent-synthesis")["body"][
             "input_budget"
         ]["target_fraction"] == .4
@@ -3472,7 +3513,7 @@ def test_413_soft_target_escalation_needs_a_smaller_exact_request(
         host.close()
 
 
-def test_confirmed_413_requires_soft_fit_and_smaller_serialized_input():
+def test_confirmed_413_above_soft_needs_observed_bound_and_exact_shrink():
     rejected = {
         "rejected_sha256": "old",
         "rejected_bytes": 21_398,
@@ -3484,6 +3525,16 @@ def test_confirmed_413_requires_soft_fit_and_smaller_serialized_input():
         "candidate_tokens": 4_336,
     }
     assert not _shrinks_confirmed_413(**rejected, **candidate, above_soft_target=True)
+    assert not _shrinks_confirmed_413(
+        **rejected, **candidate, above_soft_target=True,
+        observed_limit_tokens="4337",
+    )
+    assert _shrinks_confirmed_413(
+        **rejected, **candidate, above_soft_target=True, observed_limit_tokens=4_337,
+    )
+    assert not _shrinks_confirmed_413(
+        **rejected, **candidate, above_soft_target=True, observed_limit_tokens=4_336,
+    )
     assert _shrinks_confirmed_413(**rejected, **candidate, above_soft_target=False)
     assert not _shrinks_confirmed_413(
         **rejected, **{**candidate, "candidate_tokens": 4_378}, above_soft_target=False
@@ -3543,7 +3594,7 @@ def test_prior_completion_forecast_does_not_reject_an_untried_request(tmp_path, 
         assert budget["rate_admission_policy"] == "provider_feedback_probe"
         assert budget["estimated_tokens_with_completion_reservation"] > 8000
         assert packet["max_completion_tokens"] == 8192
-        assert packet["reasoning_effort"] == "high"
+        assert packet["reasoning_effort"] == "medium"
         assert any(m.get("name") == "discover_capabilities" for m in packet["messages"])
         assert not any(item["body"].get("category") == "local_token_rate_reservation"
                        for item in host.store.records("mission_host_diagnostic"))
@@ -3695,6 +3746,104 @@ def test_old_context_repair_does_not_churn_when_preparation_still_fails(tmp_path
     assert current["body"]["phase"] == "waiting"
     assert current["body"]["preparation_repair_attempted_for"] == ref(budget_ref)
     assert current["version"] == 4  # Initial, waiting, one repair, one failed retry.
+    assert host.store.records("model_response_receipt") == []
+
+
+@pytest.mark.parametrize("saved_budget", [False, True])
+@pytest.mark.parametrize("stale_wait_decision", [False, True])
+def test_current_context_preparation_failure_stays_local_without_peer_replan(
+    tmp_path, monkeypatch, saved_budget, stale_wait_decision,
+):
+    def forbidden_transport(*_args, **_kwargs):
+        raise AssertionError("Local preparation failure must not dispatch a provider call")
+
+    host = service(tmp_path, monkeypatch, forbidden_transport)
+    receipt = host.start(LiveStartRequest(
+        request_id=f"local-context-preparation-{saved_budget}",
+        question="Keep local preparation separate from peer waits",
+        agent_ids=["agent-synthesis"],
+    ))
+    control = host._control(receipt.run_id, "agent-synthesis")
+    if stale_wait_decision:
+        host._update_control(
+            control, wait_for=[],
+            wait_decision_ref={
+                "kind": "mission_wait_decision", "id": "obsolete", "version": 1,
+            },
+        )
+        control = host._control(receipt.run_id, "agent-synthesis")
+    call_id, _ = host._model_ids(control, 1)
+    if saved_budget:
+        host._save(
+            "mission_call_budget", call_id,
+            {
+                "mission_id": control["body"]["mission_id"],
+                "run_id": receipt.run_id,
+                "estimator_version": ESTIMATOR_VERSION,
+                "packer_version": PACKER_VERSION,
+            },
+            mission_id=control["body"]["mission_id"],
+        )
+
+    def failed_preparation(_control):
+        raise ContextOverflow("Synthetic local preparation cannot fit")
+
+    monkeypatch.setattr(host, "_schedule_model", failed_preparation)
+    for _ in range(6):
+        host._drive_run(host._run(receipt.run_id))
+    current = host._control(receipt.run_id, "agent-synthesis")
+    assert current["version"] == control["version"] + 1
+    assert current["body"]["phase"] == "waiting"
+    assert current["body"]["local_host_wait"] == {
+        "category": "host_local_failure", "call_id": call_id,
+        "sequence": 1, "error_class": "ContextOverflow",
+    }
+    assert (current["body"].get("feedback") or {}).get("status") != "wait_needs_peer_replan"
+    assert host.store.records("model_response_receipt") == []
+
+    # A later model turn must not inherit this local wait classification.
+    host._update_control(current, sequence=1, waiting_reason="No future wake was recorded")
+    later = host._control(receipt.run_id, "agent-synthesis")
+    assert host._resume_explicit_wait(later)
+    assert host._control(receipt.run_id, "agent-synthesis")["body"]["feedback"]["status"] == (
+        "wait_needs_peer_replan"
+    )
+
+
+@pytest.mark.parametrize("failure", ["ValueError", "StateError", "operation_conflict"])
+def test_host_local_failure_does_not_become_peer_replan(tmp_path, monkeypatch, failure):
+    from ora.state import StateConflict, StateError
+
+    def forbidden_transport(*_args, **_kwargs):
+        raise AssertionError("Local host failure must not dispatch a provider call")
+
+    host = service(tmp_path, monkeypatch, forbidden_transport)
+    receipt = host.start(LiveStartRequest(
+        request_id=f"local-host-failure-{failure}",
+        question="Keep a host failure separate from peer waits",
+        agent_ids=["agent-synthesis"],
+    ))
+    control = host._control(receipt.run_id, "agent-synthesis")
+    call_id, _ = host._model_ids(control, 1)
+
+    def fail_locally(_control):
+        if failure == "operation_conflict":
+            raise StateConflict("Operation ID was already used with different inputs")
+        if failure == "StateError":
+            raise StateError("Synthetic local state failure")
+        raise ValueError("Synthetic local value failure")
+
+    monkeypatch.setattr(host, "_schedule_model", fail_locally)
+    for _ in range(6):
+        host._drive_run(host._run(receipt.run_id))
+    current = host._control(receipt.run_id, "agent-synthesis")
+    assert current["version"] == 2
+    assert current["body"]["phase"] == "waiting"
+    assert current["body"]["local_host_wait"] == {
+        "category": "host_local_failure", "call_id": call_id, "sequence": 1,
+        "error_class": "StateConflict" if failure == "operation_conflict" else failure,
+    }
+    assert (current["body"].get("feedback") or {}).get("status") != "wait_needs_peer_replan"
     assert host.store.records("model_response_receipt") == []
 
 
@@ -4322,7 +4471,7 @@ def test_numeric_pmid_selected_id_is_in_prepared_schema_and_exact_fetch(
                   if item["function"]["name"] == "search_scholarly")
     assert search["parameters"]["properties"]["selected_id"]["type"] == ["string", "integer", "null"]
     assert "query" not in search["parameters"]["required"]
-    assert prepared["reasoning_effort"] == "high"
+    assert prepared["reasoning_effort"] == "medium"
     drain(host, run.run_id)
     message = json.loads(host.store.read_blob(
         host.store.records("context_tool_result")[0]["body"]["blob"]["sha256"]
@@ -4573,7 +4722,7 @@ def test_prepared_publish_schema_tracks_saved_participation_policy(
                        if item["function"]["name"] == "publish_result")
         assert ("scope_completion" in publish["parameters"]["properties"]) == (policy == 2)
         assert ("For this saved participation policy" in publish["description"]) == (policy == 1)
-        assert prepared["reasoning_effort"] == "high"
+    assert prepared["reasoning_effort"] == "medium"
 
 
 @pytest.mark.parametrize("name,args,expected_field", [

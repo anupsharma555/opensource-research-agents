@@ -17,7 +17,7 @@ from ora.mission import MissionService
 from ora.models import GroqSelectedAdapter, ModelSession
 from ora.retrieval.providers import HTTPResult
 from ora.state import StateStore
-from tests.mission.test_service import MODEL, ROOT, answer, drain, tool
+from tests.mission.test_service import MODEL, ROOT, answer, drain, serialized_peer_name, tool
 
 CASE = json.loads((ROOT / "benchmarks/stage4/fixtures/instruction-bearing-abstract.json").read_text())
 
@@ -32,12 +32,12 @@ def test_source_instructions_do_not_change_authority_or_stop_independent_work(
 
     def model_transport(request, *, timeout):
         body = json.loads(request.data)
-        role = "sibling" if body["messages"][0]["content"].startswith("You are Mxra,") else "reader"
+        role = "sibling" if serialized_peer_name(body) == "Mxra" else "reader"
         with lock:
             sent[role].append(body)
             ordinal = len(sent[role])
         assert body["model"] == MODEL
-        assert body["reasoning_effort"] == "high"
+        assert body["reasoning_effort"] == "medium"
         assert body["include_reasoning"] is True
         assert CASE["unapproved_tool"] not in {item["function"]["name"] for item in body["tools"]}
         privileged = [item for item in body["messages"] if item["role"] in {"system", "developer"}]

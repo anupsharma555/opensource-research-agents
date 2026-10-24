@@ -12,7 +12,7 @@ import json
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from ora.agents.capabilities import content_hash
 from ora.agents.configuration import (
@@ -23,10 +23,11 @@ from ora.agents.configuration import (
 from ora.coordination.traces import TraceContext, TraceJournal, ref
 from ora.evidence.library import EvidenceError
 from ora.evidence.local_text_quality import attest_local_text_quality_tx
+from ora.retrieval.providers import HTTPDispatchBlocked
 from ora.retrieval.redact import redact_text
 from ora.state import StateStore
 from ora.state.source_lineage import inherited_public_source
-from ora.state.store import canonical
+from ora.state.store import Transaction, canonical
 
 from .groq import (
     MODEL,
@@ -38,14 +39,20 @@ from .groq import (
     PreparedCall,
     SourceUse,
 )
+from .reasoning_artifacts import (
+    export_receipt_reasoning,
+    record_export_failure,
+)
 from .token_estimate import (
     LEGACY_BASIS,
     TOKENIZER_BASIS,
     TOKENIZER_BASIS_V1,
     TOKENIZER_BASIS_V2,
+    TOKENIZER_BASIS_V3,
     TokenEstimateUnavailable,
     estimate_request_tokens,
 )
+from .token_measurement import measure_tokens
 
 
 class SessionError(ValueError):
@@ -420,7 +427,9 @@ class ModelSession:
             or set(settings) - {"max_completion_tokens", "stream", "unknown_source_policy",
                                 "response_format", "credential_profile", "quota_domain"}
             or type(reasoning) is not dict
-            or reasoning != {"reasoning_effort": "high", "include_reasoning": True}):
+            or set(reasoning) != {"reasoning_effort", "include_reasoning"}
+            or reasoning.get("reasoning_effort") not in ("medium", "high")
+            or reasoning.get("include_reasoning") is not True):
             raise SessionError("Saved model settings are unsupported or unpinned")
         if (type(settings.get("max_completion_tokens")) is not int
             or type(settings.get("stream")) is not bool):
@@ -540,7 +549,7 @@ class ModelSession:
         descriptors = call["body"].get("permitted_tools", {})
         if not isinstance(selected, list) or len(selected) != len(set(selected)):
             raise SessionError("Saved tool exposure is invalid")
-        result = []
+        validated = []
         for name in selected:
             descriptor = descriptors.get(name)
             if (not isinstance(descriptor, dict) or descriptor.get("tool_id") != name
@@ -554,10 +563,28 @@ class ModelSession:
                         "additionalProperties": False,
                     }):
                     raise SessionError("Saved browser_search descriptor is invalid")
-                result.append({"type": "browser_search"})
+                validated.append((name, descriptor))
                 continue
             if descriptor.get("execution_model") == "provider_builtin":
                 raise SessionError("Unsupported provider built-in tool")
+            validated.append((name, descriptor))
+        # Presentation order changes no grants: every pinned descriptor above
+        # is checked before the exact selected set is serialized for the model.
+        stable = {
+            "discover_capabilities": 0, "request_capability": 1,
+            "publish_result": 2, "read_context_page": 3,
+        }
+        ordered = (
+            validated if any(name == "browser_search" for name, _ in validated)
+            else sorted(validated, key=lambda item: (
+                0, stable[item[0]]
+            ) if item[0] in stable else (1, item[0]))
+        )
+        result = []
+        for name, descriptor in ordered:
+            if name == "browser_search":
+                result.append({"type": "browser_search"})
+                continue
             result.append({"type": "function", "function": {
                 "name": name, "parameters": descriptor["schema"],
                 **({"description": descriptor["description"]} if descriptor.get("description") else {}),
@@ -629,6 +656,7 @@ class ModelSession:
                 parent_call_ref: dict[str, Any] | None = None,
                 context_source_dependency_refs: tuple[dict[str, Any], ...] = (),
                 request_token_estimate: dict[str, Any] | None = None,
+                research_activity_digest: dict[str, Any] | None = None,
                 ) -> SessionPrepared:
         call, config, _actor = self._selection(call_id, call_version)
         prepared, selected, unknown_policy = self._prepare_request(
@@ -662,6 +690,15 @@ class ModelSession:
                         quota_domain=selected.quota_domain)
         if request_token_estimate is not None:
             body["request_token_estimate"] = request_token_estimate
+        if research_activity_digest is not None:
+            if not any(
+                isinstance(message.get("content"), str)
+                and canonical({"authority": "saved_peer_research_activity_not_source_instruction",
+                               "research_activity_digest": research_activity_digest}) == message["content"]
+                for message in messages
+            ):
+                raise SessionError("Research activity metadata differs from model input")
+            body["research_activity_digest"] = research_activity_digest
         intent_id = f"model-intent:{call_id}:{call_version}"
 
         def save(tx):
@@ -723,7 +760,8 @@ class ModelSession:
                 or set(saved) != {"tokens", "basis", "asset_sha256", "fallback_reason"}
                 or type(saved.get("tokens")) is not int
                 or saved.get("basis") not in {
-                    LEGACY_BASIS, TOKENIZER_BASIS_V1, TOKENIZER_BASIS_V2, TOKENIZER_BASIS,
+                    LEGACY_BASIS, TOKENIZER_BASIS_V1, TOKENIZER_BASIS_V2,
+                    TOKENIZER_BASIS_V3, TOKENIZER_BASIS,
                 }):
             raise SessionError("Saved request token estimate is invalid")
         try:
@@ -824,10 +862,16 @@ class ModelSession:
                                     if outcome.reasoning is not None else (None, False))
         reasoning_blob = (self.store.put_blob(safe_reasoning.encode())
                           if safe_reasoning is not None else None)
+        raw_reasoning_blob = (self.store.put_blob(outcome.reasoning.encode("utf-8"))
+                              if outcome.reasoning is not None else None)
+        raw_reasoning_ref = ({"kind": "restricted_reasoning_raw",
+                              "id": f"model-reasoning-raw:{intent['id']}", "version": 1}
+                             if raw_reasoning_blob is not None else None)
         reasoning_ref = {"kind": "restricted_reasoning",
                          "id": f"model-reasoning:{intent['id']}", "version": 1}
         reasoning_body = {**asdict(context), "schema": "ora.reasoning.v1",
                           "status": outcome.reasoning_status, "blob": reasoning_blob,
+                          "raw_ref": raw_reasoning_ref,
                           "redacted": bool(redacted), "origin": "provider_returned",
                           "access": "restricted_diagnostics"}
         private_payload = {"content": outcome.content, "tool_calls": outcome.tool_calls}
@@ -856,6 +900,11 @@ class ModelSession:
             "partial_response_sha256": (_sha(outcome.partial_response)
                                         if outcome.partial_response is not None else None),
             "usage": outcome.usage, "cache_observation": outcome.cache_observation,
+            "token_measurement": measure_tokens(
+                estimate=body.get("request_token_estimate"), usage=outcome.usage,
+                http_status=outcome.http_status, provider_error=outcome.provider_error,
+                model=prepared.request.body["model"],
+            ),
             "rate_headers": outcome.rate_headers,
             "timings": outcome.timings, "error_kind": outcome.error_kind,
             "http_status": outcome.http_status,
@@ -873,9 +922,27 @@ class ModelSession:
             saved_intent = tx.get(**intent_ref)
             if saved_intent != intent:
                 raise SessionError("Prepared request intent changed before capture")
+            raw_record = None
+            if raw_reasoning_ref is not None:
+                raw_record = tx.put("restricted_reasoning_raw", raw_reasoning_ref["id"],
+                                    {"schema": "ora.reasoning_raw.v1",
+                                     "mission_id": body["mission_id"],
+                                     "run_id": context.run_id,
+                                     "intent_ref": intent_ref,
+                                     "request_sha256": body["request_sha256"],
+                                     "call_ref": body["call_ref"],
+                                     "instance_id": body["instance_id"],
+                                     "attempt_id": body["attempt_id"],
+                                     "blob": raw_reasoning_blob,
+                                     "origin": "provider_returned",
+                                     "access": "restricted_diagnostics"})
+                if ref(raw_record) != raw_reasoning_ref:
+                    raise SessionError("Raw reasoning reference changed")
             reasoning_record = tx.put("restricted_reasoning", reasoning_ref["id"], reasoning_body)
             if ref(reasoning_record) != reasoning_ref:
                 raise SessionError("Restricted reasoning reference changed")
+            if raw_record is not None:
+                tx.link(reasoning_record, raw_record, "has_exact_provider_text")
             receipt = tx.put("model_response_receipt", receipt_id, receipt_body)
             tx.link(receipt, saved_intent, "responds_to")
             tx.link(receipt, reasoning_record, "has_restricted_reasoning")
@@ -902,10 +969,18 @@ class ModelSession:
             )
             return ref(receipt)
 
-        return self.store.transact(f"model-response-save:{intent['id']}", receipt_body, save,
-                                   mission_id=body["mission_id"])
+        saved_ref = self.store.transact(f"model-response-save:{intent['id']}", receipt_body, save,
+                                       mission_id=body["mission_id"])
+        try:
+            export_receipt_reasoning(self.store, saved_ref)
+        except Exception as exc:
+            record_export_failure(self.store, saved_ref, exc)
+        return saved_ref
 
-    def invoke_capture(self, intent_ref: dict[str, Any]) -> dict:
+    def invoke_capture(
+        self, intent_ref: dict[str, Any], *,
+        pre_dispatch_check: Callable[[Transaction, dict], None] | None = None,
+    ) -> dict:
         """Executor callback after the host has admitted this exact call."""
         _exact_ref(intent_ref, "model_request_intent")
         prepared = self.load(intent_ref)
@@ -991,6 +1066,8 @@ class ModelSession:
                 except EvidenceError as exc:
                     raise SessionError(str(exc)) from exc
             _check_visible_shared_materials(tx, saved_intent, prepared.request.body)
+            if pre_dispatch_check is not None:
+                pre_dispatch_check(tx, saved_intent)
             saved = tx.put("model_dispatch_attempt", marker_id,
                            {**marker_body, "source_use_refs": policy_refs})
             tx.link(saved, saved_intent, "attempts_request")
@@ -1002,5 +1079,27 @@ class ModelSession:
                                        mark, mission_id=marker_body["mission_id"])
         if "receipt_ref" in decision:
             return decision["receipt_ref"]
-        outcome = self.adapter.invoke(prepared.request)
+        try:
+            outcome = self.adapter.invoke(prepared.request)
+        except HTTPDispatchBlocked:
+            # The transport guard has confirmed that the opener was never
+            # entered. Keep that proof on the exact dispatch marker so the
+            # host can release its reservation without inventing a response.
+            def mark_blocked(tx):
+                marker = tx.get("model_dispatch_attempt", marker_id)
+                if (marker is None or marker["body"].get("intent_ref") != intent_ref
+                    or marker["body"].get("request_sha256") != prepared.request.request_sha256
+                    or marker["body"].get("status") != "attempted_external_effect"
+                    or tx.get("model_response_receipt", f"model-response:{intent['id']}") is not None):
+                    raise DispatchUncertain("Model dispatch changed during local admission")
+                blocked = tx.put("model_dispatch_attempt", marker_id,
+                                 {**marker["body"], "status": "blocked_before_external_effect"},
+                                 expected_version=marker["version"])
+                tx.link(blocked, marker, "derived_from")
+                return ref(blocked)
+
+            self.store.transact(f"model-dispatch-blocked:{intent['id']}",
+                                {"intent_ref": intent_ref}, mark_blocked,
+                                mission_id=marker_body["mission_id"])
+            raise
         return self.capture(intent_ref, outcome)

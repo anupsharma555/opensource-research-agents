@@ -12,6 +12,7 @@ from collections import Counter
 from datetime import datetime
 from typing import Any
 
+from ora.models.token_measurement import read_token_measurement
 from ora.observability.evaluation import read_evaluation_observation
 from ora.state import StateError, StateStore
 from ora.state.store import canonical, unpack
@@ -25,6 +26,15 @@ _DETAIL_FIELDS = (
 _CACHE_OBSERVATION_STATUSES = frozenset({
     "reported_hit", "reported_zero", "not_reported", "malformed", "unavailable",
 })
+_CACHE_FIELD_PRESENCE = {
+    "not_reported": frozenset({
+        "details_absent", "details_null", "cached_tokens_absent",
+    }),
+    "malformed": frozenset({
+        "details_not_object", "cached_tokens_null", "cached_tokens_invalid",
+    }),
+}
+_CACHE_FIELD_PRESENCE_VALUES = frozenset().union(*_CACHE_FIELD_PRESENCE.values())
 
 
 def _ref(record: dict) -> dict:
@@ -107,6 +117,9 @@ def read_cache_observation(receipt_body: dict | None) -> dict:
         return {"status": "malformed"}
     status = observed["status"]
     amount = observed.get("cached_tokens")
+    presence = observed.get("field_presence")
+    if presence is not None and presence not in _CACHE_FIELD_PRESENCE.get(status, ()):
+        return {"status": "malformed"}
     if status in {"reported_hit", "reported_zero"}:
         if (type(amount) is not int or amount < 0
                 or (status == "reported_hit") != (amount > 0)
@@ -118,7 +131,7 @@ def read_cache_observation(receipt_body: dict | None) -> dict:
         return {"status": "malformed"}
     if status == "not_reported" and normalized_present:
         return {"status": "malformed"}
-    return {"status": status}
+    return {"status": status, **({"field_presence": presence} if presence else {})}
 
 
 def _usage(body: dict | None, *, unresolved: bool) -> dict:
@@ -189,6 +202,33 @@ def _usage_total(calls: list[dict]) -> dict:
             input_tokens / all_reported_input if all_reported_input else None
         ),
     }
+    # A lower bound over *all reported input* is useful even when Groq reports
+    # cache detail for only some responses. Do not turn omitted detail into a
+    # zero-cache observation, or include prepared-only intents in coverage.
+    reported_input_calls = totals["prompt_tokens"]["reported_calls"]
+    totals["cache_fraction_confirmed"] = {
+        "basis": "reported_cache_read_over_all_reported_input",
+        "value": (cached_tokens / all_reported_input
+                  if eligible and all_reported_input else None),
+        "status": ("complete" if eligible and len(eligible) == reported_input_calls
+                   and all_reported_input else "minimum" if eligible and all_reported_input
+                   else "unknown"),
+        "cached_tokens": cached_tokens if eligible else None,
+        "reported_input_tokens": all_reported_input,
+        "cache_reported_calls": len(eligible),
+        "input_reported_calls": reported_input_calls,
+        "request_records_without_reported_input": sum(
+            call.get("status") not in {"prepared_only", "manifest_without_intent"}
+            and call["usage"]["prompt_tokens"]["status"] != "reported"
+            for call in calls
+        ),
+    }
+    totals["cache_field_presence_counts"] = dict(sorted(Counter(
+        call.get("cache_observation", {}).get("field_presence")
+        for call in calls
+        if call.get("cache_observation", {}).get("field_presence")
+        in _CACHE_FIELD_PRESENCE_VALUES
+    ).items()))
     paired = [call for call in calls if all(
         call["usage"][key]["status"] == "reported"
         for key in ("prompt_tokens", "completion_tokens")
@@ -396,13 +436,19 @@ def build_context_metrics(
             and first_marker["body"].get("request_sha256") == intent["body"].get("request_sha256")
             and first_marker["body"].get("status") == "attempted_external_effect"
         )
+        blocked_before_http = bool(
+            valid_marker and receipt is None
+            and marker["body"].get("status") == "blocked_before_external_effect"
+        )
         status = ("captured" if valid_receipt else "receipt_lineage_mismatch" if receipt
+                  else "blocked_before_http" if blocked_before_http
                   else "unresolved_after_dispatch" if valid_marker else "dispatch_lineage_mismatch" if marker
                   else "prepared_only")
         request = _request_diagnostic(store, intent)
         actor = call["body"].get("instance_id")
-        if (valid_receipt and valid_marker
-                and response_body.get("status") in {"complete", "tool_requested"}):
+        if valid_receipt and valid_marker:
+            # Input comparison is independent of response quality: a cutoff or
+            # provider rejection still has a captured request/response pair.
             captured_terminal_model_calls += 1
             intent_body = intent["body"]
             profile = intent_body.get("credential_profile")
@@ -427,6 +473,7 @@ def build_context_metrics(
                 and intent_body.get("configuration_sha256")
                 == call["body"].get("configuration_sha256")
             )
+            raw = None
             if scope_matches:
                 descriptor = intent_body.get("blob") or intent_body.get("request_blob")
                 try:
@@ -435,22 +482,36 @@ def build_context_metrics(
                            and isinstance(descriptor.get("sha256"), str) else None)
                 except StateError:
                     raw = None
-                scope = {
-                    "run_id": run_id, "actor_id": actor,
-                    "task_id": call["body"].get("task_id"),
-                    "provider": call["body"].get("provider"),
-                    "model_id": call["body"].get("model_id"),
-                    "credential_profile": profile,
-                    "call_id": call["id"],
-                    "dispatch_created_at": first_marker["created_at"],
-                    "response_created_at": receipt["created_at"],
-                }
-                if raw is not None and all(isinstance(value, str) and value
-                                           for value in scope.values()):
-                    prefix_candidates.append({
-                        **scope, "request_bytes": raw,
-                        "request_sha256": intent_body.get("request_sha256"),
-                    })
+            # Keep an unavailable row as a coverage gap and comparison barrier;
+            # otherwise a missing intermediate packet would silently disappear.
+            prefix_candidates.append({
+                "run_id": run_id, "actor_id": actor,
+                "task_id": call["body"].get("task_id"),
+                "provider": call["body"].get("provider"),
+                "model_id": call["body"].get("model_id"),
+                "credential_profile": profile,
+                "call_id": call["id"],
+                "dispatch_created_at": (first_marker["created_at"]
+                                        if first_marker else call["created_at"]),
+                "response_created_at": receipt["created_at"],
+                "request_bytes": raw,
+                "request_sha256": intent_body.get("request_sha256"),
+            })
+        elif valid_first_marker and not blocked_before_http:
+            # An uncertain or mismatched response must not make the next
+            # captured turn look like the first request in this scope.
+            prefix_candidates.append({
+                "run_id": run_id, "actor_id": actor,
+                "task_id": call["body"].get("task_id"),
+                "provider": call["body"].get("provider"),
+                "model_id": call["body"].get("model_id"),
+                "credential_profile": intent["body"].get("credential_profile"),
+                "call_id": call["id"],
+                "dispatch_created_at": first_marker["created_at"],
+                "response_created_at": None,
+                "request_bytes": None,
+                "request_sha256": intent["body"].get("request_sha256"),
+            })
         if request["status"] == "verified":
             prefix = (request["instruction_sha256"], request["tool_manifest_sha256"])
             previous = previous_prefix.get(actor)
@@ -475,15 +536,19 @@ def build_context_metrics(
             "kind": "model", "call_id": call["id"], "task_id": call["body"].get("task_id"),
             "status": status, "intent_id": intent["id"],
             "request_sha256": intent["body"].get("request_sha256"),
-            "dispatch_recorded": valid_marker, "response_status": response_body.get("status") if valid_receipt else None,
+            "dispatch_recorded": valid_marker and not blocked_before_http,
+            "response_status": response_body.get("status") if valid_receipt else None,
+            "dispatch_created_at": first_marker["created_at"] if valid_first_marker else None,
+            "response_created_at": receipt["created_at"] if valid_receipt else None,
             "usage": _usage(response_body if valid_receipt else None,
                             unresolved=bool(
-                                valid_marker and not valid_receipt
+                                valid_marker and not valid_receipt and not blocked_before_http
                                 or valid_receipt and response_body.get("status") not in {
                                     "complete", "tool_requested",
                                 }
                             )),
             "cache_observation": read_cache_observation(response_body if valid_receipt else None),
+            "token_measurement": read_token_measurement(response_body if valid_receipt else None),
             "stage_estimate": _stage_budget(budget["body"] if budget else None, intent),
             "request": request, "inclusion": inclusion_info,
         })
@@ -540,6 +605,7 @@ def build_context_metrics(
     run_calls = [*(call for call in model_calls if call.get("intent_id") is not None),
                  *figure_calls]
     local_prefix_reuse = analyze_local_prefix_reuse(prefix_candidates)
+    local_prefix_reuse["structural_candidate_basis"] = "saved_dispatch_or_response_records_not_http_count"
     if captured_terminal_model_calls and not local_prefix_reuse["eligible_requests"]:
         local_prefix_reuse["status"] = "request_unavailable"
     local_prefix_reuse["captured_terminal_model_calls"] = captured_terminal_model_calls

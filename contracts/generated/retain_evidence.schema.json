@@ -1,0 +1,93 @@
+{
+  "$defs": {
+    "EvidenceFindingRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "report",
+          "title": "Kind",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "version"
+      ],
+      "title": "EvidenceFindingRef",
+      "type": "object"
+    },
+    "EvidenceSourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "source_copy",
+          "title": "Kind",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "version"
+      ],
+      "title": "EvidenceSourceRef",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "findingRefs": {
+      "items": {
+        "$ref": "#/$defs/EvidenceFindingRef"
+      },
+      "maxItems": 10,
+      "title": "Findingrefs",
+      "type": "array"
+    },
+    "relevanceNote": {
+      "maxLength": 1000,
+      "minLength": 1,
+      "title": "Relevancenote",
+      "type": "string"
+    },
+    "sourceRefs": {
+      "items": {
+        "$ref": "#/$defs/EvidenceSourceRef"
+      },
+      "maxItems": 10,
+      "minItems": 1,
+      "title": "Sourcerefs",
+      "type": "array"
+    }
+  },
+  "required": [
+    "sourceRefs",
+    "relevanceNote"
+  ],
+  "title": "RetainEvidenceInput",
+  "type": "object"
+}

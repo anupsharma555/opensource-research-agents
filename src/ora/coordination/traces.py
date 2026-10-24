@@ -134,7 +134,7 @@ class TraceJournal:
             record = tx.get(**pointer)
             if record is None:
                 raise StateError("Trace input/output reference is unavailable")
-            if record["kind"] == "restricted_reasoning":
+            if record["kind"] in {"restricted_reasoning", "restricted_reasoning_raw"}:
                 raise StateError("Returned reasoning uses the separate restricted lookup")
             inherited_input = (
                 pointer in (inputs or []) and pointer not in (outputs or [])
@@ -160,7 +160,7 @@ class TraceJournal:
                 raise StateError("Unknown or malformed trace relationship")
             pointer = _exact_ref(item["reference"])
             target = tx.get(**pointer)
-            if target is None or target["kind"] == "restricted_reasoning":
+            if target is None or target["kind"] in {"restricted_reasoning", "restricted_reasoning_raw"}:
                 raise StateError("Trace relationship target is unavailable or restricted")
             if target["body"].get("mission_id") not in (None, context.mission_id):
                 raise StateError("Trace relationship belongs to another mission")
@@ -402,7 +402,7 @@ class TraceJournal:
             if "reference" in gap:
                 pointer = _exact_ref(gap["reference"])
                 target = tx.get(**pointer)
-                if target is None or target["kind"] == "restricted_reasoning":
+                if target is None or target["kind"] in {"restricted_reasoning", "restricted_reasoning_raw"}:
                     raise StateError("Summary gap reference is unavailable or restricted")
                 if target["body"].get("mission_id") not in (None, mission_id):
                     raise StateError("Summary gap reference belongs to another mission")
@@ -425,7 +425,7 @@ class TraceJournal:
         def save(tx):
             for pointer in source_refs:
                 source = tx.get(**_exact_ref(pointer))
-                if source is None or source["kind"] == "restricted_reasoning" or source["body"].get("mission_id") not in (None, mission_id):
+                if source is None or source["kind"] in {"restricted_reasoning", "restricted_reasoning_raw"} or source["body"].get("mission_id") not in (None, mission_id):
                     raise StateError("Summary source is unavailable or restricted")
             if coverage is not None:
                 body["coverage"] = self._summary_coverage_tx(tx, mission_id, level, coverage, source_refs)

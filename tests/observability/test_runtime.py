@@ -91,6 +91,29 @@ def test_disabled_observer_has_no_worker_or_binding(tmp_path):
     assert observer.close()
 
 
+def test_local_reuse_snapshot_persists_across_restart_without_prompt_content(tmp_path):
+    from tests.observability.test_metrics import _seed_reuse_run
+
+    store = StateStore(tmp_path)
+    observer = RuntimeObserver(store, _config(), sender=lambda *_: True, start_worker=False)
+    _seed_reuse_run(store, response_status="partial")
+    assert observer.register("run-a", newly_created=True)
+    observer.process_once()
+    snapshot = store.get(SNAPSHOT_KIND, "observability-context:run-a")
+    reuse = snapshot["body"]["metrics"]["local_prefix_reuse"]
+    assert reuse["structural_measured_calls"] == 3
+    assert reuse["structural_measured_followup_pairs"] == 1
+    assert 0 < reuse["local_structural_input_reuse_fraction"] < 1
+    assert len(reuse["structural_input_calls"]) == 3
+    assert "Shared synthetic guidance" not in str(snapshot)
+    assert observer.close()
+    reopened = RuntimeObserver(StateStore(tmp_path), _config(),
+                               sender=lambda *_: True, start_worker=False)
+    reopened.process_once()
+    assert reopened.store.get(SNAPSHOT_KIND, "observability-context:run-a") == snapshot
+    assert reopened.close()
+
+
 def test_tool_projection_refreshes_on_results_and_later_model_receipts(tmp_path):
     from tests.observability.test_tool_activity import (
         _followup_messages,

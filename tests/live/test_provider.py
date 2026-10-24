@@ -91,7 +91,7 @@ def test_serial_tool_call_round_trip_and_safe_output(
     assert first == {
         "content": None, "tool_calls": calls,
         "usage": {"prompt_tokens": 100, "completion_tokens": 200, "total_tokens": 300},
-        "cache_observation": {"status": "not_reported"},
+        "cache_observation": {"status": "not_reported", "field_presence": "details_absent"},
         "model": live.MODEL, "elapsed_seconds": first["elapsed_seconds"],
         "finish_reason": "tool_calls", "estimated_usd": 0.000135,
     }

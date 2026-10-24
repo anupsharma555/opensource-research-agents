@@ -44,7 +44,7 @@ def test_repeated_visible_and_tool_cutoffs_reopen_then_publish_once(tmp_path, mo
         sent_requests.append(body)
         ordinal = len(sent_requests)
         assert body["model"] == MODEL
-        assert body["reasoning_effort"] == "high"
+        assert body["reasoning_effort"] == "medium"
         assert body["include_reasoning"] is True
         encoded = json.dumps(body)
         assert private_reasoning not in encoded
@@ -195,7 +195,7 @@ def test_revoked_source_cutoff_reopens_without_source_or_derived_draft(
         sent_requests.append(body)
         encoded = json.dumps(body)
         assert body["model"] == MODEL
-        assert body["reasoning_effort"] == "high"
+        assert body["reasoning_effort"] == "medium"
         assert body["include_reasoning"] is True
         if len(sent_requests) == 1:
             assert source_text in encoded
@@ -290,7 +290,7 @@ def test_revoked_source_cutoff_reopens_without_source_or_derived_draft(
     assert all(
         reopened.store.get(**item["body"]["configuration_ref"])["body"][
             "reasoning_settings"
-        ] == {"reasoning_effort": "high", "include_reasoning": True}
+        ] == {"reasoning_effort": "medium", "include_reasoning": True}
         for item in responses
     )
     assert not any(

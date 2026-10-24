@@ -95,7 +95,7 @@ def test_budget_counts_failed_transport_and_rejects_retry(tmp_path):
         attempts.append(request)
         raise OSError("synthetic failure")
     request = urllib.request.Request(URL, data=json.dumps({
-        "model": MODEL, "reasoning_effort": "high", "max_completion_tokens": 8192,
+        "model": MODEL, "reasoning_effort": "medium", "max_completion_tokens": 8192,
     }).encode())
     with runner.BatchBudget(tmp_path / "ledger.json", 1, "primary", transport=failed) as budget:
         with pytest.raises(OSError):

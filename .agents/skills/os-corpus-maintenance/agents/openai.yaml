@@ -1,0 +1,4 @@
+interface:
+  display_name: "OSRA Corpus Maintenance"
+  short_description: "Check corpus readiness and plan versioned updates"
+  default_prompt: "Use $os-corpus-maintenance to check the corpus and prepare a source update plan without uploading anything."

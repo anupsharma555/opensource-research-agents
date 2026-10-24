@@ -54,6 +54,14 @@ full image transforms remain in immutable OCR records instead of repeating in
 model input. Current source and caption permissions are checked before this
 projection; native checked passages and OCR transcriptions remain distinct.
 
+Packer v52 also reduces peer-message bookkeeping under input pressure. Identical
+next-action guidance for outstanding requests is shown once; each request keeps
+its own status, exact reference and recipient. An unanswered request can retain
+its question and a compact identity preview while its full record remains
+available through `read_context_record`. Short requests retain the ordinary
+view. This does not summarize peer answers, merge different questions, or turn
+receipt of an answer reference into evidence that its prose was read.
+
 The current question is included once when the task objective already contains
 it, and the separate short scope survives packing. Longer previews retain an
 explicit partial flag and exact saved-record reader. Selected image captions and
@@ -94,9 +102,10 @@ passages, source-backed claims still need their checked citations, and existing
 source-use restrictions still apply. Skill pins and saved tool descriptors are
 unchanged.
 
-The developer instructions place `CALL NOW`, `REQUEST FIRST` and `NEXT TURN`
-guidance directly after peer identity, before the catalog and scientific task
-guidance. Only attached function schemas are callable now; a catalog-only local
+The developer instructions begin with shared `CALL NOW`, `REQUEST FIRST` and
+`NEXT TURN` guidance and research rules. The exact peer identity follows this
+shared prefix, before the role-specific catalog. Only attached function schemas
+are callable now; a catalog-only local
 tool requires a separate `request_capability` turn before use. Native browser
 selection remains a distinct provider route. A verified unexposed-function error
 offers this request-first route only while the exact local tool remains granted.
@@ -174,6 +183,116 @@ guaranteed, and Groq credits cached tokens against rate limits after processing.
 Do not assume a hit to admit an otherwise oversized cold request. The adapter
 retains reported `prompt_tokens_details.cached_tokens`; missing values mean
 unknown. Validate actual cache benefit separately from offline packing savings.
+
+Variable peer identity no longer breaks the first shared instruction paragraph.
+This reorders existing developer text without removing the role, scientific
+guidance, source rules or capability catalog. Saved prepared requests retain
+their exact bytes; new configuration snapshots record the changed layout.
+Measure both same-peer and cross-peer prefix overlap, and retain tool-schema
+comparisons separately from provider-confirmed cached tokens.
+
+For new local-function requests, `ModelSession` validates the exact saved tool
+set before presenting the attached core tools first, followed by the remaining
+attached tools in name order. The canonical exposure manifest stays alphabetical;
+no tool is added, kept attached, or granted solely for caching. Native browser
+requests keep their separate tool path. Previously prepared requests are loaded
+from their saved bytes, so a layout change does not rewrite pending requests.
+Ordering may affect model choices and still requires live qualification.
+
+When input pressure deferred default core tools, the next turn can retain that
+smaller attachment instead of restoring unrelated schemas after one explicit
+capability selection. `tool_attachment_policy.carry_forward_core_deferral`
+requires the exact previous call and budget from the same actor, task, run and
+configuration. Preparation rechecks the final configuration after source
+selection; a provisional match does not carry into a changed source setup.
+The saved budget records the tools actually deferred, so subsequent turns can
+repeat this decision after reopening. Missing or mismatched records use the
+ordinary attachment policy. Current grants, explicit selections, release,
+schema pins and the full discovery catalog still apply; invitation and native
+browser turns retain their separate paths. This changes newly prepared inputs,
+not previously captured request bytes. Matched synthetic host tests measure
+serialized input savings; provider cache hits and fewer live steps remain
+separate evidence requirements.
+
+For a currently readable answer to this task's own pending request, pressure
+deferral keeps the existing `read_context_record` and `review_peer_answer`
+schemas callable. The host checks exact requester/task/answer/report lineage
+and current access, then intersects with the pinned tool grants. Explicit
+release receipts suppress this convenience; a later explicit selection still
+works normally. This exposes choices without reading, accepting or reviewing
+an answer automatically. Closed requests, unrelated tasks, invitation reviews
+and native browser turns do not acquire these tools through this path.
+
+Reading an exact `mail_answer` can also return a `related_report_window` in the
+same result when the caller is entitled to the linked report. Parent record
+text, hash and offsets remain unchanged. Parent and report text share the
+requested character limit, while each retains its own paging metadata; report
+continuation resumes at the returned offset with the normal reader page size.
+The report remains model-authored peer material, not inspected source evidence.
+Preparation records its source dependencies and replay rechecks access before
+delivering the nested text. A complete report projection must actually be in
+the current model input before a test can credit complete answer delivery.
+The result also carries the exact peer question within the existing bounded
+question window; longer questions expose their exact reader without a clipped
+excerpt. Offline path comparisons must derive choices from the current packet,
+surface all injected transport exceptions, and account for each attempted turn.
+Runtime recovery of a broken test chooser does not establish an efficient path.
+
+When the current answer read carries an exact report page, packing can omit an
+older direct read of that same page. It compares the report identity, version,
+hash, text and navigation, ignoring only the two requested/effective limit
+fields. A nonempty earlier assistant explanation prevents this consolidation.
+The saved exchange remains recoverable, and current source access is rechecked.
+Different pages and partial overlaps remain separate. A repeated direct report
+read may receive a short observed-repeat hint only when it fits without removing
+the requested text. This does not force the next action or prove that an earlier
+result was seen. Tests live in `test_duplicate_report_read_compaction.py`;
+serialized input savings alone do not establish fewer natural model steps.
+
+An exact repeated `peer_request` can return a bounded observation of earlier
+open requests with the same question, sender, recipient and task version.
+This feedback is saved with the original message and remains stable on work
+replay. It records observed versions and statuses, not a guarantee that those
+requests remain open; concurrent requests may be missed. Both requests remain
+distinct. No semantic similarity rule rejects or merges scientific questions,
+and ordinary request results gain no extra feedback text.
+
+## Public action purposes
+
+Shared agent instructions ask for brief public explanations of consequential
+skill choices and actions, including activation/release, tool selection, peer
+requests, waits and changes of approach. Agents use a purpose/reason argument
+when that tool supports it, or ordinary assistant content otherwise. After a
+meaningful result they state what changed and the next action in the same
+response or next normal turn. Routine unchanged steps do not need repeated
+explanations. This guidance adds no separate model call or execution gate;
+instruction delivery and explanation capture do not prove live compliance.
+The same shared instructions ask peers to address an existing incoming request
+before seeking another independent check. When help is needed first, the peer
+states its provisional finding and specific gap. This is standing agent guidance,
+not an extra instruction in evaluation questions or a host ban on early checks.
+
+Mission `peer_request`, `request_capability` and `activate_skill` descriptors at
+version 2 accept an optional short `purpose` alongside their ordinary arguments. It states the
+agent's intended benefit in the same model response; no separate explanation
+call is required. Missing, null or blank values provide no explanation. Reports
+may quote nonempty purpose text as agent-stated intent, while checking actual
+actions and results separately. It is not a record of private reasoning.
+
+The purpose stays in the saved tool arguments and their normal replay. It does
+not grant permission, change the requested peer/question or skill, or become
+recipient message payload. Skill activation still uses the same package/version
+checks and delivers the pinned skill instructions through its ordinary result.
+Exact older version-1 descriptors remain executable through a
+narrow compatibility check; their saved requests and schemas are not rewritten.
+Cloud traces retain the metrics-only content boundary. Optional public text is
+not automatically exported or treated as proof that an action was useful.
+
+An incoming reply may be saved with `publish_result(answer_request_id=...)`
+while that peer's own check is pending. This closes its current work, while
+outstanding requests still govern run closure and can resume the peer for
+review. Providing a public purpose does not replace the reply, its delivery,
+the requester's read, or explicit review.
 
 When reviewing token efficiency, separate provider-reported input/completion
 usage from local tokenizer estimates of individual prompt components. Reasoning
