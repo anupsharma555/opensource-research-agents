@@ -10,7 +10,7 @@ evidence, not keywords or task age. State the information need without private r
 - **Quick web lookup**: `mode="quick"`, one targeted query, Exa fast, up to ten results.
   Example: locate a trial's publication page when its exact identifier is unknown.
 - **Research web search**: `mode="research"`, up to ten distinct complementary queries per
-  round, Exa auto, at most five concurrent Exa requests. Example: trials, long-term outcomes,
+  call, Exa auto, with host-managed concurrency. Example: trials, long-term outcomes,
   economic outcomes and contradictory findings. More rounds may address unresolved gaps.
 - **Read search results**: `read_search_results` with the saved operation ID and cursor.
   It makes no new search. `wait=true` waits for progress without model polling.
@@ -35,9 +35,25 @@ restrictions and run authorization; no source availability or permission is impl
 
 A single missing publication URL usually needs quick lookup. A comparison across several
 evidence dimensions benefits from research queries that ask different questions. Ten is
-a round size, not a lifetime limit. Decide relevance, sufficiency and the next question
+a call size, not a lifetime limit. Decide relevance, sufficiency and the next question
 from returned evidence, constraints and remaining authorization. Mechanical fallbacks
 handle provider availability; they cannot judge scientific completeness.
+
+Before a substantial round, consider `read_research_activity` to inspect other peers'
+questions, planned or running searches and unresolved gaps. This is a coordination aid,
+not a required step before every query. Choose complementary work from the current
+evidence. An identical request may reuse one physical provider query or public fetch;
+each peer still receives its own task-scoped result and makes an independent scientific
+interpretation. A distinct question needs its own query. Use `refresh=true` explicitly
+when a fresh provider attempt is needed, and keep old results and their timestamps.
+
+`search_evidence_library` first returns metadata and a peer-authored relevance note.
+Choose one returned `entry_id` to select its exact checked source for the current task,
+then inspect passages with `read_source_window` under current source permissions. The
+library does not insert source text into a model turn or certify a finding. Candidate
+snippets and negative search attempts remain diagnostics, not retained checked evidence.
+Continue with further rounds when real gaps remain; no fixed research stage or lifetime
+query count replaces the peer's judgment.
 
 Each finished query becomes readable independently while siblings run. Keep the
 operation reference and continuation cursor. Read existing progress before repeating

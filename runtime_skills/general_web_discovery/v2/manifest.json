@@ -1,0 +1,44 @@
+{
+  "example": {
+    "path": "runtime_skills/general_web_discovery/example.json",
+    "sha256": "ecae0f6ccc7a17f71204edf48deec9ed362d146d9522736f564c69168adfa3d8"
+  },
+  "failure_handling": "If search is disallowed, unavailable, opaque, or lacks a fetchable source, preserve the gap and do not invent evidence.",
+  "helper": {
+    "dependencies": [
+      "pydantic==2.13.5"
+    ],
+    "durable_state_access": "none",
+    "function": "prepare_claim_link",
+    "helper_version": "1.0.0",
+    "license": "Project-owned; redistribution terms pending repository LICENSE",
+    "local_changes": "Reuses the existing first-party helper unchanged after source inspection",
+    "module": "ora.skills.evidence_links",
+    "origin_type": "project_owned",
+    "path": "src/ora/skills/evidence_links.py",
+    "sha256": "e0e9541f9691468dba0346a28a8aaef1bf965f73dcf894f679d26529949f4e27",
+    "side_effects": "none",
+    "upstream_commit": null,
+    "upstream_url": null
+  },
+  "input_contract": "ora.contracts.models.EvidencePacket",
+  "instruction_variants": {
+    "concise": {
+      "path": "runtime_skills/general_web_discovery/CONCISE.md",
+      "sha256": "e8cdcd6612ca599fc8df0329febe3835c309a88d4f53b00aa94fa03ca4ee09ac"
+    },
+    "rich": {
+      "path": "runtime_skills/general_web_discovery/RICH.md",
+      "sha256": "886f0884e664cf33f18e4f0703056b80d00e3898cce7302283690eedd44b28cc"
+    }
+  },
+  "output_contract": "Project-owned internal candidate link only after separately inspected source evidence; discovery leads are not a wire schema.",
+  "purpose": "Choose quick or research web discovery, read progressive results and inspect exact source evidence.",
+  "required_capabilities": [
+    "source_read_by_id"
+  ],
+  "schema": "ora.runtime_skill.v1",
+  "skill_id": "general-web-discovery",
+  "trigger": "Use when a research question may benefit from public web discovery beyond scholarly records.",
+  "version": "2.0.0"
+}

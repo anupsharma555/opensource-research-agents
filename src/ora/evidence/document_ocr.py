@@ -38,6 +38,7 @@ from .ocr_images import (
     prepare_ocr_raster,
     traineddata_digest,
 )
+from .shared_local_extraction import shared_ocr_result
 
 PAGE_IMAGE_KIND = "public_document_page_image"
 PAGE_OCR_KIND = "public_document_page_ocr"
@@ -533,6 +534,7 @@ def _selective_ocr(image: bytes, psm: int) -> tuple[str, bytes, dict]:
 def ocr_public_document_page(
     store, page_image_ref: dict, *, mission_id: str, run_id: str,
     actor_id: str, task_id: str, operation_id: str, layout: str = "auto",
+    shared_enabled: bool = False,
 ) -> dict:
     """OCR one saved page locally; output is unverified derived text."""
     image_record = store.get(**page_image_ref) if (
@@ -565,12 +567,12 @@ def ocr_public_document_page(
     psm = 6 if layout == "block" or (
         layout == "auto" and body.get("ocr_preparation", {}).get("region") is not None
     ) else 11 if layout == "sparse" else 3
-    engine_identity = _selective_engine_identity() if selective else None
+    engine_identity = _selective_engine_identity() if selective or shared_enabled else None
     record_id = _identity(
         "public-page-ocr-", page_image_ref,
         SELECTIVE_OCR_VERSION if selective else OCR_VERSION,
         layout, psm, engine_identity,
-    ) if selective else _identity("public-page-ocr-", page_image_ref, OCR_VERSION)
+    ) if selective or shared_enabled else _identity("public-page-ocr-", page_image_ref, OCR_VERSION)
     existing = store.get(PAGE_OCR_KIND, record_id)
     if existing is not None:
         return {**read_public_document_ocr(
@@ -596,10 +598,9 @@ def ocr_public_document_page(
             raise EvidenceError("Prepared OCR image dimensions changed")
     else:
         _bounded_image(image, body["mime_type"])
-    tsv_bytes, quality = None, None
-    if selective:
-        text, tsv_bytes, quality = _selective_ocr(image, psm)
-    else:
+    def compute():
+        if selective:
+            return _selective_ocr(image, psm)
         completed = _run(
             ["tesseract", "stdin", "stdout", "-l", "eng", "--psm", "3"],
             content=image, timeout=30, output_limit=MAX_OCR_TEXT_CHARS * 4,
@@ -607,11 +608,35 @@ def ocr_public_document_page(
         if completed.returncode != 0:
             raise EvidenceError("Local OCR rejected the selected page image")
         try:
-            text = completed.stdout.decode("utf-8").strip()
+            recognized = completed.stdout.decode("utf-8").strip()
         except UnicodeDecodeError as exc:
             raise EvidenceError("Local OCR returned non-UTF-8 text") from exc
-        if len(text) > MAX_OCR_TEXT_CHARS:
+        if len(recognized) > MAX_OCR_TEXT_CHARS:
             raise EvidenceError("Local OCR text exceeds the selected-page limit")
+        return recognized, None, None
+
+    shared_ref = None
+    if shared_enabled:
+        identity = {
+            "mission_id": mission_id,
+            "image_sha256": body["image_sha256"],
+            "image_byte_length": body["byte_length"],
+            "mime_type": body["mime_type"],
+            "engine_identity": engine_identity,
+            "engine": SELECTIVE_OCR_VERSION if selective else OCR_VERSION,
+            "layout": layout,
+            "psm": psm,
+            "preparation": body.get("ocr_preparation"),
+        }
+        text, tsv_bytes, quality, shared_ref = shared_ocr_result(
+            store, identity=identity, compute=compute,
+        )
+    else:
+        text, tsv_bytes, quality = compute()
+    if len(text) > MAX_OCR_TEXT_CHARS or (
+        tsv_bytes is not None and len(tsv_bytes) > MAX_OCR_TSV_BYTES
+    ):
+        raise EvidenceError("Shared OCR output exceeds the selected-page limit")
     prohibition_detected = bool(_EXPLICIT_USE_PROHIBITION.search(text))
     delivery_status = (
         "restricted" if prohibition_detected else checked["model_input_status"]
@@ -638,6 +663,8 @@ def ocr_public_document_page(
         "model_input_status": delivery_status,
         "permission_basis": permission_basis,
     }
+    if shared_ref is not None:
+        ocr_body["shared_extraction_ref"] = shared_ref
     if selective:
         ocr_body.update({
             "tsv_sha256": tsv_digest, "tsv_blob": tsv_blob,
@@ -655,6 +682,11 @@ def ocr_public_document_page(
             raise EvidenceError("Page image changed before OCR commit")
         saved = tx.put(PAGE_OCR_KIND, record_id, ocr_body)
         tx.link(saved, exact_image, "derived_from")
+        if shared_ref is not None:
+            shared = tx.get(**shared_ref)
+            if shared is None or shared["body"].get("phase") != "completed":
+                raise EvidenceError("Shared OCR extraction changed before peer commit")
+            tx.link(saved, shared, "derived_from")
         return ref(saved)
     ocr_ref = store.transact("page-ocr:" + record_id, ocr_body, save,
                              mission_id=mission_id)

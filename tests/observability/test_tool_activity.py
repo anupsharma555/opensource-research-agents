@@ -326,6 +326,60 @@ def test_untrusted_name_and_foreign_result_do_not_leak_or_claim_execution(tmp_pa
     assert "PRIVATE_PROMPT_PAYLOAD" not in str(report)
 
 
+@pytest.mark.parametrize("valid_request", [True, False])
+def test_peer_request_saved_outcome_requires_matching_durable_request(
+    tmp_path, valid_request,
+):
+    store = StateStore(tmp_path)
+    _seed(store)
+    call, response, tool = _turn(store, "peer", "peer_request")
+    request = _put(store, "mail_request", "request-peer", {
+        "mission_id": "mission-a", "requester_id": "actor-a" if valid_request else "actor-other",
+        "recipient_id": "actor-peer", "cause_ref": {
+            "kind": "board_proposal", "id": "task-a", "version": 1,
+        }, "status": "unanswered", "question": "Check a synthetic claim",
+    })
+    _result(store, response, tool, {
+        "status": "request_saved", "request_id": request["id"],
+        "request_ref": _ref(request), "recipient_id": "actor-peer",
+    })
+    _work(store, "peer", call, tool)
+    prepared = _put(store, "agent_call", "call-prepared-peer", {
+        "mission_id": "mission-a", "instance_id": "actor-a", "task_id": "task-a",
+        "attempt_id": "attempt-prepared-peer",
+    })
+    request_blob = _blob(store, {"messages": [], "tools": [{"function": {"name": "peer_request"}}]})
+    _put(store, "model_request_intent", "intent-prepared-peer", {
+        "mission_id": "mission-a", "instance_id": "actor-a", "task_id": "task-a",
+        "attempt_id": "attempt-prepared-peer", "call_ref": _ref(prepared),
+        "blob": request_blob, "request_sha256": request_blob["sha256"],
+    })
+    steps = build_tool_activity(store, "run-a")["steps"]
+    assert len(steps) == 1  # Prepared input did not select or execute another peer tool.
+    step = steps[0]
+    assert step["execution_status"] == "executed"
+    assert step["outcome"] == ("completed" if valid_request else "unknown")
+    assert step["reuse_status"] == ("new" if valid_request else "unknown")
+    assert step["reuse_basis"] == ("saved_peer_request_record" if valid_request else None)
+    if valid_request:
+        from ora.observability.export import project_tool_activity
+
+        run = store.get("mission_run", "run-a")
+        store.transact("close-synthetic-peer-observation", {}, lambda tx: tx.put(
+            "mission_run", "run-a", {**run["body"], "status": "completed"},
+            expected_version=run["version"],
+        ))
+        projected = project_tool_activity(store, "mission-a", "run-a")
+        assert projected["created"] >= 1
+        tool_spans = [row for row in store.records("observability_export")
+                      if row["body"]["attributes"].get("gen_ai.tool.name") == "peer_request"]
+        assert len(tool_spans) == 1
+        assert tool_spans[0]["body"]["attributes"]["osra.tool.outcome"] == "completed"
+        assert tool_spans[0]["body"]["attributes"]["osra.tool.reuse_basis"] == (
+            "saved_peer_request_record"
+        )
+
+
 @pytest.mark.parametrize("corruption", ["foreign_mission", "stale_response_ref", "wrong_message_hash"])
 def test_corrupt_result_lineage_does_not_claim_tool_execution(tmp_path, corruption):
     store = StateStore(tmp_path)

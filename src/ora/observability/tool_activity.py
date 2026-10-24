@@ -217,6 +217,30 @@ def _outcome(message: dict, tool_name: str,
     return "unknown", reuse_status, reuse_basis
 
 
+def _saved_peer_request(store: StateStore, run: dict, turn: dict,
+                        message: dict | None) -> bool:
+    """Require the exact saved request before calling a peer tool successful."""
+    if message is None:
+        return False
+    try:
+        content = json.loads(message["content"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    if not isinstance(content, dict) or content.get("status") != "request_saved":
+        return False
+    request = _exact(store, content.get("request_ref"), "mail_request")
+    if request is None or content.get("request_id") != request["id"]:
+        return False
+    body = request["body"]
+    cause = body.get("cause_ref")
+    return (body.get("mission_id") == run["body"].get("mission_id")
+            and body.get("requester_id") == turn["actor"]["id"]
+            and body.get("recipient_id") == content.get("recipient_id")
+            and isinstance(cause, dict)
+            and cause.get("kind") == "board_proposal"
+            and cause.get("id") == turn["call"]["body"].get("task_id"))
+
+
 def _accepted_report(store: StateStore, run: dict, turn: dict) -> bool:
     attempt_id = turn["intent"]["body"].get("attempt_id")
     attempt = store.get("agent_attempt", attempt_id) if isinstance(attempt_id, str) else None
@@ -525,6 +549,10 @@ def build_tool_activity(store: StateStore, run_id: str) -> dict:
             outcome = "completed"
         elif message is None:
             outcome = "unknown"
+        elif name == "peer_request" and execution == "executed" and _saved_peer_request(
+            store, run, turn, message,
+        ):
+            outcome, reuse, reuse_basis = "completed", "new", "saved_peer_request_record"
         (delivery, prepared, dispatched, captured,
          delivery_final, delivery_form) = _delivery(
             message, result["created_at"] if result else None,

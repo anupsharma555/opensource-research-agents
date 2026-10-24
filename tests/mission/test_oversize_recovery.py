@@ -270,7 +270,7 @@ def test_413_recovery_changes_request_and_delivers_selected_source_window(
         assert paced["observed_limit_tokens"] == 7000
         assert paced["limit_evidence_ref"] == paced_control["body"]["response_ref"]
         assert all(item["model"] == MODEL for item in sent)
-        assert all(item["reasoning_effort"] == "high" for item in sent)
+        assert all(item["reasoning_effort"] == "medium" for item in sent)
         assert host.store.get(**source_ref) == source_before
         receipts = host.store.records("model_response_receipt")
         assert sum(item["body"].get("http_status") == 413 for item in receipts) == 1

@@ -40,7 +40,7 @@ class SearchWebInput(WireModel):
     queries: list[Annotated[str, Field(min_length=1, max_length=1000)]] = Field(min_length=1, max_length=10)
     provider: Literal["exa", "tavily", "searxng"] = Field(default="exa", description="Optional agent selection for an identified research gap. Default Exa; quick uses the configured fallback.")
     limit: int = Field(default=10, ge=1, le=10)
-    refresh: bool = Field(default=False, description="Reuse an identical saved search in this peer task by default. Set true to intentionally start fresh retrieval; different queries or options remain separate searches.")
+    refresh: bool = Field(default=False, description="Reuse identical provider/query/options within this mission using a separate operation for each peer. Set true to request fresh retrieval. Different terms, providers, modes or filters remain separate.")
 
     @model_validator(mode="after")
     def distinct_queries(self):
@@ -54,6 +54,10 @@ class SearchWebInput(WireModel):
         return self
 
 
+class LegacySearchWebInput(SearchWebInput):
+    refresh: bool = Field(default=False, description="Reuse an identical saved search in this peer task by default. Set true to intentionally start fresh retrieval; different queries or options remain separate searches.")
+
+
 class ReadSearchResultsInput(WireModel):
     operation_id: Identifier
     cursor: int = Field(default=0, ge=0, description="Saved candidate sequence; never a provider pagination offset.")
@@ -63,6 +67,51 @@ class ReadSearchResultsInput(WireModel):
 
 class CancelSearchInput(WireModel):
     operation_id: Identifier
+
+
+class ReadResearchActivityInput(WireModel):
+    snapshot_id: Identifier | None = None
+    cursor: int = Field(default=0, ge=0)
+    limit: int = Field(default=10, ge=1, le=20)
+
+
+class EvidenceSourceRef(WireModel):
+    kind: Literal["source_copy"]
+    id: Identifier
+    version: Version
+
+
+class EvidenceFindingRef(WireModel):
+    kind: Literal["report"]
+    id: Identifier
+    version: Version
+
+
+class RetainEvidenceInput(WireModel):
+    source_refs: list[EvidenceSourceRef] = Field(min_length=1, max_length=10)
+    relevance_note: str = Field(min_length=1, max_length=1000)
+    finding_refs: list[EvidenceFindingRef] = Field(default_factory=list, max_length=10)
+
+
+class SearchEvidenceLibraryInput(WireModel):
+    query: str | None = Field(default=None, min_length=1, max_length=500)
+    entry_id: Identifier | None = None
+    cursor: int = Field(default=0, ge=0)
+    limit: int = Field(default=5, ge=1, le=20)
+
+    @model_validator(mode="after")
+    def search_or_select(self):
+        if ((self.query is None) == (self.entry_id is None)
+                or self.query is not None and not self.query.strip()):
+            raise ValueError("Provide a nonempty query or select one returned entry_id")
+        if self.entry_id and self.cursor:
+            raise ValueError("Selecting an entry does not use a page cursor")
+        return self
+
+
+class FetchSourceInput(WireModel):
+    hit_id: Identifier
+    refresh: bool = Field(default=False, description="Request a fresh source version instead of reusing compatible saved bytes.")
 
 
 class PublicDocumentRef(WireModel):
@@ -680,8 +729,100 @@ class LiveReceipt(WireModel):
     reused: bool = False
 
 
+class LiveBranchCancelRequest(WireModel):
+    """Trusted local operator request for one exact saved mission task."""
+
+    request_id: Identifier
+    run_id: Identifier
+    task_id: Identifier
+    expected_task_version: Version
+    reason: Annotated[str, Field(min_length=1, max_length=2000, pattern=r"\S")]
+
+
+class LiveBranchCancelReceipt(WireModel):
+    """Durable acceptance; an in-flight remote effect may remain unresolved."""
+
+    request_id: Identifier
+    run_id: Identifier
+    task_id: Identifier
+    status: Literal["cancelled", "cancellation_requested"]
+    reused: bool = False
+    cancellation_ref: SavedRecordRef
+    task_ref: SavedRecordRef
+
+    @model_validator(mode="after")
+    def references_match_target(self):
+        if self.cancellation_ref.kind != "mission_branch_cancellation":
+            raise ValueError("Cancellation receipt needs its saved cancellation record")
+        if self.task_ref.kind != "board_proposal" or self.task_ref.id != self.task_id:
+            raise ValueError("Cancellation receipt task reference must name the exact task")
+        return self
+
+
+class LiveRunCancelRequest(WireModel):
+    """Trusted local operator request to stop one exact saved run."""
+
+    request_id: Identifier
+    run_id: Identifier
+    expected_run_version: Version
+    reason: Annotated[str, Field(min_length=1, max_length=2000, pattern=r"\S")]
+
+
+class LiveRunCancelReceipt(WireModel):
+    """Durable stop receipt; an in-flight external effect may remain unresolved."""
+
+    request_id: Identifier
+    run_id: Identifier
+    status: Literal["cancelled", "cancellation_requested"]
+    reused: bool = False
+    cancellation_ref: SavedRecordRef
+    run_ref: SavedRecordRef
+
+    @model_validator(mode="after")
+    def references_match_target(self):
+        if self.cancellation_ref.kind != "mission_run_cancellation":
+            raise ValueError("Cancellation receipt needs its saved run cancellation")
+        if self.run_ref.kind != "mission_run" or self.run_ref.id != self.run_id:
+            raise ValueError("Cancellation receipt must name the exact run")
+        return self
+
+
+class LiveUserInputRequest(WireModel):
+    """Authenticated local input for one exact open task and agent instance."""
+
+    request_id: Identifier
+    run_id: Identifier
+    task_id: Identifier
+    target_agent_id: Identifier
+    expected_task_version: Version
+    kind: Literal["direction", "unverified_pasted_evidence"]
+    text: Annotated[str, Field(min_length=1, max_length=100000, pattern=r"\S")]
+
+
+class LiveUserInputReceipt(WireModel):
+    """Durable acceptance only; subsequent context records establish delivery."""
+
+    request_id: Identifier
+    run_id: Identifier
+    task_id: Identifier
+    target_agent_id: Identifier
+    status: Literal["queued_for_next_boundary"] = "queued_for_next_boundary"
+    reused: bool = False
+    input_ref: SavedRecordRef
+    task_ref: SavedRecordRef
+
+    @model_validator(mode="after")
+    def references_match_target(self):
+        if self.input_ref.kind != "mission_user_input":
+            raise ValueError("User-input receipt needs its saved input record")
+        if self.task_ref.kind != "board_proposal" or self.task_ref.id != self.task_id:
+            raise ValueError("User-input receipt must name the exact task")
+        return self
+
+
 class LiveRunSummary(WireModel):
     id: Identifier
+    version: Version | None = None
     question: Text
     status: Text
     parent_run_id: Identifier | None = None

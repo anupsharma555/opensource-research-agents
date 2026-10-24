@@ -16,7 +16,7 @@ from ora.mission.tool_operations import read_navigation_operation, reconcile_lat
 from ora.retrieval.catalog_tools import list_catalog_leads
 from ora.state import StateConflict
 from ora.state.store import canonical
-from tests.mission.test_service import Response, answer, drain, service, tool
+from tests.mission.test_service import Response, answer, drain, serialized_peer_name, service, tool
 
 
 def test_navigation_operation_is_pinned_before_fetch_and_finishes_once(tmp_path, monkeypatch):
@@ -51,7 +51,7 @@ def test_navigation_operation_is_pinned_before_fetch_and_finishes_once(tmp_path,
 
     def transport(request, *, timeout):
         body = json.loads(request.data)
-        if "Mxra" in body["messages"][0]["content"]:
+        if serialized_peer_name(body) == "Mxra":
             sibling_calls.append(body)
             return answer("A separate synthetic review completed.", 100)
         calls.append(body)
@@ -931,7 +931,7 @@ def test_interrupted_navigation_reconciles_only_a_current_saved_result(
     def transport(request, *, timeout):
         body = json.loads(request.data)
         calls.append(body)
-        if "Mxra" in body["messages"][0]["content"]:
+        if serialized_peer_name(body) == "Mxra":
             return answer("An independent synthetic sibling result.", 100)
         count = len([item for item in calls if "Mxra" not in item["messages"][0]["content"]])
         if count == 1:

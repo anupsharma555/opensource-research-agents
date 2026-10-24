@@ -64,7 +64,7 @@ def test_saved_rejected_choice_recovery_respects_grant_and_restart(
         packets.append(packet)
         if len(packets) == 1:
             assert {"type": "browser_search"} not in packet["tools"]
-            assert packet["reasoning_effort"] == "high"
+            assert packet["reasoning_effort"] == "medium"
             raise urllib.error.HTTPError(
                 "https://example.invalid", 400, "tool rejected", {},
                 BytesIO(json.dumps({"error": _error()}).encode()),
@@ -75,7 +75,7 @@ def test_saved_rejected_choice_recovery_respects_grant_and_restart(
             assert "provider_rejected_unselected_browser_call" in json.dumps(packet["messages"])
             return _native_result(2)
         assert {"type": "browser_search"} not in packet["tools"]
-        assert packet["reasoning_effort"] == "high"
+        assert packet["reasoning_effort"] == "medium"
         return tool("publish_result", {
             "title": "Synthetic discovery", "text": "Only a discovery lead is available.",
             "citations": [], "limitations": ["No inspected source text"],

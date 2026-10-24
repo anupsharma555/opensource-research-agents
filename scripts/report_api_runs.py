@@ -53,6 +53,19 @@ def known_total(report: dict) -> int | None:
 
 def local_reuse_text(report: dict) -> str:
     reuse = report.get("local_prefix_reuse") or {}
+    structural = reuse.get("local_structural_input_reuse_fraction")
+    coverage = reuse.get("structural_coverage_status")
+    if structural is not None:
+        return (f"Local input reuse: {structural * 100:.1f}% "
+                f"({number(reuse['repeated_local_structural_input_tokens'])}/"
+                f"{number(reuse['local_structural_input_tokens'])} locally measured tokens; "
+                f"{coverage} coverage, {reuse['structural_measured_calls']}/"
+                f"{reuse['structural_candidate_calls']} request records). "
+                "Unchanged opening messages plus identical whole tool definitions; "
+                "first requests included at zero local reuse. This is not a provider cache hit.")
+    if coverage == "baseline_only":
+        return ("Local input reuse unavailable: only first requests in separate comparison "
+                "scopes; no comparable follow-up. This is not a 0% provider cache rate.")
     fraction = reuse.get("estimated_message_prefix_token_fraction")
     if reuse.get("status") == "measured" and fraction is not None:
         return (f"Prompt overlap (local estimate): {fraction * 100:.1f}% of compared follow-up "

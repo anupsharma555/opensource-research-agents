@@ -28,7 +28,7 @@ export type Queries =
   | [string, string, string, string, string, string, string, string, string]
   | [string, string, string, string, string, string, string, string, string, string];
 /**
- * Reuse an identical saved search in this peer task by default. Set true to intentionally start fresh retrieval; different queries or options remain separate searches.
+ * Reuse identical provider/query/options within this mission using a separate operation for each peer. Set true to request fresh retrieval. Different terms, providers, modes or filters remain separate.
  */
 export type Refresh = boolean;
 

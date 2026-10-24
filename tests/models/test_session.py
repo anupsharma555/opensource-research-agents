@@ -24,6 +24,7 @@ from ora.models import (
 )
 from ora.observability.export import EXPORT_KIND, project_run, project_run_summary
 from ora.observability.metrics import build_context_metrics
+from ora.retrieval.agent_validation_budget import AgentBudget, BudgetAdmissionStop, BudgetStop
 from ora.state import StateConflict, StateStore
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -87,7 +88,8 @@ def source_copy(store: StateStore) -> dict:
 
 def setup(tmp_path: Path, *, raw: bytes | None = None,
           source_ref: dict | None = None, unknown_policy: str = "reject",
-          tool_description: str = "", credential_settings: dict | None = None):
+          tool_description: str = "", credential_settings: dict | None = None,
+          reasoning_effort: str = "high"):
     store = StateStore(tmp_path)
     copy_ref = source_ref or source_copy(store)
     copy_record = store.get(**copy_ref)
@@ -110,7 +112,8 @@ def setup(tmp_path: Path, *, raw: bytes | None = None,
                   "response_format": {"type": "json_schema", "json_schema": {
                       "name": "answer", "strict": True, "schema": SCHEMA,
                   }}},
-        reasoning_settings={"reasoning_effort": "high", "include_reasoning": True},
+        reasoning_settings={"reasoning_effort": reasoning_effort,
+                            "include_reasoning": True},
         instructions="Use only saved synthetic evidence.", skill_choices={},
         grants={f"common:{name}" for name in COMMON_TOOL_IDS},
         input_refs=[{"kind": "source_copy", "id": copy_ref["id"],
@@ -136,6 +139,26 @@ def setup(tmp_path: Path, *, raw: bytes | None = None,
 
 def select(copy_ref: dict, route: str = "direct") -> tuple[SourceSelection, ...]:
     return (SourceSelection(copy_ref, "permitted", True, route),)
+
+
+def test_saved_medium_selection_survives_reopen_and_capture(tmp_path: Path) -> None:
+    store, _registry, bridge, call, _config, copy_ref, _captured = setup(
+        tmp_path, reasoning_effort="medium",
+    )
+    prepared = bridge.prepare(
+        call_id=call["id"], call_version=1, phase="collect",
+        messages=[{"role": "user", "content": "Review the synthetic abstract"}],
+        sources=select(copy_ref),
+    )
+    assert prepared.request.body["reasoning_effort"] == "medium"
+    intent = store.get(**prepared.intent_ref)
+    assert intent["body"]["effective_reasoning_effort"] == "medium"
+    reopened = ModelSession(StateStore(tmp_path), ROOT, adapter=bridge.adapter)
+    assert reopened.load(prepared.intent_ref).request.body == prepared.request.body
+    outcome = reopened.adapter.decode(prepared.request, json.loads(response()))
+    receipt_ref = reopened.capture(prepared.intent_ref, outcome)
+    assert reopened.store.get(**receipt_ref)["body"]["effective_reasoning_effort"] == "medium"
+    assert reopened.load(prepared.intent_ref).request.body["reasoning_effort"] == "medium"
 
 
 def _preview_task(store: StateStore) -> None:
@@ -301,6 +324,10 @@ def test_saved_selection_abstract_request_and_private_capture(tmp_path: Path,
     assert receipt["body"]["usage"]["prompt_tokens_details"] == {"cached_tokens": 4}
     assert receipt["body"]["usage"]["completion_tokens_details"] == {"reasoning_tokens": 12}
     assert receipt["body"]["cache_observation"] == {"status": "reported_hit", "cached_tokens": 4}
+    measurement = receipt["body"]["token_measurement"]
+    assert measurement["reported_input_tokens"] == 10
+    assert measurement["provider_admission_tokens"] is None
+    assert measurement["provider_admission_status"] == "not_reported"
     assert captured[0][1] == 120 and len(captured) == 1
     store.transact("seed-run-for-projection", {}, lambda tx: tx.put(
         "mission_run", "run", {"mission_id": "mission", "run_id": "run", "status": "active"},
@@ -348,15 +375,19 @@ def test_saved_selection_abstract_request_and_private_capture(tmp_path: Path,
 
 
 @pytest.mark.parametrize(("detail", "expected"), [
-    (None, {"status": "not_reported"}),
+    (None, {"status": "not_reported", "field_presence": "details_absent"}),
     ({"cached_tokens": 0}, {"status": "reported_zero", "cached_tokens": 0}),
-    ({"cached_tokens": "four"}, {"status": "malformed"}),
+    ({"cached_tokens": "four"},
+     {"status": "malformed", "field_presence": "cached_tokens_invalid"}),
 ])
 def test_capture_saves_cache_field_quality_separately_from_usage(tmp_path, monkeypatch, detail, expected):
     monkeypatch.setenv("GROQ_API_KEY", "synthetic-token")
     raw = json.loads(response())
     if detail is not None:
         raw["usage"]["prompt_tokens_details"] = detail
+        assert raw["usage"]["prompt_tokens_details"] == detail
+    else:
+        assert "prompt_tokens_details" not in raw["usage"]
     store, _registry, bridge, call, _config, copy_ref, _captured = setup(
         tmp_path, raw=json.dumps(raw).encode(),
     )
@@ -797,6 +828,80 @@ def test_crash_after_attempt_marker_never_resends_automatically(
     with pytest.raises(DispatchUncertain, match="reconcile"):
         bridge.invoke_capture(prepared.intent_ref)
     assert len(count) == 1
+
+
+@pytest.mark.parametrize("stop_reason", ["token_cap", "case_closed"])
+def test_local_budget_denial_marks_exact_dispatch_as_no_external_effect(
+    tmp_path: Path, monkeypatch, stop_reason: str,
+) -> None:
+    monkeypatch.setenv("GROQ_API_KEY", "synthetic-token")
+    store, _registry, bridge, call, _config, copy_ref, _captured = setup(tmp_path)
+    prepared = bridge.prepare(call_id=call["id"], call_version=1, phase="collect",
+                              messages=[{"role": "user", "content": "Review abstract"}],
+                              sources=select(copy_ref))
+    opened = []
+
+    def open_http(_opener, _request, **_kwargs):
+        opened.append(True)
+        return FakeResponse(response())
+
+    with AgentBudget(tmp_path / "budget.json", token_limit=10) as budget:
+        if stop_reason == "case_closed":
+            with pytest.raises(BudgetStop, match="case_closed"):
+                budget.stop("case_closed")
+        bridge.adapter = GroqSelectedAdapter(
+            ROOT,
+            transport=lambda request, timeout: budget.open(
+                open_http, object(), request, timeout=timeout,
+            ),
+        )
+        with pytest.raises(BudgetAdmissionStop, match=stop_reason):
+            bridge.invoke_capture(prepared.intent_ref)
+        assert budget.data["model_attempts"] == []
+        assert budget.data["planned_tokens"] == 0
+    assert opened == []
+    marker = store.get("model_dispatch_attempt",
+                       f"model-dispatch:{prepared.intent_ref['id']}")
+    assert marker["version"] == 2
+    assert marker["body"]["status"] == "blocked_before_external_effect"
+    assert marker["body"]["request_sha256"] == prepared.request.request_sha256
+    assert store.records("model_response_receipt") == []
+    with pytest.raises(DispatchUncertain, match="reconcile"):
+        bridge.invoke_capture(prepared.intent_ref)
+    assert opened == []
+
+
+def test_budget_transport_uncertainty_keeps_attempted_marker(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("GROQ_API_KEY", "synthetic-token")
+    store, _registry, bridge, call, _config, copy_ref, _captured = setup(tmp_path)
+    prepared = bridge.prepare(call_id=call["id"], call_version=1, phase="collect",
+                              messages=[{"role": "user", "content": "Review abstract"}],
+                              sources=select(copy_ref))
+    opened = []
+
+    def fail_after_open(_opener, _request, **_kwargs):
+        opened.append(True)
+        raise TimeoutError("synthetic transport uncertainty")
+
+    with AgentBudget(tmp_path / "budget.json", token_limit=55_000) as budget:
+        bridge.adapter = GroqSelectedAdapter(
+            ROOT,
+            transport=lambda request, timeout: budget.open(
+                fail_after_open, object(), request, timeout=timeout,
+            ),
+        )
+        with pytest.raises(BudgetStop, match="uncertain_transport"):
+            bridge.invoke_capture(prepared.intent_ref)
+        assert budget.data["model_attempts"][0]["state"] == "uncertain"
+        assert budget.data["model_attempts"][0]["failure_stage"] == "opening"
+    assert opened == [True]
+    marker = store.get("model_dispatch_attempt",
+                       f"model-dispatch:{prepared.intent_ref['id']}")
+    assert marker["version"] == 1
+    assert marker["body"]["status"] == "attempted_external_effect"
+    assert store.records("model_response_receipt") == []
 
 
 def test_capture_is_atomic_and_rejects_false_returned_model(tmp_path: Path) -> None:

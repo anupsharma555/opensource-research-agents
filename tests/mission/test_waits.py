@@ -492,3 +492,30 @@ def test_quota_timer_and_uncertain_effect_are_not_stranded_peer_waits(tmp_path) 
         "timer",
     }
     assert due["fingerprint"] != report["fingerprint"]
+
+
+def test_operator_and_search_waits_are_not_peer_replan_candidates(tmp_path) -> None:
+    store = StateStore(tmp_path)
+
+    def save(tx):
+        tx.put("mission_task_control", "operator", {
+            "mission_id": "m", "actor_id": "held", "phase": "waiting",
+            "work_id": None, "wait_for": [],
+            "operator_credential_hold": {"phase": "ready_model"},
+        })
+        tx.put("mission_task_control", "search", {
+            "mission_id": "m", "actor_id": "searching", "phase": "waiting",
+            "work_id": None, "wait_for": [],
+            "search_wait": {"operation_ref": {
+                "kind": "web_search_operation", "id": "saved-search", "version": 1,
+            }},
+        })
+        return {"saved": True}
+
+    store.transact("seed-operator-and-search-waits", {}, save, mission_id="m")
+    report = inspect_waits(store, "m")
+    assert {item["kind"] for item in report["normal_waits"]} == {
+        "operator_credential_hold", "saved_search_wait",
+    }
+    assert report["stranded_waits"] == []
+    assert report["cycles"] == []

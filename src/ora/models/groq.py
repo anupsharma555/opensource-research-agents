@@ -19,6 +19,7 @@ from typing import Any, Callable, Literal
 
 from ora.credentials import CredentialProfileError, GroqCredentialProfiles, validate_selection
 from ora.live.provider import (
+    DEFAULT_REASONING_EFFORT,
     MAX_RESPONSE_BYTES,
     MODEL,
     URL,
@@ -78,7 +79,7 @@ class CallConfiguration:
     provider: str = "groq"
     endpoint: str = URL
     model_id: str = MODEL
-    reasoning_effort: str = "high"
+    reasoning_effort: str = DEFAULT_REASONING_EFFORT
     include_reasoning: bool = True
     max_completion_tokens: int = 8192
     stream: bool = False
@@ -449,8 +450,8 @@ class GroqSelectedAdapter:
             raise ModelPreflightError("configuration needs an exact SHA-256")
         if (configuration.provider, configuration.endpoint, configuration.model_id) != (
             "groq", URL, MODEL,
-        ) or configuration.reasoning_effort != "high" or configuration.include_reasoning is not True:
-            raise ModelPreflightError("selected Groq model and high reasoning must stay pinned",
+        ) or configuration.reasoning_effort not in ("medium", "high") or configuration.include_reasoning is not True:
+            raise ModelPreflightError("selected Groq model and supported reasoning must stay pinned",
                                       reasoning_status="unsupported")
         if type(configuration.stream) is not bool:
             raise ModelPreflightError("stream setting must be boolean")
@@ -507,7 +508,7 @@ class GroqSelectedAdapter:
             "model": MODEL,
             "messages": [{"role": "developer", "content": configuration.instructions},
                          *cleaned],
-            "reasoning_effort": "high", "include_reasoning": True,
+            "reasoning_effort": configuration.reasoning_effort, "include_reasoning": True,
             "max_completion_tokens": budget, "stream": configuration.stream,
         }
         if source_lines:
@@ -771,10 +772,12 @@ class GroqSelectedAdapter:
             "unknown" if finish == "length" else
             "returned" if reasoning else "absent"
         )
+        # Observe optional cache-field presence on the decoded provider payload,
+        # before the public usage projection can omit malformed/absent detail.
+        cache_observation = observe_groq_cache(payload.get("usage"))
         usage = _usage(payload.get("usage"))
         if usage is None:
             return self._failed(prepared, "invalid_usage", started, 502)
-        cache_observation = observe_groq_cache(payload.get("usage"))
         x_groq = payload.get("x_groq")
         request_id = x_groq.get("id") if isinstance(x_groq, dict) else None
         if not isinstance(request_id, str):

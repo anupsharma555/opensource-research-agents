@@ -11,7 +11,7 @@ from ora.contracts.models import LiveStartRequest
 from ora.coordination.board import ref
 from ora.coordination.executor import WorkSpec
 from ora.mission.service import LocalToolRejection
-from tests.mission.test_service import answer, drain, service, tool
+from tests.mission.test_service import answer, drain, serialized_peer_name, service, tool
 
 
 def _last_tool(request: dict) -> tuple[str, dict]:
@@ -142,9 +142,7 @@ def test_forged_peer_actor_argument_is_local_then_authorized_request_succeeds(
 
     def transport(request, *, timeout):
         body = json.loads(request.data)
-        instructions = body["messages"][0]["content"]
-        assert instructions.startswith(("You are Sage,", "You are Mxra,"))
-        role = "critique" if instructions.startswith("You are Mxra,") else "synthesis"
+        role = "critique" if serialized_peer_name(body) == "Mxra" else "synthesis"
         counts[role] += 1
         step = counts[role]
         if role == "synthesis" and step == 1:

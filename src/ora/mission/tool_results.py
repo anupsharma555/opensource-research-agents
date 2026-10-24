@@ -12,7 +12,8 @@ import hashlib
 from ora.state import StateError
 from ora.state.store import canonical
 
-PAGEABLE_TOOLS = frozenset({"read_note", "read_plan", "search_notes", "board_read", "list_optional_work"})
+PARALLEL_PAGEABLE_TOOLS = frozenset({"read_research_activity", "retain_evidence", "search_evidence_library"})
+PAGEABLE_TOOLS = frozenset({"read_note", "read_plan", "search_notes", "board_read", "list_optional_work"}) | PARALLEL_PAGEABLE_TOOLS
 WEB_PAGEABLE_TOOLS = frozenset({"search_web", "read_search_results", "cancel_search"})
 SCHOLARLY_PAGEABLE_TOOLS = frozenset({"search_scholarly"})
 ASSET_PAGEABLE_TOOLS = frozenset({"list_source_assets"})

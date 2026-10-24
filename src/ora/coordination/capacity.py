@@ -80,6 +80,25 @@ def _saved_token_limit(tx: Transaction, snapshot: dict) -> int | None:
     return _remaining((receipt["body"].get("rate_headers") or {}).get("x-ratelimit-limit-tokens"))
 
 
+def _blocked_model_dispatch_tx(tx: Transaction, body: dict, intent_ref: dict) -> bool:
+    """Require exact saved proof that a model guard stopped before HTTP."""
+    marker = tx.get("model_dispatch_attempt", f"model-dispatch:{intent_ref['id']}")
+    intent = tx.get(**intent_ref)
+    return bool(
+        marker is not None and intent is not None
+        and marker["body"].get("status") == "blocked_before_external_effect"
+        and marker["body"].get("intent_ref") == intent_ref
+        and marker["body"].get("mission_id") == body.get("mission_id")
+        and marker["body"].get("call_ref") == intent["body"].get("call_ref")
+        and marker["body"].get("request_sha256") == intent["body"].get("request_sha256")
+        and intent["body"].get("mission_id") == body.get("mission_id")
+        and intent["body"].get("task_id") == body.get("task_id")
+        and intent["body"].get("attempt_id") == body.get("attempt_id")
+        and (intent["body"].get("call_ref") or {}).get("id") == body.get("call_id")
+        and tx.get("model_response_receipt", f"model-response:{intent_ref['id']}") is None
+    )
+
+
 @dataclass(frozen=True)
 class QuotaLimit:
     """A configured local ceiling; None means external headroom is unknown."""
@@ -167,7 +186,7 @@ class CapacityScheduler:
         def no_higher(previous, updated):
             return previous is None or updated is not None and updated <= previous
         def web_tightening(scope, previous, updated):
-            return (scope in {"web:exa", "web:tavily", "web:searxng", "web:browserless"}
+            return (scope in {"web:exa", "web:tavily", "web:tavily:minute", "web:searxng", "web:browserless"}
                     and updated is not None
                     and updated["window_seconds"] >= previous["window_seconds"]
                     and updated["basis"] == previous["basis"]
@@ -626,6 +645,29 @@ class CapacityScheduler:
             if scoped_operations is None:
                 return None
             block = tx.get(QUOTA, scope)
+            if body["kind"] == "model" and limit.tokens is None:
+                token_heads = ([block["body"]] if block else []) + inherited_heads
+                has_token_feedback = any(
+                    type(head.get("remaining_tokens")) is int
+                    or _saved_token_limit(tx, head) is not None
+                    for head in token_heads
+                )
+                if not has_token_feedback:
+                    model_operations = [
+                        record["body"] for record in scoped_operations
+                        if record["body"]["kind"] == "model"
+                        and scope in record["body"]["quota_scopes"]
+                    ]
+                    probe_finished = any(
+                        attempt["status"] in {
+                            "completed", "failed", "known_unaccepted", "rate_limited",
+                        }
+                        for item in model_operations for attempt in item["attempts"]
+                    )
+                    if not probe_finished and any(
+                        item["reservation"] for item in model_operations
+                    ):
+                        return None  # Learn this domain before a concurrent first model call.
             observed_limits = []
             if block:
                 blocked_until = block["body"]["blocked_until"]
@@ -645,7 +687,8 @@ class CapacityScheduler:
                 if scope not in item["quota_scopes"]:
                     continue
                 for attempt in item["attempts"]:
-                    if attempt["at"] > now - limit.window_seconds:
+                    if (attempt["status"] != "terminal_no_effect"
+                            and attempt["at"] > now - limit.window_seconds):
                         charges.append((attempt["at"] + limit.window_seconds, attempt["charged_tokens"]))
                 if item["reservation"] and item["phase"] == "admitted":
                     pending_requests += 1
@@ -735,7 +778,9 @@ class CapacityScheduler:
             if item["reservation"] or item["phase"] in {"admitted", "dispatched", "uncertain"}:
                 return None, []
             recent_inherited_charge |= any(
-                attempt["at"] > now - window_seconds for attempt in item["attempts"]
+                attempt["status"] != "terminal_no_effect"
+                and attempt["at"] > now - window_seconds
+                for attempt in item["attempts"]
             )
             merged.append({**record, "body": {
                 **item, "quota_scopes": [*item["quota_scopes"], scope],
@@ -845,6 +890,8 @@ class CapacityScheduler:
                 continue
             counted_active = False
             for index, attempt in enumerate(item["attempts"]):
+                if attempt["status"] == "terminal_no_effect":
+                    continue  # A pre-provider cancellation used no external request.
                 if record["id"] == source_operation_id:
                     if type(source_attempt_count) is int and index < source_attempt_count:
                         continue
@@ -922,7 +969,9 @@ class CapacityScheduler:
                 )
                 recent = sum(
                     max(1, attempt["charged_tokens"])
-                    for attempt in item["attempts"] if attempt["at"] > now - window
+                    for attempt in item["attempts"]
+                    if attempt["status"] != "terminal_no_effect"
+                    and attempt["at"] > now - window
                 )
                 allocation = recent + (
                     max(1, item["estimated_tokens"]) if item["reservation"] else 0
@@ -1382,8 +1431,56 @@ class CapacityScheduler:
             return self.timeout(operation_id, owner, generation)
         if classification == "terminal":
             return self.settle(operation_id, owner, generation, used_tokens=None, outcome="failed")
+        if classification == "terminal_no_effect":
+            now = self.store.clock()
+
+            def save_no_effect(tx):
+                record = self._owned(tx, operation_id, owner, generation, now)
+                body = record["body"]
+                intent_ref = (body.get("request_token_estimate") or {}).get("intent_ref")
+                exact_intent_ref = (
+                    isinstance(intent_ref, dict)
+                    and set(intent_ref) == {"kind", "id", "version"}
+                    and intent_ref.get("kind") == "model_request_intent"
+                    and isinstance(intent_ref.get("id"), str)
+                    and type(intent_ref.get("version")) is int
+                )
+                marker = (
+                    tx.get("model_dispatch_attempt", f"model-dispatch:{intent_ref['id']}")
+                    if exact_intent_ref
+                    else None
+                )
+                blocked_before_effect = (
+                    _blocked_model_dispatch_tx(tx, body, intent_ref)
+                    if marker is not None else False
+                )
+                if (body["phase"] != "dispatched" or body["kind"] != "model"
+                        or not exact_intent_ref
+                        or (marker is not None and not blocked_before_effect)
+                        or tx.get("model_response_receipt", f"model-response:{intent_ref['id']}")):
+                    raise StateConflict("Model no-effect cancellation lacks an undispatched intent")
+                attempts = list(body["attempts"])
+                attempts[-1] = dict(
+                    attempts[-1], charged_tokens=0, usage_known=True, cached_tokens=0,
+                    status="terminal_no_effect", completed_at=now,
+                )
+                updated = dict(
+                    body, phase="failed", attempts=attempts, reservation=False,
+                    local_active=False, external_active=False, owner=None,
+                    lease_until=None, wake_at=None, wait_started_at=None,
+                    diagnostic="confirmed_pre_dispatch_no_effect",
+                    active_seconds=body["active_seconds"] + max(0, now - attempts[-1]["at"]),
+                )
+                return tx.put(OPERATION, operation_id, updated,
+                              expected_version=record["version"])["body"]
+
+            self.store.transact(
+                f"capacity-terminal-no-effect-{operation_id}-{generation}",
+                {"owner": owner, "generation": generation, "at": now}, save_no_effect,
+            )
+            return self.get(operation_id)
         if classification != "temporary_no_effect" or not math.isfinite(retry_after) or retry_after < 0:
-            raise StateError("Transport failure needs temporary_no_effect, terminal or uncertain")
+            raise StateError("Transport failure needs a known no-effect, terminal or uncertain outcome")
         now = self.store.clock()
 
         def save(tx):
@@ -1410,6 +1507,54 @@ class CapacityScheduler:
                             {"owner": owner, "generation": generation,
                              "classification": classification, "retry_after": retry_after}, save)
         return self.get(operation_id)
+
+    def settle_expired_pre_dispatch_no_effect_tx(
+        self, tx: Transaction, operation_id: str, *, intent_ref: dict,
+    ) -> dict:
+        """Release an expired model hold with exact saved no-HTTP proof.
+
+        The caller must independently establish the saved pre-dispatch stop.
+        This method fences the old generation and zeroes the capacity account
+        in the same transaction as that caller's work replacement.
+        """
+        if (
+            type(intent_ref) is not dict
+            or intent_ref.get("kind") != "model_request_intent"
+            or type(intent_ref.get("id")) is not str
+            or type(intent_ref.get("version")) is not int
+        ):
+            raise StateError("Known no-effect recovery needs an exact model intent")
+        record = tx.get(OPERATION, operation_id)
+        body = record["body"] if record else None
+        marker = tx.get("model_dispatch_attempt", f"model-dispatch:{intent_ref['id']}")
+        if (
+            body is None or body["kind"] != "model"
+            or body["phase"] != "uncertain" or body["owner"] is not None
+            or body["lease_until"] is not None or not body["reservation"]
+            or body["cancel_requested"] or body["local_active"]
+            or (body.get("request_token_estimate") or {}).get("intent_ref") != intent_ref
+            or not body["attempts"]
+            or body["attempts"][-1]["status"] not in {"dispatched", "uncertain"}
+            or (marker is not None and not _blocked_model_dispatch_tx(tx, body, intent_ref))
+            or tx.get("model_response_receipt", f"model-response:{intent_ref['id']}")
+        ):
+            raise StateConflict("Uncertain model hold lacks confirmed pre-dispatch no-effect proof")
+        now = self.store.clock()
+        attempts = list(body["attempts"])
+        attempts[-1] = dict(
+            attempts[-1], status="terminal_no_effect", charged_tokens=0,
+            usage_known=True, cached_tokens=0, completed_at=now,
+        )
+        return tx.put(
+            OPERATION, operation_id,
+            {**body, "phase": "failed", "attempts": attempts,
+             "reservation": False, "local_active": False, "external_active": False,
+             "owner": None, "lease_until": None, "wake_at": None,
+             "wait_started_at": None, "generation": body["generation"] + 1,
+             "diagnostic": "confirmed_pre_dispatch_no_effect",
+             "active_seconds": body["active_seconds"] + max(0, now - attempts[-1]["at"])},
+            expected_version=record["version"],
+        )["body"]
 
     def expire(self) -> list[dict]:
         """Recover unused admissions; retain dispatched external reservations."""

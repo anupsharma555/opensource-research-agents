@@ -6,6 +6,7 @@ changes request bytes, or stores provider text, headers, credentials, or URLs.
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import hashlib
 import io
@@ -24,6 +25,7 @@ from typing import Callable
 from ora.live.provider import MODEL, URL
 from ora.mission.figure_reading import IMAGE_INPUT_TOKENS, VISION_MODEL
 from ora.models.token_estimate import estimate_context_tokens, estimate_request_tokens
+from ora.retrieval.providers import HTTPDispatchBlocked
 from ora.retrieval.validation_transport import _atomic_json
 
 
@@ -33,6 +35,10 @@ class BudgetStop(RuntimeError):
     def __init__(self, reason: str):
         self.reason = reason
         super().__init__(reason)
+
+
+class BudgetAdmissionStop(BudgetStop, HTTPDispatchBlocked):
+    """The current request was blocked before dispatch; earlier attempts are unchanged."""
 
 
 def _usage(raw: bytes) -> int | None:
@@ -52,6 +58,24 @@ def _usage(raw: bytes) -> int | None:
     except (ValueError, TypeError, KeyError, AttributeError):
         pass
     return None
+
+
+def _failure_category(error: Exception) -> str:
+    """Classify transport failure without retaining exception text or addresses."""
+    reason = error.reason if isinstance(error, urllib.error.URLError) else error
+    if isinstance(reason, socket.gaierror):
+        return "dns"
+    if isinstance(reason, TimeoutError):
+        return "timeout"
+    if isinstance(reason, ConnectionError) or (
+        isinstance(reason, OSError)
+        and reason.errno in {
+            errno.ECONNABORTED, errno.ECONNREFUSED, errno.ECONNRESET,
+            errno.EHOSTUNREACH, errno.ENETDOWN, errno.ENETUNREACH,
+        }
+    ):
+        return "connection"
+    return "other"
 
 
 class _ReplayResponse:
@@ -106,8 +130,11 @@ class AgentBudget:
         if type(accounting_only) is not bool:
             raise ValueError("accounting-only authorization must be explicit boolean")
         values = (model_limit, token_limit, retrieval_limit)
+        # A finite token budget can bound model work without a separate call
+        # count. Retrieval has no model-token charge, so it still needs its own
+        # explicit bound unless wholly unbounded accounting was authorized.
         if (accounting_only and not all(value is None for value in values)) or (
-                not accounting_only and any(value is None for value in values)):
+                not accounting_only and (token_limit is None or retrieval_limit is None)):
             raise ValueError("unlimited aggregate accounting requires all limits None and explicit authorization")
         for value in (model_limit, token_limit):
             if value is not None and (type(value) is not int or value < 1):
@@ -224,7 +251,9 @@ class AgentBudget:
                 elif (packet.get("model") != MODEL or type(cap) is not int
                     or not 1 <= cap <= 65536 or packet.get("stream") is not False
                     or packet.get("include_reasoning") is not True
-                    or packet.get("reasoning_effort") != ("low" if native else "high")):
+                    or packet.get("reasoning_effort") not in (
+                        ("low",) if native else ("medium", "high")
+                    )):
                     self.stop("model_request_mismatch")
                 else:
                     estimate = estimate_request_tokens(raw)
@@ -269,40 +298,52 @@ class AgentBudget:
                     self.data["stop_reason"] = "reported_token_cap"
         self._save()
 
+    def _uncertain_transport(self, entry: dict, error: Exception, *, stage: str):
+        entry.update(state="uncertain", failure_stage=stage,
+                     failure_category=_failure_category(error))
+        self.data["stop_reason"] = "uncertain_transport"
+        self._save()
+        raise BudgetStop("uncertain_transport") from None
+
     def open(self, original_open, opener, fullurl, data=None, timeout=socket._GLOBAL_DEFAULT_TIMEOUT,
              **kwargs):
         """Wrap one HTTP exchange; the caller preserves original urllib handling."""
         with self._mutex:
-            self._guard()
-            request = fullurl if isinstance(fullurl, urllib.request.Request) else None
-            url = request.full_url if request is not None else fullurl
             try:
-                parsed = urllib.parse.urlsplit(url)
-                if (parsed.scheme != "https" or not parsed.hostname
-                    or parsed.username is not None or parsed.password is not None):
-                    self.stop("endpoint_not_https")
-            except (ValueError, TypeError):
-                self.stop("endpoint_invalid")
-            is_model = url == URL
-            if parsed.hostname == urllib.parse.urlsplit(URL).hostname and not is_model:
-                self.stop("model_endpoint_mismatch")
-            body = request.data if request is not None else data
-            method = request.get_method() if request is not None else ("POST" if data is not None else "GET")
-            if is_model and method != "POST":
-                self.stop("model_request_mismatch")
-            native = False
-            if is_model:
+                self._guard()
+                request = fullurl if isinstance(fullurl, urllib.request.Request) else None
+                url = request.full_url if request is not None else fullurl
                 try:
-                    packet = json.loads(body)
-                    native = {"type": "browser_search"} in packet.get("tools", [])
-                except (ValueError, TypeError, AttributeError):
-                    self.stop("model_request_invalid")
-                if native and self.retrieval_limit == 0:
-                    self.stop("retrieval_attempt_cap")
-            kind = "model" if is_model else "retrieval"
-            entry = self._reserve(kind, body, native)
+                    parsed = urllib.parse.urlsplit(url)
+                    if (parsed.scheme != "https" or not parsed.hostname
+                        or parsed.username is not None or parsed.password is not None):
+                        self.stop("endpoint_not_https")
+                except (ValueError, TypeError):
+                    self.stop("endpoint_invalid")
+                is_model = url == URL
+                if parsed.hostname == urllib.parse.urlsplit(URL).hostname and not is_model:
+                    self.stop("model_endpoint_mismatch")
+                body = request.data if request is not None else data
+                method = request.get_method() if request is not None else ("POST" if data is not None else "GET")
+                if is_model and method != "POST":
+                    self.stop("model_request_mismatch")
+                native = False
+                if is_model:
+                    try:
+                        packet = json.loads(body)
+                        native = {"type": "browser_search"} in packet.get("tools", [])
+                    except (ValueError, TypeError, AttributeError):
+                        self.stop("model_request_invalid")
+                    if native and self.retrieval_limit == 0:
+                        self.stop("retrieval_attempt_cap")
+                kind = "model" if is_model else "retrieval"
+                entry = self._reserve(kind, body, native)
+            except BudgetStop as exc:
+                raise BudgetAdmissionStop(exc.reason) from None
+            stage = "opening"
             try:
                 result = original_open(opener, fullurl, data=data, timeout=timeout, **kwargs)
+                stage = "capture"
                 raw = result.read(self.MAX_CAPTURE_BYTES + 1)
                 if len(raw) > self.MAX_CAPTURE_BYTES:
                     entry["state"] = "uncertain"
@@ -311,7 +352,12 @@ class AgentBudget:
                 self._observed(kind, entry, status, raw)
                 return _ReplayResponse(result, raw)
             except urllib.error.HTTPError as exc:
-                raw = exc.read(self.MAX_CAPTURE_BYTES + 1)
+                if stage == "capture":
+                    self._uncertain_transport(entry, exc, stage=stage)
+                try:
+                    raw = exc.read(self.MAX_CAPTURE_BYTES + 1)
+                except Exception as capture_error:
+                    self._uncertain_transport(entry, capture_error, stage="capture")
                 if len(raw) > self.MAX_CAPTURE_BYTES:
                     entry["state"] = "uncertain"
                     self.stop("response_capture_limit")
@@ -345,8 +391,5 @@ class AgentBudget:
                 raise
             except BudgetStop:
                 raise
-            except Exception:
-                entry["state"] = "uncertain"
-                self.data["stop_reason"] = "uncertain_transport"
-                self._save()
-                raise BudgetStop("uncertain_transport") from None
+            except Exception as error:
+                self._uncertain_transport(entry, error, stage=stage)

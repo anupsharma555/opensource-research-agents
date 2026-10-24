@@ -107,7 +107,8 @@ def image_reader_handoff(store, *, scope: dict, document_ref: dict | None = None
 
 def read_document_page(store, document_ref: dict, *, page_number: int,
                        operation_id: str, region: dict | None = None,
-                       layout: str = "auto", prepare_for_ocr: bool = True, **scope) -> dict:
+                       layout: str = "auto", prepare_for_ocr: bool = True,
+                       shared_enabled: bool = False, **scope) -> dict:
     if prepare_for_ocr:
         rendered = render_public_document_ocr_page(store, document_ref, **scope,
             page_number=page_number, operation_id=operation_id, region=region)
@@ -115,7 +116,7 @@ def read_document_page(store, document_ref: dict, *, page_number: int,
         rendered = render_public_document_page(store, document_ref, **scope,
             page_number=page_number, operation_id=operation_id)
     return ocr_public_document_page(store, rendered["page_image_ref"], **scope,
-        operation_id=operation_id, layout=layout)
+        operation_id=operation_id, layout=layout, shared_enabled=shared_enabled)
 
 
 def supported_public_document_type(content_type: str) -> bool:
@@ -238,7 +239,9 @@ def run_figure_tool(host, spec, requested: dict) -> WorkResult:
     if spec.kind != "model" or spec.quota_scopes != (selected["quota_domain"],):
         raise StateError("Figure work lacks selected-profile model capacity")
     ocr = read_document_page(host.store, args["document_ref"], **scope,
-        page_number=args["page_number"], operation_id=spec.work_id, prepare_for_ocr=False)
+        page_number=args["page_number"], operation_id=spec.work_id,
+        prepare_for_ocr=False,
+        shared_enabled=run["body"].get("parallel_research_version") == 1)
     if ocr.get("model_input_status") != "permitted":
         return WorkResult(disposition="continue_task", payload={
             "tool_call_id": requested["id"], "name": "inspect_figure",

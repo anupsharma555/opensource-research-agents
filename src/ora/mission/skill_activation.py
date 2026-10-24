@@ -98,12 +98,15 @@ def checked_registry(root, role_id: str, pins: dict, selected: list[str]):
         pin = pins.get(name)
         skill = registry.skills.get(name)
         if (name == "general-web-discovery" and name in allowed and pin
-                and pin.get("version") == "1.0.0"):
-            directory = "runtime_skills/general_web_discovery/v1/"
+                and pin.get("version") in {"1.0.0", "2.0.0"}):
+            archived_version = pin["version"]
+            directory = ("runtime_skills/general_web_discovery/v1/"
+                         if archived_version == "1.0.0"
+                         else "runtime_skills/general_web_discovery/v2/")
             manifest = _read(root / directory / "manifest.json")
-            if manifest.get("skill_id") != name or manifest.get("version") != "1.0.0":
+            if manifest.get("skill_id") != name or manifest.get("version") != archived_version:
                 raise StateError("Archived web-discovery package is invalid")
-            skill = SkillDefinition(name, "1.0.0", manifest, {
+            skill = SkillDefinition(name, archived_version, manifest, {
                 variant: _checked_file(root, {**shape, "path": directory + Path(shape["path"]).name}, "Archived web discovery")
                 for variant, shape in manifest["instruction_variants"].items()
             }, _checked_file(root, {**manifest["example"], "path": directory + "example.json"}, "Archived web example"), skill.helper)

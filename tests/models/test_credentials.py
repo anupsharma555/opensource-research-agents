@@ -165,7 +165,7 @@ def test_prepared_binding_selects_key_without_sending_profile_to_provider(tmp_pa
         assert request.get_header("Authorization") == "Bearer fixture-backup"
         body = json.loads(request.data)
         assert "credential_profile" not in body and "quota_domain" not in body
-        assert body["reasoning_effort"] == "high"
+        assert body["reasoning_effort"] == "medium"
         return Response()
 
     adapter = GroqSelectedAdapter(tmp_path, transport=transport)

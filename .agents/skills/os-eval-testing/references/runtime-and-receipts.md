@@ -64,6 +64,14 @@ fail or become uncertain. Use the authorized aggregate ceiling across cases and
 retries; a new process or state directory must not silently reset it. Check limits
 at the transport boundary, not only after an agent turn that may contain several
 calls. Honor any token/spend ceiling as well as request count when specified.
+For a token-only evaluation allowance, keep request counts as accounting and
+enforce the aggregate token budget, including reservations for calls already in
+flight. Do not add an arbitrary call cap or substitute a very large number for
+an absent limit. Verify that the budget implementation supports an absent call
+cap with an enforced token cap; accounting-only mode is not a substitute because
+it removes the aggregate token limit. Provider request quotas and unexpected
+failure stops still apply. Do not rewrite historical ledgers when this policy
+changes.
 An allowance exhausted before a useful answer yields an incomplete test, not a
 scientific negative result. After diagnosis and authorized continuation, preserve
 the stopped ledger and link any continuation to its attempt count and remaining
@@ -73,8 +81,15 @@ A test of corrected orchestration with old prompts does not qualify new prompts.
 
 On a first-failure stop, block new dispatch while allowing the already-attempted
 callback a bounded opportunity to save its exact response receipt and settle its
-capacity record before closing the host. If either remains missing, preserve the
-uncertain state rather than replaying the request. Verify this through the full
+capacity record and executor acceptance before closing the host. A finished HTTP
+ledger entry alone does not mean the callback has finished applying its result.
+Use `MissionDispatchDriver.drain_active` after disabling new scheduling, and
+inspect the result before close; a drain timeout preserves unfinished state.
+Read intent/work/receipt transitions from one coherent snapshot, as in
+`ora.mission.evaluation_settlement`, rather than mixing observations taken during
+capture. Do not declare review proof missing between a mailbox update and its
+executor receipt; judge the settled record. If capture or settlement remains
+missing, preserve the uncertainty rather than replaying the request. Verify this through the full
 runner entrypoint with injected success and transport failure; helper-only checks
 can miss configuration-shape errors, capture timing and profile restoration.
 
@@ -172,11 +187,46 @@ and accepted outputs. Count all relevant intermediate inputs when checking
 leakage, including partial/error responses and earlier same-task calls. An
 unresolved dispatch leaves that part of the audit uncertain.
 
+## Review provider reasoning for every live test
+
+Inspect the captured provider reasoning for every model step, including
+intermediate agent and auxiliary-model calls when available. Keep the review
+separate from checking file integrity:
+
+1. Match the trace to the exact run, agent, call and response receipt. Reconcile
+   capture coverage with attempted calls, returned responses and finish reasons.
+   Distinguish complete provider text, provider-truncated text, legacy redacted
+   text and unavailable capture. Reasoning-token counts cannot supply missing text.
+2. Read each available trace and compare its stated purpose and evidence use with
+   the input actually sent, skills/tools available and selected, peer questions
+   and answers, and subsequent saved effects. Note useful explanations, repeated
+   deliberation, mistaken context or tool assumptions, and discrepancies only
+   where the records support them. Intended actions are not executed actions.
+3. Record **Reasoning trace reviewed: Yes / Partial / No / Not applicable**, with
+   reviewed/available/model-step counts and a short finding. Missing or truncated
+   traces limit the conclusion; they do not imply zero reasoning or invalidate
+   independently demonstrated behavior. Model-free cases are not applicable.
+4. Treat provider reasoning as diagnostic model output, not a faithful account of
+   every internal computation or independent proof of scientific support. Use the
+   actual request, tool outcomes and source evidence to resolve disagreements.
+   Keep a public action-purpose field distinct from this trace and from the
+   evaluator's interpretation.
+5. In a requested private input-to-output report, follow
+   [the step-level reasoning format](../../os-run-details/references/report-format.md#provider-reasoning-in-each-step):
+   link the matching private, human-readable per-step Markdown directly after
+   its capture label, state capture limits and concise reviewed findings, and
+   link the combined Markdown trace at the end. Embed full trace text inline
+   only when explicitly requested. Keep byte-exact TXT and JSON separately.
+   Use saved exports to review existing runs; do not rerun a model
+   just to fill a reporting gap. Keep raw text out of cloud telemetry, runtime peer
+   context, tracked examples, and Codex conversation-log exports.
+
 Finish with separate results for:
 
 - Task usefulness and source support, including review method and limitations.
 - Whether the intended condition/capability was actually exercised.
 - Execution, recovery and permissions, supported by exact records.
+- Reasoning-trace review coverage and its findings or capture limitations.
 - Provider-reported input/output/total usage, unknown outcomes and optional subsets.
 - UI behavior only if tested; broader scientific validity/endurance remain separate.
 

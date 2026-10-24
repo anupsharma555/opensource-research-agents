@@ -11,7 +11,7 @@ from ora.contracts.models import LiveStartRequest
 from ora.mission import MissionService
 from ora.models import GroqSelectedAdapter, ModelSession
 from ora.state import StateStore
-from tests.mission.test_service import ROOT, answer, drain, service, tool
+from tests.mission.test_service import ROOT, answer, drain, serialized_peer_name, service, tool
 
 
 def _restored_host(store: StateStore, transport) -> MissionService:
@@ -123,7 +123,7 @@ def test_backup_restores_pending_peer_tool_then_accepts_one_answer(
 
     def transport(request, *, timeout):
         body = json.loads(request.data)
-        role = "Sage" if "Sage" in body["messages"][0]["content"] else "Mxra"
+        role = serialized_peer_name(body)
         calls.append((role, body))
         index = sum(item[0] == role for item in calls)
         if role == "Sage" and index == 1:

@@ -7,6 +7,7 @@ no local peer requires a network service.
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
 from typing import Any, Callable
@@ -15,7 +16,7 @@ from ora.agents.json_shapes import JsonShapeError, finite_json
 from ora.state import StateConflict, StateError, StateStore, Transaction
 from ora.state.store import identifier
 
-from .board import BoardError, ref, require_actor, require_ref
+from .board import BoardError, ProposalBoard, ref, require_actor, require_ref
 
 
 class MailError(StateError):
@@ -124,29 +125,76 @@ class PeerMailbox:
             except (TypeError, ValueError) as exc:
                 raise MailError("Last progress needs an ISO timestamp") from exc
         cause = require_ref(tx, mission_id, cause_ref)
+        if cause["kind"] == ProposalBoard.KIND:
+            current_cause = tx.get(cause["kind"], cause["id"])
+            if current_cause is None or current_cause["body"].get("status") == "cancelled":
+                raise MailError("Source task was cancelled before peer request")
         if tx.get("mail_request", request_id):
             raise StateConflict("Request ID already exists")
+        requester = require_actor(tx, mission_id, requester_id)
+        run_id = requester["body"].get("run_id")
+        recipient_controls = [
+            json.loads(row["body"])
+            for row in tx.db.execute(
+                "SELECT r.body FROM records r JOIN heads h USING(kind,id,version) "
+                "WHERE r.kind='mission_task_control' "
+                "AND json_extract(r.body,'$.actor_id')=?",
+                (recipient_id,),
+            ).fetchall()
+        ]
+        eligible_recipient = any(
+            item.get("run_id") == run_id
+            and item.get("phase") not in {"cancelled", "deferred"}
+            for item in recipient_controls
+        )
+        cancelled_recipient = next((
+            item for item in recipient_controls
+            if item.get("run_id") == run_id and item.get("phase") == "cancelled"
+            and item.get("cancellation_request_id")
+        ), None)
+        cancellation = (
+            tx.get("mission_branch_cancellation", cancelled_recipient["cancellation_request_id"])
+            if cancelled_recipient and not eligible_recipient else None
+        )
+        unavailable_ref = ref(cancellation) if cancellation else None
         message = self.send_message_tx(
             tx, mission_id=mission_id, message_id=message_id,
             sender_id=requester_id, recipient_id=recipient_id,
             correlation_id=request_id, payload=payload, task_ref=task_ref,
             evidence_refs=evidence_refs, request_id=request_id)
+        if unavailable_ref:
+            outbox = tx.get("mail_outbox", message_id)
+            tx.put(
+                "mail_outbox", message_id,
+                {**outbox["body"], "status": "cancelled", "updated_at": self.store.now()},
+                expected_version=outbox["version"],
+            )
         saved = tx.put("mail_request", request_id, {
             "mission_id": mission_id, "question": question,
             "expected_artifact": expected_artifact, "cause_ref": ref(cause),
             "requester_id": requester_id, "recipient_id": recipient_id,
-            "message_ref": message["message_ref"], "status": "unanswered",
+            "message_ref": message["message_ref"],
+            "status": "recipient_unavailable_due_branch_cancel" if unavailable_ref else "unanswered",
             "answer_refs": [], "accepted_answer_ref": None,
             "replacement_request_ref": None, "reviewer_id": None,
             "expected_latency": expected_latency,
             "last_useful_progress_at": last_useful_progress_at,
             "created_at": self.store.now(), "delivered_at": None,
-            "answered_at": None, "resolved_at": None})
+            "answered_at": None, "resolved_at": self.store.now() if unavailable_ref else None,
+            **({"reason": "recipient_task_cancelled", "cancellation_ref": unavailable_ref}
+               if unavailable_ref else {}),
+        })
         tx.link(saved, cause, "caused_by")
         tx.link(saved, tx.get(**message["message_ref"]), "sent_as")
         tx.emit(mission_id, "peer_request_opened", {"request_ref": ref(saved),
                 "recipient_id": recipient_id,
                 "subjects": ([{"kind": "task", "id": task_ref["id"]}] if task_ref else [])})
+        if unavailable_ref:
+            tx.emit(mission_id, "peer_request_recipient_unavailable", {
+                "request_ref": ref(saved), "cancellation_ref": unavailable_ref,
+                "recipient_ids": [requester_id],
+                "subjects": ([{"kind": "task", "id": task_ref["id"]}] if task_ref else []),
+            })
         return {**message, "request_ref": ref(saved)}
 
     def send_request(
@@ -245,7 +293,7 @@ class PeerMailbox:
             raise MailError("Request is unavailable")
         if request["body"]["recipient_id"] != responder_id:
             raise MailError("Only the current recipient can answer")
-        if request["body"]["status"] in {"answered", "declined", "replaced"}:
+        if request["body"]["status"] in {"answered", "declined", "replaced", "cancelled", "recipient_unavailable_due_branch_cancel"}:
             raise MailError("Request already has a final disposition")
         artifact = require_ref(tx, mission_id, artifact_ref)
         if tx.get("mail_answer", answer_id):
@@ -309,7 +357,7 @@ class PeerMailbox:
                 raise MailError("Answer belongs to another request")
             if ref(answer) not in pending["body"]["answer_refs"]:
                 raise MailError("Answer version is not linked to the request")
-            if pending["body"]["status"] in {"answered", "declined", "replaced"}:
+            if pending["body"]["status"] in {"answered", "declined", "replaced", "cancelled", "recipient_unavailable_due_branch_cancel"}:
                 raise MailError("A final disposition already exists")
             if disposition not in {"answered", "partly_answered"}:
                 raise MailError("Review disposition must be answered or partly answered")
@@ -362,22 +410,70 @@ class PeerMailbox:
         return self._run(operation_id, mission_id, request, action)
 
     def decline(self, operation_id: str, *, mission_id: str, request_id: str,
-                recipient_id: str, reason: str) -> dict:
-        request = {key: value for key, value in locals().items() if key != "self"}
+                recipient_id: str, reason: str, expected_version: int | None = None,
+                producer_response_ref: dict | None = None) -> dict:
+        request = {key: value for key, value in locals().items()
+                   if key != "self" and (key not in {
+                       "expected_version", "producer_response_ref"
+                   } or value is not None)}
 
         def action(tx: Transaction) -> dict:
             require_actor(tx, mission_id, recipient_id)
             old = tx.get("mail_request", request_id)
             if old is None or old["body"]["mission_id"] != mission_id:
                 raise MailError("Request is unavailable")
-            if old["body"]["recipient_id"] != recipient_id or old["body"]["status"] in {"answered", "declined", "replaced"}:
+            if expected_version is not None:
+                if type(expected_version) is not int or expected_version < 1:
+                    raise MailError("Expected request version must be positive")
+                if old["version"] != expected_version:
+                    raise StateConflict("Request changed before recipient decline")
+                if old["body"]["status"] not in {"unanswered", "partly_answered"}:
+                    raise MailError("Request has an answer awaiting review or a final disposition")
+            if old["body"]["recipient_id"] != recipient_id or old["body"]["status"] in {"answered", "declined", "replaced", "cancelled", "recipient_unavailable_due_branch_cancel"}:
                 raise MailError("Recipient or request state is invalid")
+            producer = None
+            if producer_response_ref is not None:
+                producer = require_ref(tx, mission_id, producer_response_ref)
+                call_ref = producer["body"].get("call_ref")
+                call = require_ref(tx, mission_id, call_ref) if isinstance(call_ref, dict) else None
+                if (producer["kind"] != "model_response_receipt"
+                        or producer["body"].get("status") != "tool_requested"
+                        or call is None or call["kind"] != "agent_call"
+                        or call["body"].get("instance_id") != recipient_id
+                        or call["body"].get("task_id") != producer["body"].get("task_id")
+                        or call["body"].get("attempt_id") != producer["body"].get("attempt_id")
+                        or call["body"].get("mission_id") != mission_id):
+                    raise MailError("Decline reason lacks this recipient's model response")
+                try:
+                    payload = json.loads(self.store.read_blob(producer["body"]["blob"]["sha256"]))
+                    calls = payload["tool_calls"]
+                    selected = calls[0].get("function") if (
+                        type(calls) is list and len(calls) == 1
+                        and isinstance(calls[0], dict)
+                    ) else None
+                    arguments = json.loads(selected["arguments"]) if (
+                        isinstance(selected, dict)
+                    ) else None
+                except (KeyError, IndexError, TypeError, ValueError, StateError) as exc:
+                    raise MailError("Decline reason lacks an exact saved tool call") from exc
+                if (not isinstance(selected, dict)
+                        or selected.get("name") != "decline_peer_request"
+                        or arguments != {
+                            "request_id": request_id,
+                            "request_version": expected_version,
+                            "reason": reason,
+                        }):
+                    raise MailError("Decline reason differs from the saved model tool call")
             identifier(reason)
             saved = tx.put("mail_request", request_id,
                            {**old["body"], "status": "declined", "reason": reason,
-                            "resolved_at": self.store.now()},
+                            "resolved_at": self.store.now(),
+                            **({"reason_producer_response_ref": ref(producer)}
+                               if producer is not None else {})},
                            expected_version=old["version"])
             tx.link(saved, old, "derived_from")
+            if producer is not None:
+                tx.link(saved, producer, "input")
             tx.emit(mission_id, "peer_request_declined", {"request_ref": ref(saved),
                     "recipient_ids": [old["body"]["requester_id"]],
                     "subjects": self._request_subjects(tx, old)})
@@ -398,7 +494,7 @@ class PeerMailbox:
             old = tx.get("mail_request", old_request_id)
             if old is None or old["body"]["mission_id"] != mission_id:
                 raise MailError("Original request is unavailable")
-            if old["body"]["status"] in {"answered", "replaced"}:
+            if old["body"]["status"] in {"answered", "replaced", "cancelled", "recipient_unavailable_due_branch_cancel"}:
                 raise MailError("Original request cannot be redirected")
             delegated = (
                 old["body"].get("reviewer_id") == actor_id

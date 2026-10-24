@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 
 import pytest
 
@@ -209,8 +210,9 @@ def test_selected_window_archives_exact_duplicate_when_full_request_needs_space(
             f"model-intent:{control['body']['call_ref']['id']}:1",
         )
         prior_hash = prior_intent["body"]["request_sha256"]
+        observed_limit = math.ceil((target + 6) / .90)
         host._update_control(
-            control, input_budget={"observed_limit_tokens": target + 6,
+            control, input_budget={"observed_limit_tokens": observed_limit,
                                    "target_fraction": .70},
         )
         assert host._schedule_model(host._control(run.run_id, actor))
@@ -224,8 +226,9 @@ def test_selected_window_archives_exact_duplicate_when_full_request_needs_space(
         assert budget["source_turn_mode"] == "all_allowed_sources_fit"
         assert budget["preview_admission_target_tokens"] == target
         assert budget["exact_complete_request_estimate_tokens"] <= target
-        assert budget["observed_account_limit"] == target + 6
-        assert budget["exact_complete_request_estimate_tokens"] + 6 <= (
+        assert budget["observed_account_limit"] == observed_limit
+        assert (budget["exact_complete_request_estimate_tokens"] + 6
+                + budget["rate_input_headroom_tokens"]) <= (
             budget["observed_account_limit"]
         )
         assert budget["output_reserve"] == call["body"]["settings"]["max_completion_tokens"]
@@ -241,7 +244,7 @@ def test_selected_window_archives_exact_duplicate_when_full_request_needs_space(
         assert len(call["body"]["exposed_tools"]) == len(expected_tools)
         assert set(call["body"]["exposed_tools"]) == expected_tools
         assert request["model"] == MODEL
-        assert request["reasoning_effort"] == "high"
+        assert request["reasoning_effort"] == "medium"
         assert len(request["tools"]) == len(expected_tools)
         assert {item["function"]["name"] for item in request["tools"]} == expected_tools
         index = json.loads(request["messages"][-1]["content"])

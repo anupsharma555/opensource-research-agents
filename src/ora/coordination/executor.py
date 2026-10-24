@@ -578,6 +578,195 @@ class ConcurrentExecutor:
             return "known"
         return "unverified"
 
+    def _cancelled_saved_model_tx(
+        self, tx: Transaction, spec: WorkSpec,
+    ) -> tuple[dict, dict, dict, int] | None:
+        """Find one captured response whose cancelled work and dispatch still match."""
+        work = tx.get(self.KIND, self._work_record_id(spec))
+        cap = tx.get("capacity_operation", self._capacity_id(spec))
+        run = tx.get("mission_run", spec.run_id)
+        task = tx.get("board_proposal", spec.proposal_ref["id"])
+        if not all((work, cap, run, task)):
+            return None
+        body = cap["body"]
+        cancelled = run["body"].get("status") == "cancelled" or (
+            task["body"].get("status") == "cancelled"
+            and body.get("cancel_requested") is True
+        )
+        attempts = body.get("attempts")
+        if (
+            not cancelled
+            or run["body"].get("mission_id") != spec.mission_id
+            or task["body"].get("mission_id") != spec.mission_id
+            or work["body"].get("spec") != spec.intent()
+            or work["body"].get("phase") not in {"pending", "result_unaccepted"}
+            or body.get("phase") not in {"dispatched", "uncertain"}
+            or body.get("reservation") is not True
+            or any(body.get(key) != value for key, value in (
+                ("mission_id", spec.mission_id), ("run_id", spec.run_id),
+                ("task_id", spec.proposal_ref["id"]), ("kind", "model"),
+                ("attempt_id", spec.attempt_id), ("call_id", spec.call_id),
+                ("budget_version", spec.configuration_ref["id"]),
+            ))
+            or tuple(body.get("quota_scopes", ())) != spec.quota_scopes
+            or not isinstance(attempts, list) or not attempts
+            or attempts[-1].get("status") not in {"dispatched", "uncertain"}
+            or attempts[-1].get("usage_known") is not False
+        ):
+            return None
+        try:
+            receipt = self._saved_model_receipt_tx(tx, spec)
+        except (StateConflict, StateError, KeyError, TypeError, ValueError):
+            return None
+        if receipt is None or self._model_receipt_effect(receipt) != "known":
+            return None
+        intent_id = f"model-intent:{spec.call_id}:{spec.call_version}"
+        intent = tx.get("model_request_intent", intent_id)
+        marker = tx.get("model_dispatch_attempt", f"model-dispatch:{intent_id}")
+        call = tx.get("agent_call", spec.call_id, spec.call_version)
+        if not all((intent, marker, call)):
+            return None
+        call_ref = {"kind": "agent_call", "id": spec.call_id,
+                    "version": spec.call_version}
+        intent_body, marker_body, response = (
+            intent["body"], marker["body"], receipt["body"]
+        )
+        request_sha = intent_body.get("request_sha256")
+        total = response.get("usage", {}).get("total_tokens")
+        if (
+            type(total) is not int or total < 0
+            or not isinstance(request_sha, str) or not request_sha
+            or (intent_body.get("blob") or {}).get("sha256") != request_sha
+            or any(intent_body.get(key) != value for key, value in (
+                ("mission_id", spec.mission_id), ("task_id", spec.proposal_ref["id"]),
+                ("instance_id", spec.actor_id), ("attempt_id", spec.attempt_id),
+                ("call_ref", call_ref), ("configuration_ref", spec.configuration_ref),
+            ))
+            or tuple(intent_body.get("source_refs", ())) != spec.input_refs
+            or any(call["body"].get(key) != value for key, value in (
+                ("mission_id", spec.mission_id), ("task_id", spec.proposal_ref["id"]),
+                ("instance_id", spec.actor_id), ("attempt_id", spec.attempt_id),
+                ("configuration_id", spec.configuration_ref["id"]),
+            ))
+            or marker_body.get("schema") != "ora.model_dispatch_attempt.v1"
+            or marker_body.get("status") != "captured"
+            or any(marker_body.get(key) != value for key, value in (
+                ("mission_id", spec.mission_id), ("intent_ref", ref(intent)),
+                ("call_ref", call_ref), ("request_sha256", request_sha),
+                ("receipt_ref", ref(receipt)),
+                ("credential_profile", intent_body.get("credential_profile")),
+                ("quota_domain", intent_body.get("quota_domain")),
+            ))
+            or any(response.get(key) != value for key, value in (
+                ("mission_id", spec.mission_id), ("task_id", spec.proposal_ref["id"]),
+                ("attempt_id", spec.attempt_id),
+                ("credential_profile", intent_body.get("credential_profile")),
+                ("quota_domain", intent_body.get("quota_domain")),
+            ))
+            or intent_body.get("quota_domain") not in spec.quota_scopes
+            or (body.get("request_token_estimate") or {}).get("intent_ref") not in (None, ref(intent))
+            or (body.get("request_token_estimate") or {}).get("request_sha256") not in (None, request_sha)
+        ):
+            return None
+        if work["body"].get("result_ref") is not None:
+            prior = tx.get(**work["body"]["result_ref"])
+            if (
+                prior is None or prior["kind"] != "executor_unaccepted_result"
+                or prior["body"].get("observed_receipt_ref") != ref(receipt)
+                or prior["body"].get("external_effect") != "known"
+                or prior["body"].get("capacity_reconciled") is True
+            ):
+                return None
+        return work, cap, receipt, total
+
+    def reconcile_cancelled_saved_model_responses(self, run_id: str) -> int:
+        """Account for exact captured cancelled responses without accepting their work."""
+        run = self.store.get("mission_run", run_id)
+        if run is None:
+            return 0
+        reconciled = 0
+        for work in self._work(run["body"]["mission_id"]):
+            spec = self._spec_from(work)
+            if (
+                spec.run_id != run_id or spec.kind != "model" or not spec.call_id
+                or work["body"].get("phase") not in {"pending", "result_unaccepted"}
+            ):
+                continue
+            db = self.store._connect()
+            try:
+                candidate = self._cancelled_saved_model_tx(Transaction(self.store, db), spec)
+            finally:
+                db.close()
+            if candidate is None:
+                continue
+
+            def save(tx: Transaction) -> dict:
+                exact = self._cancelled_saved_model_tx(tx, spec)
+                if exact is None:
+                    return {"reconciled": False}
+                current_work, current_cap, receipt, total = exact
+                cap_body = current_cap["body"]
+                generation = cap_body["generation"]
+                observation_id = _id(
+                    "executor-unaccepted:", [spec.mission_id, spec.work_id, generation]
+                )
+                prior_ref = current_work["body"].get("result_ref")
+                prior = tx.get(**prior_ref) if prior_ref else None
+                if prior is not None:
+                    observation_id = prior["id"]
+                    observation_body = {**prior["body"], "capacity_reconciled": True}
+                    observation = tx.put(
+                        "executor_unaccepted_result", observation_id, observation_body,
+                        expected_version=prior["version"],
+                    )
+                else:
+                    observation = tx.put("executor_unaccepted_result", observation_id, {
+                        "mission_id": spec.mission_id, "work_id": spec.work_id,
+                        "proposal_ref": spec.proposal_ref,
+                        "configuration_ref": spec.configuration_ref,
+                        "input_refs": list(spec.input_refs),
+                        "handler_id": spec.handler_id,
+                        "handler_version": spec.handler_version,
+                        "capacity_operation_id": self._capacity_id(spec),
+                        "capacity_generation": generation,
+                        "reason_code": "saved_response_after_cancel",
+                        "result": None, "result_sha256": None,
+                        "observed_receipt_ref": ref(receipt),
+                        "external_effect": "known", "used_tokens": total,
+                        "cached_tokens": 0, "capacity_reconciled": True,
+                        "created_at": self.store.clock(),
+                    })
+                now = self.store.clock()
+                claimed = tx.put("capacity_operation", current_cap["id"], {
+                    **cap_body, "phase": "uncertain", "owner": self.owner,
+                    "generation": generation + 1,
+                    "lease_until": now + self.lease_seconds,
+                    "local_active": False, "external_active": True,
+                }, expected_version=current_cap["version"])
+                self.capacity.settle_known_uncertain_tx(
+                    tx, self._capacity_id(spec), self.owner,
+                    claimed["body"]["generation"], outcome="known_unaccepted",
+                    output_ref=observation_id, used_tokens=total,
+                )
+                tx.put(self.KIND, current_work["id"], {
+                    **current_work["body"], "phase": "result_unaccepted",
+                    "result_ref": ref(observation),
+                }, expected_version=current_work["version"])
+                tx.emit(spec.mission_id, "executor_result_unaccepted", {
+                    "work_ref": ref(tx.get(self.KIND, current_work["id"])),
+                    "observation_ref": ref(observation),
+                    "external_effect": "known", "capacity_reconciled": True,
+                })
+                return {"reconciled": True}
+
+            result = self.store.transact(
+                _id("executor-cancelled-response:", [spec.mission_id, spec.work_id, uuid.uuid4().hex]),
+                {"run_id": run_id, "work_id": spec.work_id}, save,
+                mission_id=spec.mission_id,
+            )
+            reconciled += bool(result["reconciled"])
+        return reconciled
+
     def _mark_external_unknown(self, spec: WorkSpec, generation: int) -> None:
         try:
             self.capacity.timeout(self._capacity_id(spec), self.owner, generation)
@@ -835,6 +1024,14 @@ class ConcurrentExecutor:
                 raise StateConflict("Work intent vanished before result observation")
             if work["body"]["phase"] == "completed":
                 return {"status": "completed"}
+            if work["body"]["phase"] == "result_unaccepted" and work["body"].get("result_ref"):
+                saved = tx.get(**work["body"]["result_ref"])
+                if saved is not None and saved["body"].get("capacity_reconciled") is True:
+                    return {
+                        "status": "result_unaccepted",
+                        "observation_ref": ref(saved),
+                        "capacity_reconciled": True,
+                    }
             prior = tx.get("executor_unaccepted_result", observation_id)
             if prior is not None:
                 return {
@@ -1067,6 +1264,8 @@ class ConcurrentExecutor:
     def _accept(
         self, spec: WorkSpec, cap: dict, fence: dict, result: WorkResult, *,
         recovered_uncertain: bool = False,
+        accounted_observation_ref: dict | None = None,
+        validate_current_tx: Callable[[Transaction], None] | None = None,
     ) -> dict:
         result_data = json.loads(canonical(asdict(result)))
         result_hash = hashlib.sha256(canonical(result_data).encode()).hexdigest()
@@ -1086,6 +1285,25 @@ class ConcurrentExecutor:
 
         def save_related(tx: Transaction) -> list[dict]:
             self._validate_tx(tx, spec)
+            if accounted_observation_ref is not None:
+                work = tx.get(self.KIND, self._work_record_id(spec))
+                capacity = tx.get("capacity_operation", self._capacity_id(spec))
+                observation = tx.get(**accounted_observation_ref)
+                if (
+                    work is None or work["body"].get("phase") != "result_unaccepted"
+                    or work["body"].get("result_ref") != accounted_observation_ref
+                    or capacity is None or capacity["body"].get("phase") != "known_unaccepted"
+                    or capacity["body"].get("cancel_requested") is True
+                    or capacity["body"].get("output_ref") != accounted_observation_ref["id"]
+                    or observation is None or observation["kind"] != "executor_unaccepted_result"
+                    or observation["body"].get("observed_receipt_ref") != result.output_refs[0]
+                    or observation["body"].get("external_effect") != "known"
+                    or observation["body"].get("capacity_reconciled") is not True
+                    or observation["body"].get("used_tokens") != result.used_tokens
+                ):
+                    raise StateConflict("Captured model response is no longer unaccepted work")
+            if validate_current_tx is not None:
+                validate_current_tx(tx)
             if self.validate_output_tx is not None:
                 self.validate_output_tx(tx, spec, result)
             model_receipt = self._model_receipt_tx(tx, spec, result)
@@ -1105,7 +1323,8 @@ class ConcurrentExecutor:
                 "provider_wait_seconds": capacity_body["provider_wait_seconds"],
                 "retry_wait_seconds": capacity_body["retry_wait_seconds"],
                 "active_seconds": capacity_body["active_seconds"]
-                + max(0, now - capacity_body["attempts"][-1]["at"]),
+                + (0 if accounted_observation_ref is not None else
+                   max(0, now - capacity_body["attempts"][-1]["at"])),
                 "peer_wait": "not_measured_by_executor",
             }
             artifact = tx.put(
@@ -1198,7 +1417,9 @@ class ConcurrentExecutor:
                 ),
             )
             pointers.append(trace)
-            if recovered_uncertain:
+            if accounted_observation_ref is not None:
+                pass  # Its known provider usage was settled with the unaccepted observation.
+            elif recovered_uncertain:
                 self.capacity.settle_known_uncertain_tx(
                     tx, self._capacity_id(spec), self.owner, cap["generation"],
                     outcome="completed", output_ref=artifact_id,
@@ -1230,7 +1451,8 @@ class ConcurrentExecutor:
             return pointers
 
         return self.board.accept_result(
-            _id("executor-accept:", [spec.mission_id, spec.work_id]),
+            _id("executor-accept-captured:" if accounted_observation_ref is not None
+                else "executor-accept:", [spec.mission_id, spec.work_id]),
             mission_id=spec.mission_id,
             proposal_id=spec.proposal_ref["id"],
             actor_id=spec.actor_id,
@@ -1240,6 +1462,87 @@ class ConcurrentExecutor:
             related_request=related_request,
             complete_task=result.disposition == "completed",
         )
+
+    def accept_captured_model_response(
+        self, spec: WorkSpec, response_ref: dict, observation_ref: dict, *,
+        validate_current_tx: Callable[[Transaction], None],
+    ) -> dict:
+        """Accept one already-accounted model reply under a fresh task claim.
+
+        The provider and callback are never invoked. The existing capacity charge
+        stays attached to the unaccepted observation; board acceptance creates
+        only the missing local artifact and advances the original work.
+        """
+        if (spec.kind, spec.handler_id, spec.handler_version) != ("model", "mission-model", "1"):
+            raise StateError("Captured recovery needs pinned mission model work")
+        work = self.store.get(self.KIND, self._work_record_id(spec))
+        if work is None or work["body"].get("spec") != spec.intent():
+            raise StateConflict("Captured model work changed")
+        if work["body"].get("phase") == "completed":
+            return {"status": "already_completed"}
+        if (work["body"].get("phase") != "result_unaccepted"
+                or work["body"].get("result_ref") != observation_ref):
+            return {"status": "not_unaccepted"}
+        db = self.store._connect()
+        try:
+            tx = Transaction(self.store, db)
+            receipt = self._saved_model_receipt_tx(tx, spec)
+            observation = tx.get(**observation_ref)
+            cap = tx.get("capacity_operation", self._capacity_id(spec))
+            run = tx.get("mission_run", spec.run_id)
+            proposal = tx.get("board_proposal", spec.proposal_ref["id"])
+            if (
+                receipt is None or ref(receipt) != response_ref
+                or self._model_receipt_effect(receipt) != "known"
+                or receipt["body"].get("status") not in {"complete", "tool_requested"}
+                or observation is None or observation["kind"] != "executor_unaccepted_result"
+                or observation["body"].get("observed_receipt_ref") != response_ref
+                or observation["body"].get("capacity_reconciled") is not True
+                or cap is None or cap["body"].get("phase") != "known_unaccepted"
+                or cap["body"].get("output_ref") != observation_ref["id"]
+                or cap["body"].get("cancel_requested") is True
+                or run is None or run["body"].get("status") == "cancelled"
+                or proposal is None or ref(proposal) != spec.proposal_ref
+                or proposal["body"].get("status") != "open"
+            ):
+                return {"status": "not_eligible"}
+            validate_current_tx(tx)
+        finally:
+            db.close()
+        current = next((item for item in self.board.open_work(spec.mission_id)
+                        if item["proposal_ref"] == spec.proposal_ref), None)
+        if current is None or current["current_claim"] is not None:
+            return {"status": "claimed_elsewhere"}
+        try:
+            claim = self.board.claim(
+                f"executor-captured-claim:{uuid.uuid4().hex}",
+                mission_id=spec.mission_id, proposal_id=spec.proposal_ref["id"],
+                actor_id=spec.actor_id, ttl=self.lease_seconds,
+                expected_version=spec.proposal_ref["version"],
+                invitation_id=spec.invitation_id,
+            )
+        except (StateConflict, StateError):
+            return {"status": "claim_unavailable"}
+        if claim.get("status") != "accepted":
+            return {"status": "claim_unavailable"}
+        fence = claim["fence"]
+        result = WorkResult(
+            disposition="continue_task", output_refs=(response_ref,),
+            payload={"response_ref": response_ref, "status": receipt["body"]["status"]},
+            used_tokens=receipt["body"]["usage"]["total_tokens"],
+        )
+        try:
+            accepted = self._accept(
+                spec, cap["body"], fence, result,
+                accounted_observation_ref=observation_ref,
+                validate_current_tx=validate_current_tx,
+            )
+        finally:
+            try:
+                self._release_board(spec, fence)
+            except (StateError, StateConflict):
+                pass
+        return accepted
 
     def accept_saved_navigation_result(
         self, spec: WorkSpec, result: WorkResult, navigation_ref: dict,
@@ -1520,7 +1823,9 @@ class ConcurrentExecutor:
                         "board_claim_release": "pending_expiry",
                     }
                 return {"work_id": spec.work_id, "status": state["phase"]}
-            if result.disposition in {"temporary_no_effect", "terminal", "uncertain"}:
+            if result.disposition in {
+                "temporary_no_effect", "terminal_no_effect", "terminal", "uncertain",
+            }:
                 try:
                     state = self.capacity.transport_failure(
                         cap_id,

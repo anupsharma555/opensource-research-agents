@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 
 import pytest
 
@@ -50,15 +51,20 @@ def test_latest_requested_window_is_in_next_request_with_other_copy_recoverable(
         control = host._control(run.run_id, actor)
         proposal = host.store.get("board_proposal", control["body"]["task_id"])
         target = None
+        observed_limit = None
         # The full planning/search catalog adds fixed overhead; allow room around the
         # one-copy boundary for generated record IDs and timestamps to vary.
+        # Preview the same hard input bound the scheduler will apply after its
+        # completion reservation and observed-limit headroom.
         for allowance in range(5300, 9001, 100):
+            candidate_limit = math.floor((allowance + 6) / .90)
+            candidate_target = candidate_limit - math.ceil(candidate_limit * .10) - 6
             all_sources = plan_source_turn(
-                host.store, ref(control), source_input_allowance_tokens=allowance
+                host.store, ref(control), source_input_allowance_tokens=candidate_target
             )
             all_fit = (
                 host._preview_soft_source_plan(
-                    control, proposal, all_sources, total_target=allowance,
+                    control, proposal, all_sources, total_target=candidate_target,
                     sequence=control["body"]["sequence"] + 1,
                 )
                 if all_sources["mode"] != "source_free_recovery" else None
@@ -69,18 +75,19 @@ def test_latest_requested_window_is_in_next_request_with_other_copy_recoverable(
             one = host._requested_window_source_plan(control, source_free)
             one_fit = (
                 host._preview_soft_source_plan(
-                    control, proposal, one, total_target=allowance,
+                    control, proposal, one, total_target=candidate_target,
                     sequence=control["body"]["sequence"] + 1,
                 ) if one else None
             )
             if (not all_fit and one_fit and (
                 one_fit["compact_selected_window"] or one_fit["archive_selected_window"]
             )):
-                target = allowance
+                target = candidate_target
+                observed_limit = candidate_limit
                 break
         assert target is not None, "Synthetic input must separate one-copy and two-copy fit"
         host._update_control(control, input_budget={
-            "observed_limit_tokens": target + 6, "target_fraction": .70,
+            "observed_limit_tokens": observed_limit, "target_fraction": 1.0,
         })
         assert host._schedule_model(host._control(run.run_id, actor))
         prepared = host._control(run.run_id, actor)
@@ -93,7 +100,7 @@ def test_latest_requested_window_is_in_next_request_with_other_copy_recoverable(
         text = json.dumps(request["messages"])
         budget = host.store.get("mission_call_budget", call["id"])["body"]
         assert request["model"] == MODEL
-        assert request["reasoning_effort"] == "high"
+        assert request["reasoning_effort"] == "medium"
         expected_tools = {
             "activate_skill", "board_read", "discover_capabilities", "peer_request",
             "publish_result", "read_context_page", "read_context_record",
@@ -120,7 +127,7 @@ def test_latest_requested_window_is_in_next_request_with_other_copy_recoverable(
         assert budget["source_turn_mode"] == "requested_window_recovery"
         assert budget["retained_source_refs"] == [early, late]
         assert budget["prior_completion_reservation"] == 6
-        assert budget["exact_complete_request_estimate_tokens"] + 6 <= target + 6
+        assert budget["exact_complete_request_estimate_tokens"] + 6 <= observed_limit
         assert "SELECTED_MARKER" in text
         assert "SECOND_COPY_MARKER" not in text
         assert late in [
@@ -174,7 +181,11 @@ def test_realistic_completion_reservation_delivers_requested_window(
         assert budget["prior_completion_reservation"] == 628
         assert budget["observed_account_limit"] == 8000
         soft_target = int(budget["observed_account_limit"] * .70)
-        hard_target = budget["observed_account_limit"] - budget["prior_completion_reservation"]
+        hard_target = (
+            budget["observed_account_limit"]
+            - budget["prior_completion_reservation"]
+            - budget["rate_input_headroom_tokens"]
+        )
         assert budget["preview_admission_target_tokens"] in {soft_target, hard_target}
         assert budget["exact_complete_request_estimate_tokens"] <= budget["preview_admission_target_tokens"]
         assert budget["exact_complete_request_estimate_tokens"] + 628 <= 8000
@@ -191,7 +202,7 @@ def test_realistic_completion_reservation_delivers_requested_window(
             budget["compacted_tool_turn_refs"]
             + ([budget["current_tool_turn_ref"]] if budget["current_tool_turn_ref"] else [])
         )
-        assert request["reasoning_effort"] == "high"
+        assert request["reasoning_effort"] == "medium"
         assert request["max_completion_tokens"] == 8192
         assert {"read_source_window", "read_context_record", "request_capability"} <= {
             item["function"]["name"] for item in request["tools"]

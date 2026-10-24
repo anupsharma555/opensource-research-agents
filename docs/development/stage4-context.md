@@ -130,12 +130,23 @@ draft, is preserved. These changes reduce repeated metadata rather than limiting
 the number of research steps or discarding durable history. Token estimates are
 approximate; provider-reported usage remains the basis for live comparisons.
 
+For an observed provider rate limit, ordinary request packing now leaves 10% of
+that limit as explicit input-estimation headroom, in addition to the predicted
+next completion. This is a conservative packing policy, not a calibrated
+provider tokenizer or a fixed account limit. It first compacts recoverable
+metadata and defers unselected schemas while preserving selected source text.
+The existing paced provider-feedback path remains available when only the local
+forecast exceeds the limit; its receipt records zero applied headroom. An actual
+413 still requires a smaller request. Qualification-imposed input limits keep
+their explicit experimental meaning. Raw tokenizer counts, this packing reserve,
+and successful-response usage are recorded separately.
+
 Packer v7 preserves the current assistant tool call, its exact call ID and
 arguments, and the matched tool result. It does not resend provider-returned
 reasoning in a later request. That reasoning remains in its restricted saved
 record; the context inclusion receipt labels this saved-only policy. Omitting
 reasoning from the next input reduces repeated private text without changing
-the selected model's high-reasoning setting or capture of new returned reasoning.
+the selected model's saved reasoning setting or capture of new returned reasoning.
 
 Packer v9 adds a factual continuation recap. When the mission host supplies
 its exact current task control, the working view names selected passage
@@ -327,10 +338,12 @@ additional exact note windows fit without losing previously retained report or
 note windows. Complete-request, completion-reserve and current-use checks still
 apply; no unread text or generated summary is added by this retention step.
 
-For supported high-reasoning, nonstreaming GPT-OSS local-function requests,
+For supported medium- or high-reasoning, nonstreaming GPT-OSS local-function requests,
 `ora.models.token_estimate` counts the complete canonical request with pinned
 `tiktoken==0.11.0`. New requests use the versioned canonical-JSON estimate without
-an added token cushion; saved `plus128.v1` requests retain their original
+an added token cushion. The current v4 basis accepts medium and high effort;
+saved v1–v3 bases retain their original high-effort request checks and counts.
+Saved `plus128.v1` requests retain their original
 128-token allowance. The bundled vocabulary is hash-checked locally; runtime
 counting never downloads an asset. Native
 browser requests, unfamiliar formats or unavailable assets use the labeled
@@ -408,6 +421,25 @@ are rechecked when replayed. A title or preview removed by packing adds no text
 dependency. A queued report-only dependency that loses permission currently
 prevents dispatch and leaves a local repair wait; automatic continuation from
 that specific wait still needs qualification.
+
+Packer v55 can include the exact peer question and the complete title, body,
+citations and limitations of its report in the requester's next working context
+when an exact `mail_answer` is awaiting review. This applies only to the
+requester's task and an accepted report whose producing lineage and current
+source use permit model text. The
+whole projected report must fit within 2,000 characters, the complete question
+within 600, and both within the measured input allowance. The packer prioritizes
+this review card ahead of optional historical detail and avoids repeating its
+request and answer detail. Under input pressure it can omit only duplicate
+navigation for that exact pair; other peer requests and source-reading progress
+remain. It never substitutes a prefix or summary. It labels the text
+as model-authored peer data, preserves the exact request, answer, report and
+read coordinates, and leaves larger or budget-omitted reports available through
+their existing exact reader. Included source dependencies are saved with the
+prepared request and checked again before dispatch. Visibility does not prove
+that the requester read, accepted or used the peer's assessment. Earlier pinned
+requests keep their original bytes and packer version; a later call on the same
+saved run may use the new layout.
 
 Packer v24 pages repeated parent fetch coordinates and selected-window read
 identifiers only when the same exact records already have a saved omission
@@ -526,6 +558,18 @@ no report body and grants no access; the reader still checks the requesting task
 and current source permissions. A compact overview therefore does not require a
 separate page lookup before reading the identified report. Older saved request
 packets remain unchanged.
+
+Pending peer review keeps ownership, the exact question, answer version and
+report-reading route separate from delivered report text. Compact cues are
+retried after required-index compaction; duplicate navigation for that same
+request/answer can be paged out before the cue is dropped. Large report text
+remains behind the permitted reader when it does not fit. Adding a tool schema
+must be measured against the complete serialized request, not the context
+fragment alone. A cue or reader reference never receives report-text delivery
+credit, and a previously read page is not assumed present in a later call.
+Peer-decline reasons use the same exact producer and current source-use checks
+before entering context. Offline cue, paging and decline tests verify these
+boundaries; they do not establish natural model review or efficiency gains.
 
 Publication distinguishes record attribution from source citation. A peer report
 can be named in the answer, but its ID is not a source-copy ID and reading it does

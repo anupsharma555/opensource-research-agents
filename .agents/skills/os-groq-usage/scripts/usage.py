@@ -294,11 +294,30 @@ def build_report(calls: list[dict], *, as_of: datetime, day: date, zone: str,
                  if day_start <= stamp(value["observed_at"]) < day_end]
         daily_latest[profile] = (max(dated, key=lambda o: stamp(o["observed_at"]))
                                  if dated else None)
-    return {"schema": "ora.groq.usage.summary.v1", "skill_version": "0.2.1",
+    assumed_resets = {}
+    for profile, observation in latest.items():
+        assumed_resets[profile] = None
+        if profile == "unknown" or not observation:
+            continue
+        limit, used = token(observation.get("limit")), token(observation.get("used"))
+        if not limit or used is None or used * 100 < limit * 95:
+            continue
+        reset = stamp(observation["observed_at"]) + timedelta(hours=24)
+        assumed_resets[profile] = {
+            "basis": "user_requested_24h_after_latest_near_limit_observation",
+            "near_limit_threshold_fraction": 0.95,
+            "anchor_observed_at": observation["observed_at"],
+            "observed_used": used, "observed_daily_limit": limit,
+            "assumed_full_reset_at": reset.isoformat(),
+            "status": "elapsed_unverified" if reset <= as_of else "future_assumption",
+            "provider_confirmed": False,
+        }
+    return {"schema": "ora.groq.usage.summary.v1", "skill_version": "0.2.3",
             "observed_at": as_of.isoformat(), "timezone": zone, "date": day.isoformat(),
             "model": model, "planning_daily_allowance": daily_limit, "periods": periods,
             "latest_provider_daily_quota_observations": latest,
             "calendar_day_provider_daily_quota_observations": daily_latest,
+            "assumed_full_reset_estimates": assumed_resets,
             "other_model_receipts_excluded": dict(Counter(c["model"] for c in calls
                                                         if c["model"] != model)),
             "coverage": "Only explicitly selected local databases and standalone call receipts",
@@ -379,13 +398,39 @@ def markdown(report: dict) -> str:
     lines += ["", "*Planning headroom = supplied allowance minus known local total tokens. "
               "It ignores cache deductions, unobserved calls and uncertain provider window semantics; "
               "it is not a balance or permission to dispatch.", "", "## Latest daily-quota evidence", ""]
+    def local_time(value: str | None) -> str:
+        if value is None:
+            return "Unknown — not reported"
+        return stamp(value).astimezone(ZoneInfo(report["timezone"])).strftime(
+            "%b %d, %Y %I:%M:%S %p %Z"
+        )
+
+    lines += [
+        f"Times shown in {report['timezone']}; historical observations, not current capacity.", "",
+        "| API-key profile | Observed at | Used / daily limit | Earliest retry for that request | Full daily allowance available at |",
+        "| --- | --- | ---: | --- | --- |",
+    ]
     for profile, observation in report["latest_provider_daily_quota_observations"].items():
         if observation:
-            lines.append(f"- {profile}: {observation['used']:,}/{observation['limit']:,} used; "
-                         f"{observation['headroom_at_observation']:,} headroom at "
-                         f"{observation['observed_at']}. Full reset time unknown.")
+            reset_text = local_time(observation.get("full_reset_at"))
+            estimate = report.get("assumed_full_reset_estimates", {}).get(profile)
+            if observation.get("full_reset_at") is None and estimate:
+                label = ("assumed; elapsed, unverified" if estimate["status"] == "elapsed_unverified"
+                         else "assumed")
+                reset_text = f"{local_time(estimate['assumed_full_reset_at'])} ({label})"
+            lines.append(
+                f"| {profile} | {local_time(observation['observed_at'])} | "
+                f"{observation['used']:,} / {observation['limit']:,} | "
+                f"{local_time(observation.get('retry_not_before'))} | "
+                f"{reset_text} |"
+            )
         else:
-            lines.append(f"- {profile}: no retained daily-token observation.")
+            lines.append(f"| {profile} | Unknown — no observation | Unknown | Unknown | Unknown — no observation |")
+    lines += ["", "Full daily allowance means the entire daily limit shown, not enough tokens "
+              "for one retry. Assumed times use the requested planning rule: 24 hours after the "
+              "latest provider observation at or above 95% of its daily limit (190K of 200K). "
+              "This is not a confirmed Groq reset rule. No qualifying observation means no estimate. "
+              "Later usage can change availability; an elapsed estimate does not establish a full balance."]
     lines += ["", report["coverage"], "", *[f"- {x}" for x in report["limitations"]], ""]
     for source in report.get("sources", []):
         lines.append(f"Source: {source['path']}")

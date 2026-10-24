@@ -18,6 +18,7 @@ from typing import Callable, Mapping
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
+from ora.models.token_measurement import read_token_measurement
 from ora.observability.evaluation import _OUTCOMES as _EVALUATION_OUTCOMES
 from ora.observability.metrics import build_context_metrics, read_cache_observation
 from ora.observability.tool_activity import TRUSTED_TOOL_NAMES, build_tool_activity
@@ -41,6 +42,8 @@ _TOKEN_ATTRIBUTES = frozenset({
     "gen_ai.usage.input_tokens", "gen_ai.usage.output_tokens",
     "gen_ai.usage.total_tokens", "gen_ai.usage.cache_read.input_tokens",
     "gen_ai.usage.reasoning.output_tokens", "osra.estimated.input_tokens",
+    "osra.admission.requested_tokens", "osra.admission.limit_tokens",
+    "osra.estimated.rate_input_headroom_tokens",
     *(f"osra.estimated.stage.{kind}_tokens" for kind in _STAGE_KINDS),
 })
 _USAGE_STATUS_ATTRIBUTES = frozenset(
@@ -61,6 +64,7 @@ _SUMMARY_COUNTS = frozenset({
     "cache_read_tokens", "reasoning_output_tokens", "peak_reported_input_tokens",
     "peak_estimated_input_tokens", "input_reported_calls", "output_reported_calls",
     "cache_covered_calls", "cache_total_calls", "cache_covered_input_tokens",
+    "cache_confirmed_input_calls",
     "token_mix_covered_calls", "reasoning_covered_calls", "reasoning_total_calls",
     "exact_ref_reuse_occurrences", "missing_exact_refs",
     "cache_hit_calls", "cache_miss_calls", "cache_invalid_calls",
@@ -72,6 +76,7 @@ _SUMMARY_COUNTS = frozenset({
 })
 _SUMMARY_PERCENTS = frozenset({
     "input_percent", "output_percent", "cache_read_percent",
+    "cache_confirmed_percent",
     "reasoning_output_percent",
     "cache_input_coverage_percent",
 })
@@ -89,6 +94,7 @@ _TOOL_REUSE_BASES = frozenset({
     "explicit_operation_reuse_status", "capability_attachment_flag",
     "public_document_http_fetch", "same_task_exact_read_window",
     "same_task_new_checked_location",
+    "saved_peer_request_record",
 })
 _TOOL_DELIVERY_STATES = frozenset({
     "captured_later", "dispatched_later", "not_observed_yet",
@@ -152,12 +158,18 @@ _LOCAL_REUSE_STATES = frozenset({
     "measured", "no_eligible_pair", "tokenizer_unavailable", "request_unavailable",
 })
 _LOCAL_REUSE_BASIS = "local_o200k_canonical_request_structure.v1"
+_STRUCTURAL_REUSE_BASIS = "local_o200k_canonical_messages_and_whole_tool_schema.v1"
+_STRUCTURAL_REUSE_STATES = frozenset({"complete", "partial", "baseline_only", "unavailable"})
 _LOCAL_REUSE_COUNTS = frozenset({
     "eligible_requests", "eligible_pairs", "measured_pairs", "unsupported_requests",
     "overlap_skipped_pairs", "stable_tool_schema_pairs",
     "estimated_repeated_message_tokens", "estimated_current_message_tokens",
     "estimated_stable_tool_schema_tokens",
     "captured_terminal_model_calls", "request_unavailable_calls",
+    "structural_candidate_calls", "structural_measured_calls",
+    "structural_measured_followup_pairs", "structural_unavailable_calls",
+    "structural_overlap_skipped_calls", "local_structural_input_tokens",
+    "repeated_local_structural_input_tokens",
 })
 _URL_IN_TEXT = re.compile(r"(?i)\b(?:[a-z][a-z0-9+.-]*://|www\.)\S+")
 _EMAIL_IN_TEXT = re.compile(r"(?i)\b[^\s@]+@[^\s@]+\.[^\s@]+\b")
@@ -410,6 +422,12 @@ def _local_reuse_attributes(value: object) -> dict:
     fraction = _nonnegative_number(value.get("estimated_message_prefix_token_fraction"))
     if fraction is not None and fraction <= 1:
         result["osra.local_reuse.message_prefix_percent"] = round(fraction * 100, 3)
+    if value.get("structural_basis") == _STRUCTURAL_REUSE_BASIS:
+        result["osra.local_reuse.structural_basis"] = _STRUCTURAL_REUSE_BASIS
+        result["osra.local_reuse.structural_coverage_status"] = value.get("structural_coverage_status")
+        structural_fraction = _nonnegative_number(value.get("local_structural_input_reuse_fraction"))
+        if structural_fraction is not None and structural_fraction <= 1:
+            result["osra.local_reuse.structural_input_percent"] = round(structural_fraction * 100, 3)
     return result if _valid_local_reuse_attributes(result) else {
         "osra.local_reuse.status": "request_unavailable",
     }
@@ -444,7 +462,63 @@ def _valid_local_reuse_attributes(attributes: Mapping[str, object]) -> bool:
             return False
     elif percentage is not None:
         return False
-    return True
+    return _valid_structural_reuse_attributes(attributes)
+
+
+def _valid_structural_reuse_attributes(attributes: Mapping[str, object]) -> bool:
+    def value(key: str):
+        return attributes.get("osra.local_reuse." + key)
+
+    if value("structural_coverage_status") is None:
+        return value("structural_input_percent") is None  # Historical projections.
+    state = value("structural_coverage_status")
+    if (not isinstance(state, str) or state not in _STRUCTURAL_REUSE_STATES
+            or value("structural_basis") != _STRUCTURAL_REUSE_BASIS):
+        return False
+    candidates, measured, pairs, unavailable, overlap = (
+        value(key) for key in ("structural_candidate_calls", "structural_measured_calls",
+                              "structural_measured_followup_pairs", "structural_unavailable_calls",
+                              "structural_overlap_skipped_calls"))
+    if (any(_nonnegative_int(n) is None for n in (candidates, measured, pairs, unavailable, overlap))
+            or measured + unavailable + overlap != candidates or pairs > measured):
+        return False
+    if ((state == "unavailable") != (measured == 0)
+            or state == "baseline_only" and (pairs or unavailable or overlap)
+            or state == "complete" and (not pairs or unavailable or overlap)
+            or state == "partial" and not (unavailable or overlap)):
+        return False
+    denominator = value("local_structural_input_tokens")
+    numerator = value("repeated_local_structural_input_tokens")
+    percent = value("structural_input_percent")
+    if measured and (_nonnegative_int(denominator) is None or denominator == 0):
+        return False
+    if not pairs:
+        return numerator is None and percent is None
+    return (_nonnegative_int(numerator) is not None and numerator <= denominator
+            and _nonnegative_number(percent) is not None
+            and math.isclose(percent, 100 * numerator / denominator, abs_tol=0.00051))
+
+
+def _structural_reuse_output(attributes: Mapping[str, object]) -> str | None:
+    """A run-wide local denominator includes each scope's first request."""
+    state = attributes.get("osra.local_reuse.structural_coverage_status")
+    if state is None:
+        return None
+    def value(key: str):
+        return attributes.get("osra.local_reuse." + key)
+    coverage = (f"{value('structural_measured_calls')}/{value('structural_candidate_calls')} "
+                f"request records measured; {value('structural_unavailable_calls')} unavailable, "
+                f"{value('structural_overlap_skipped_calls')} overlapping.")
+    percent = value("structural_input_percent")
+    if _nonnegative_number(percent) is not None:
+        return (f"Local input reuse: {percent:.1f}% "
+                f"({value('repeated_local_structural_input_tokens'):,}/"
+                f"{value('local_structural_input_tokens'):,} local tokens; {state} coverage). "
+                "Unchanged message prefixes plus identical whole tool definitions; "
+                "first requests included at zero local reuse. " + coverage)
+    reason = ("only first requests in separate comparison scopes"
+              if state == "baseline_only" else "no measured follow-up comparison")
+    return f"Local input reuse: unavailable ({reason}). " + coverage
 
 
 def _local_reuse_output(attributes: Mapping[str, object]) -> str | None:
@@ -752,6 +826,9 @@ def render_summary_output(attributes: Mapping[str, object]) -> str:
     misses = bounded_count("cache_miss_calls") or 0
     cache_percent = percent("cache_read_percent")
     coverage_unit = "HTTP attempts" if diagnostic else "saved request records"
+    confirmed_status = attributes.get("osra.summary.cache_confirmed_status")
+    confirmed_percent = percent("cache_confirmed_percent")
+    confirmed_input_calls = bounded_count("cache_confirmed_input_calls")
     captured = bounded_count(
         "diagnostic_model_captured_responses" if diagnostic else "captured_call_count"
     )
@@ -759,7 +836,46 @@ def render_summary_output(attributes: Mapping[str, object]) -> str:
         f" {covered}/{captured} captured responses had paired cache and input detail."
         if captured is not None and captured >= covered else ""
     )
-    if total == 0:
+    if not diagnostic and confirmed_status in {"complete", "minimum", "unknown"}:
+        # The saved-record denominator includes preparation-only intents and
+        # failed calls without usage. Lead with the paired-input denominator.
+        paired = f"{covered}/{number('cache_confirmed_input_calls')} input-reporting calls"
+        if confirmed_percent is not None and confirmed_status in {"complete", "minimum"}:
+            qualifier = ("complete detail for reported input" if confirmed_status == "complete"
+                         else "confirmed minimum; omitted cache detail remains unknown")
+            lines.append(
+                f"Cache: confirmed cached share of reported input {confirmed_percent} "
+                f"({number('cache_read_tokens')}/{number('input_tokens')} tokens; "
+                f"{paired} with detail; {qualifier})."
+            )
+        else:
+            lines.append(
+                f"Cache: confirmed cached share of reported input unknown "
+                f"({paired} with detail); absent detail is not zero."
+            )
+        if total > (confirmed_input_calls or 0):
+            without_input = total - (confirmed_input_calls or 0)
+            prepared_only = bounded_count("prepared_only_count")
+            detail = (
+                f"{prepared_only} preparation-only and "
+                f"{without_input - prepared_only} other "
+                f"{'record' if without_input - prepared_only == 1 else 'records'} "
+                "without reported input"
+                if prepared_only is not None and prepared_only <= without_input
+                else f"{without_input} without reported input"
+            )
+            lines.append(
+                f"Cache records: {total} saved request records ({detail})."
+            )
+        http_attempts = bounded_count("evaluation_model_http_attempts")
+        if (http_attempts is not None and confirmed_input_calls is not None
+                and http_attempts > confirmed_input_calls):
+            lines.append(
+                f"Input usage unknown on {http_attempts - confirmed_input_calls} "
+                "ledger-counted model HTTP "
+                f"{'attempt' if http_attempts - confirmed_input_calls == 1 else 'attempts'}."
+            )
+    elif total == 0:
         lines.append(f"Cache: no {coverage_unit.lower()} to measure.")
     elif covered == 0 and not_reported == total:
         lines.append(f"Cache: Not reported by Groq (0/{total} {coverage_unit}); "
@@ -791,6 +907,9 @@ def render_summary_output(attributes: Mapping[str, object]) -> str:
                      + (" Whole-run cached-input percentage unknown."
                         if covered < total else ""))
     local_reuse = _local_reuse_output(attributes)
+    structural_reuse = _structural_reuse_output(attributes)
+    if structural_reuse is not None:
+        lines.append(structural_reuse)
     if local_reuse is not None:
         lines.append(local_reuse)
     if diagnostic:
@@ -1097,9 +1216,13 @@ def _safe_export_body(body: dict) -> bool:
             valid = isinstance(value, str) and value in _LOCAL_REUSE_STATES
         elif key == "osra.local_reuse.basis":
             valid = value == _LOCAL_REUSE_BASIS
+        elif key == "osra.local_reuse.structural_basis":
+            valid = value == _STRUCTURAL_REUSE_BASIS
+        elif key == "osra.local_reuse.structural_coverage_status":
+            valid = isinstance(value, str) and value in _STRUCTURAL_REUSE_STATES
         elif key.startswith("osra.local_reuse.") and key.removeprefix("osra.local_reuse.") in _LOCAL_REUSE_COUNTS:
             valid = _nonnegative_int(value) is not None
-        elif key == "osra.local_reuse.message_prefix_percent":
+        elif key in {"osra.local_reuse.message_prefix_percent", "osra.local_reuse.structural_input_percent"}:
             valid = _nonnegative_number(value) is not None and value <= 100
         elif key in _LABEL_ATTRIBUTES:
             valid = _safe_label(value) == value
@@ -1193,6 +1316,8 @@ def _safe_export_body(body: dict) -> bool:
                              ))
         elif key == "osra.summary.cache_coverage_status":
             valid = value in {"complete", "partial", "unavailable"}
+        elif key == "osra.summary.cache_confirmed_status":
+            valid = value in {"complete", "minimum", "unknown"}
         elif key == "osra.summary.retrieval_http_attempt_status":
             valid = value == "unavailable_from_retrieval_attempt_receipts"
         elif key.startswith("osra.summary.retrieval_outcome."):
@@ -1349,6 +1474,9 @@ def _stage_attributes(store: StateStore, receipt: dict) -> dict[str, int]:
     final = _nonnegative_int(stage.get("final_input_tokens"))
     if final is not None:
         result["osra.estimated.input_tokens"] = final
+    headroom = _nonnegative_int(stage.get("rate_input_headroom_tokens"))
+    if headroom is not None:
+        result["osra.estimated.rate_input_headroom_tokens"] = headroom
     rows = stage.get("stages")
     if not isinstance(rows, list):
         return result
@@ -1395,6 +1523,13 @@ def _receipt_attributes(store: StateStore, receipt: dict, run_id: str) -> dict:
         attributes["gen_ai.response.model"] = model
     attributes.update(_usage_attributes(body))
     attributes.update(_stage_attributes(store, receipt))
+    measurements = read_token_measurement(body)
+    for key, attribute in (
+        ("provider_admission_tokens", "osra.admission.requested_tokens"),
+        ("provider_admission_limit_tokens", "osra.admission.limit_tokens"),
+    ):
+        if key in measurements:
+            attributes[attribute] = measurements[key]
     return attributes
 
 
@@ -1525,12 +1660,17 @@ def _summary_attributes(metrics: dict, status: object) -> dict[str, str | int | 
     if estimated_peak is not None:
         attributes["osra.summary.peak_estimated_input_tokens"] = estimated_peak
     cache = usage["cache_fraction"]
+    confirmed_cache = usage["cache_fraction_confirmed"]
     attributes["osra.summary.cache_covered_calls"] = cache["covered_calls"]
     attributes["osra.summary.cache_total_calls"] = cache["total_calls"]
     attributes["osra.summary.cache_covered_input_tokens"] = cache["covered_input_tokens"]
     attributes["osra.summary.cache_coverage_status"] = cache["coverage_status"]
     attributes["osra.summary.cache_hit_calls"] = cache["reported_hit_calls"]
     attributes["osra.summary.cache_miss_calls"] = cache["reported_miss_calls"]
+    attributes["osra.summary.cache_confirmed_status"] = confirmed_cache["status"]
+    attributes["osra.summary.cache_confirmed_input_calls"] = confirmed_cache[
+        "input_reported_calls"
+    ]
     for label in ("invalid", "not_reported", "unknown", "legacy_uncertain"):
         attributes[f"osra.summary.cache_{label}_calls"] = usage["cache_read"][f"{label}_calls"]
     retrieval = metrics["retrieval"]
@@ -1549,6 +1689,7 @@ def _summary_attributes(metrics: dict, status: object) -> dict[str, str | int | 
         ("input_percent", token_mix["input_fraction"]),
         ("output_percent", token_mix["output_fraction"]),
         ("cache_read_percent", cache["value"]),
+        ("cache_confirmed_percent", confirmed_cache["value"]),
         ("cache_input_coverage_percent", cache["eligible_input_coverage_fraction"]),
         ("reasoning_output_percent", reasoning["value"]),
     ):

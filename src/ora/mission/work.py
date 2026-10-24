@@ -15,8 +15,10 @@ from typing import Any
 
 from ora.agents import AgentRegistry
 from ora.coordination.board import ProposalBoard, ref
-from ora.state import StateConflict, StateStore
+from ora.state import StateConflict, StateError, StateStore
 from ora.state.store import canonical
+
+from .peer_freshness import changed_task_message
 
 
 class WorkError(ValueError):
@@ -117,12 +119,16 @@ class MissionWork:
         current = self.store.get("mission_task_control", control["id"])
         if not allow_historical_control and ref(current) != source_control_ref:
             raise WorkError("Task control changed; reread its current version")
+        if not replay and control["body"].get("phase") == "cancelled":
+            raise WorkError("Cancelled task cannot author a new action")
         if not replay and (
             control["body"].get("phase") == "done"
             and control["body"].get("scope_status") != "continued"
         ):
             raise WorkError("Completed task control cannot author a new action")
         current_run = self.store.get("mission_run", run_id)
+        if not replay and current_run["body"].get("status") == "cancelled":
+            raise WorkError("Cancelled run cannot author new work")
         if (
             not replay
             and current_run["body"].get("status") == "completed"
@@ -232,6 +238,12 @@ class MissionWork:
         }
 
         def create(tx):
+            current_run = tx.get("mission_run", run["id"])
+            proposal = tx.get(**proposal_ref)
+            if (current_run is None or current_run["body"].get("status") == "cancelled"
+                    or proposal is None
+                    or tx.get("board_proposal", proposal_ref["id"]) != proposal):
+                raise StateConflict("Run was cancelled before optional control activation")
             saved = tx.put("mission_task_control", control_id, body)
             tx.link(saved, tx.get(**proposal_ref), "about_task")
             if invitation_ref:
@@ -397,7 +409,7 @@ class MissionWork:
                 body.get("run_id") == run["id"]
                 and body.get("task_id") == proposal["id"]
                 and body.get("scope_required") is False
-                and body.get("phase") not in {"done", "deferred"}
+                and body.get("phase") not in {"done", "deferred", "cancelled"}
             ):
                 self._set_control(control, phase="deferred", scope_status="deferred")
         return {
@@ -410,6 +422,9 @@ class MissionWork:
         body = {**control["body"], **changes}
 
         def save(tx):
+            current_run = tx.get("mission_run", control["body"]["run_id"])
+            if current_run is None or current_run["body"].get("status") == "cancelled":
+                raise StateConflict("Run was cancelled before optional control update")
             current = tx.get("mission_task_control", control["id"])
             if ref(current) != ref(control):
                 raise StateConflict("Optional control changed before state update")
@@ -737,7 +752,7 @@ class MissionWork:
             for record in _all(self.store, "mission_task_control")
             if (body := record["body"]).get("run_id") == run_id
             and body.get("scope_required") is False
-            and body.get("phase") not in {"done", "deferred"}
+            and body.get("phase") not in {"done", "deferred", "cancelled"}
         ]
 
     def record_scope_disposition(
@@ -797,7 +812,7 @@ class MissionWork:
                 if (
                     item.get("run_id") == run["id"]
                     and item.get("scope_required") is False
-                    and item.get("phase") not in {"done", "deferred"}
+                    and item.get("phase") not in {"done", "deferred", "cancelled"}
                 ):
                     open_controls.add(("mission_task_control", row["id"], row["version"]))
             selected = set()
@@ -841,6 +856,21 @@ class MissionWork:
         run = self.store.get("mission_run", run_ref["id"])
         if run is None or ref(run) != run_ref:
             return False
+        source_control = self.store.get(**body["source_control_ref"])
+        if source_control is None or any((
+            source_control["body"].get("mission_id") != body["mission_id"],
+            source_control["body"].get("run_id") != run["id"],
+            source_control["body"].get("actor_id") != body["actor_ref"]["id"],
+        )):
+            return False
+        db = self.store._connect()
+        try:
+            if changed_task_message(self.store, db, control=source_control):
+                return False
+        except StateError:
+            return False  # An unverifiable producing input cannot close scope.
+        finally:
+            db.close()
         policy_v2 = run["body"].get("participation_policy_version") == 2
         selected = {item["control_ref"]["id"]: item for item in body["decisions"]}
         if len(selected) != len(body["decisions"]):
@@ -854,7 +884,7 @@ class MissionWork:
         open_ids = {
             control_id
             for control_id, item in current.items()
-            if item["body"].get("phase") not in {"done", "deferred"}
+            if item["body"].get("phase") not in {"done", "deferred", "cancelled"}
         }
         if not policy_v2 and open_ids - selected.keys():
             return False

@@ -226,7 +226,7 @@ def read_due_review(
         or control["body"].get("run_id") != body["run_id"]
         or control["body"].get("actor_id") != actor_id
         or control["body"].get("task_id") != task_id
-        or control["body"].get("phase") in {"done", "deferred"}
+        or control["body"].get("phase") in {"done", "deferred", "cancelled"}
         or control["body"].get("operator_credential_hold")
     ):
         return None
@@ -336,7 +336,7 @@ def record_due_latency_reviews(
     for control in controls:
         body = control["body"]
         if (body.get("mission_id") != mission_id or body.get("run_id") != run["id"]
-                or body.get("phase") in {"done", "deferred"}
+                or body.get("phase") in {"done", "deferred", "cancelled"}
                 or (run["body"].get("status") == "completed"
                     and body.get("scope_status") != "continued")
                 or body.get("operator_credential_hold")):
@@ -374,7 +374,7 @@ def record_due_latency_reviews(
                     or current_control["body"].get("run_id") != run["id"]
                     or current_control["body"].get("actor_id") != body["actor_id"]
                     or current_control["body"].get("task_id") != body["task_id"]
-                    or current_control["body"].get("phase") in {"done", "deferred"}
+                    or current_control["body"].get("phase") in {"done", "deferred", "cancelled"}
                     or (current_run["body"].get("status") == "completed"
                         and current_control["body"].get("scope_status") != "continued")
                     or current_control["body"].get("operator_credential_hold")

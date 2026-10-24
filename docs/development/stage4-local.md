@@ -51,7 +51,8 @@ current connection, then opens Saved runs with the selected run retained. This
 does not start another research task. Refresh reloads the existing address; it
 cannot restore a stopped host or discover its replacement port.
 
-The default selected model is Groq `openai/gpt-oss-120b` with high reasoning.
+The default selected model is Groq `openai/gpt-oss-120b` with medium reasoning.
+Existing runs keep their saved effort, and follow-ups inherit that setting.
 The mission runtime does not impose a monetary research budget or a fixed number
 of scientific turns. Actual provider rate limits can delay a call; the saved
 wait and next attempt remain inspectable. Model, source-use and capability
@@ -138,7 +139,7 @@ standalone model probes or the legacy supplied-evidence runtime.
 
 | Work | Selected model |
 | --- | --- |
-| Reasoning, function/tool use and text-to-text research | Groq `openai/gpt-oss-120b`, with high reasoning |
+| Reasoning, function/tool use and text-to-text research | Groq `openai/gpt-oss-120b`, with medium reasoning for new runs |
 | Vision when image interpretation is useful, including figures and scanned pages | Groq `qwen/qwen3.8-27b` |
 
 These are project preferences, not a comparative benchmark result. Groq documents
@@ -182,6 +183,76 @@ Atlas fills these references from the selected work. Headless callers use
 `mission followup --input /path/to/private-followup.json` with that same contract.
 Earlier reports and source copies remain available for comparison.
 
+### Cancel one saved branch
+
+An operator can stop one exact task without cancelling its sibling tasks. First
+read `mission status --run-id RUN_ID` and use the task's saved `id` and `version`
+from that run. Save a private JSON request such as:
+
+```json
+{
+  "requestId": "synthetic-cancel-1",
+  "runId": "synthetic-run-1",
+  "taskId": "synthetic-task-1",
+  "expectedTaskVersion": 2,
+  "reason": "Stop this selected line of work"
+}
+```
+
+Then submit it to the already running local host:
+
+```sh
+scripts/dev mission cancel-branch --state-dir .local/research --input /path/to/private-cancel.json
+scripts/dev mission status --state-dir .local/research --run-id RUN_ID
+```
+
+The authenticated local command returns a saved receipt with the exact task and
+cancellation references. Retry the same unchanged `requestId` if delivery of the
+receipt is uncertain; a changed request under that ID, a stale task version, or a
+task outside the selected run is rejected. `cancelled` means the branch is fenced
+locally. `cancellation_requested` means an in-flight operation may still have an
+unknown external outcome at acceptance time; neither status proves that a provider
+stopped work. An identical retry returns the original receipt rather than a new
+assessment. Read the saved task and call diagnostics for later outcomes. Accepted
+sibling reports remain in the run.
+
+The historical `legacy` runtime has no branch-cancellation service and returns
+an explicit unavailable response for this command.
+
+To stop all remaining work in one saved run, read `mission status --run-id RUN_ID`
+and use that run's `id` and `version` from the `runs` list. Save a private command:
+
+```json
+{
+  "requestId": "synthetic-run-stop-1",
+  "runId": "synthetic-run-1",
+  "expectedRunVersion": 2,
+  "reason": "Stop this run's remaining work"
+}
+```
+
+Submit it, then inspect the same run:
+
+```sh
+scripts/dev mission cancel-run --state-dir .local/research --input /path/to/private-run-cancel.json
+scripts/dev mission status --state-dir .local/research --run-id RUN_ID
+```
+
+Retry the unchanged command if its receipt was
+lost. The receipt keeps its original acceptance-time status on retry. The command
+fences unfinished tasks and later acceptance while preserving completed reports,
+source evidence, prior completion history and usage. `cancellation_requested`
+means an already dispatched external effect may still be uncertain. A completed
+run can be stopped only while continued peer work remains. The historical
+`legacy` runtime returns an explicit unavailable response for this command.
+
+Cancelling a required starting branch does not count as its scientific contribution.
+The run remains active while independent branches continue, then becomes
+`cancelled` when its remaining controls are terminal. If no required peers were
+selected, the starting branches define this rule. An optional-only cancellation
+can leave ordinary completion available. This command is for the trusted local
+operator; research peers do not receive a branch-cancellation tool.
+
 ## Review actual work
 
 **Research review** contains the question, contributions and saved findings.
@@ -189,6 +260,17 @@ Earlier reports and source copies remain available for comparison.
 shared board. **Evidence** exposes inspected copies and passages. **Activity**
 and **Details** identify actual attempts, calls, tool results and waits.
 **Saved runs** provides dates, filters and parent/follow-up relationships.
+
+New missions also offer an optional `decline_peer_request` tool. A recipient can
+request that capability, then give the exact incoming request ID and version plus
+a reason. The mailbox checks recipient ownership and the current request state
+in one transaction; an answer awaiting requester review cannot be replaced by a
+decline. The requester sees the declined status on a fresh turn and the
+attributed reason when the producing model input still permits its source use;
+otherwise the reason is withheld. A decline is neither an answer nor a review,
+and it does not complete the mission. Existing runs retain their pinned tool menus.
+The offline checks establish this saved behavior; actual model choice and useful
+scientific collaboration still need separate qualification.
 
 For matching records in Codex or a terminal:
 
@@ -248,3 +330,7 @@ The connection's `hostBuildId` points to a private file-hash manifest in
 The run configuration separately identifies model, tools, instructions and
 skills. Ten-hour endurance, remote deployment and unattended production
 supervision require their own later evidence.
+
+## Add text to active work
+
+The authenticated [user-input backend](stage4-user-input.md) accepts a targeted in-scope direction or unverified pasted evidence, with repeat-safe acceptance and later context delivery. It does not add an Atlas composer or silently restart stopped work.

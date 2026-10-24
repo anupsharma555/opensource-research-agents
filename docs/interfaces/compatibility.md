@@ -4,6 +4,17 @@ The current [Python contract models](../../src/ora/contracts/models.py) accept `
 
 ## Three different versions
 
+Parallel research adds canonical `ReadResearchActivityInput`, `RetainEvidenceInput`,
+`SearchEvidenceLibraryInput` and `FetchSourceInput` schemas and generated UI types.
+New missions/follow-ups pin `parallel_research_version=1`, select the new search
+and fetch descriptors, and discover the three additive tools. Runs without that
+marker retain their historical catalogs and per-task retrieval behavior. Source
+fetch refresh is explicit. Library search returns metadata; selecting an exact
+entry permits the normal reader to recheck access rather than granting source use.
+Web-discovery skill v3 preserves immutable v1/v2 resources for saved pins. Existing
+command envelopes and the shared SQLite/blob format are retained. See
+[parallel research](../development/stage4-parallel-research.md).
+
 Public-document readers add canonical `ReadDocumentOCRInput` and
 `InspectFigureInput` tool schemas. `LiveStartRequest` and `LiveFollowupRequest`
 add optional `allowVision` (default false). Absent/false preserves prior request
@@ -13,6 +24,27 @@ page images, OCR and auxiliary vision receipts use separate v1 record kinds;
 they do not change checked source passages. Generated JSON/TypeScript comes from
 `scripts/dev generate`. See [document readers](../development/document-readers.md)
 for explicit opt-in, uncertainty handling and proof limits.
+
+The local operator API adds `LiveBranchCancelRequest` and
+`LiveBranchCancelReceipt` as separate generated contracts. The request names an
+exact saved run and task, the task's expected board-proposal version, a stable
+request ID and a reason. The receipt links the saved cancellation and task
+records, and reports acceptance-time local cancellation or an unresolved
+in-flight external outcome. Existing start/follow-up envelopes are unchanged;
+older hosts have no cancellation route. A matching host and terminal client are
+required to use the new command. A cancelled branch is not a completed required
+contribution, and a local receipt is not proof of remote provider termination.
+See [local research](../development/stage4-local.md#cancel-one-saved-branch).
+
+The additive local `LiveRunCancelRequest` and `LiveRunCancelReceipt` contracts
+stop remaining work in one exact run. The request requires the run's current
+version, now available as optional `LiveRunSummary.version` in the state response;
+older saved summaries without it remain readable. Existing start, follow-up and
+branch-cancel requests remain valid. A strict older reader that rejects new
+response fields needs a matching host/client update before consuming this new
+summary shape; mixed-version client behavior is not qualified here. Older hosts
+lack the route, and the legacy runtime returns an explicit unavailable response.
+A saved local stop receipt does not establish remote provider termination.
 
 Mission request preparation `source_working_set_v16` distinguishes estimated
 rate pressure from a captured provider size rejection. New internal
@@ -226,3 +258,7 @@ it. The mapping is pinned as `reference-web-discovery.v1`. Explicit source-use
 prohibitions suppress it. Exact source intake and passage checks still govern
 model claims. Search result pages expose `has_more` separately from pending
 provider work, so completion does not require an empty-page polling call.
+
+## Active-task user input
+
+`LiveUserInputRequest` and `LiveUserInputReceipt` are additive local API contracts. They do not change start/follow-up fingerprints or the peer-mailbox sender model. `mission_user_input` v1 records retain exact original text and task/run/agent lineage; older runs without these records retain their existing context. The matching backend route returns an explicit unavailable result for runtimes without input support. A receipt establishes acceptance only; existing context inclusion and dispatch records establish subsequent delivery. See [active-task input](../development/stage4-user-input.md) for authorization and proof limits.

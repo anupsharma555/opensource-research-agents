@@ -9,13 +9,16 @@ import json
 import threading
 import urllib.error
 import urllib.request
+from email.message import Message
+from io import BytesIO
+from types import SimpleNamespace
 
 import pytest
 
-from ora.contracts.models import LiveReceipt, LiveState
+from ora.contracts.models import LiveBranchCancelReceipt, LiveReceipt, LiveState
 from ora.live import cli
 from ora.live.engine import LiveError
-from ora.live.server import LocalResearchServer
+from ora.live.server import LocalResearchServer, ResearchHandler
 
 
 class StubHost:
@@ -23,6 +26,7 @@ class StubHost:
         self.started = []
         self.reasoning_reads = []
         self.peer_reads = []
+        self.branch_cancellations = []
 
     def start(self, request):
         if request.request_id == "conflict":
@@ -32,6 +36,23 @@ class StubHost:
 
     def followup(self, request):
         raise LiveError("Unknown saved parent", 404)
+
+    def cancel_branch(self, request):
+        if request.run_id != "run-1":
+            raise LiveError("Run is unavailable", 404)
+        if request.task_id != "task-1":
+            raise LiveError("Task is unavailable in this run", 404)
+        if request.expected_task_version != 2:
+            raise LiveError("Task version changed", 409)
+        if request.request_id == "conflict":
+            raise LiveError("Request identity conflict", 409)
+        self.branch_cancellations.append(request)
+        return LiveBranchCancelReceipt(
+            request_id=request.request_id, run_id=request.run_id, task_id=request.task_id,
+            status="cancelled",
+            cancellation_ref={"kind": "mission_branch_cancellation", "id": "cancel-1", "version": 1},
+            task_ref={"kind": "board_proposal", "id": request.task_id, "version": 2},
+        )
 
     def state(self, run_id=None):
         if run_id == "missing":
@@ -135,6 +156,82 @@ def test_typed_errors_and_private_paths(server):
     assert request(app, "/%2e%2e/.env")[0] == 404
 
 
+def _post_without_listener(host, path, body, *, token="synthetic-token", headers=None):
+    """Call the real request handler with in-memory HTTP streams."""
+    origin = "http://127.0.0.1:34567"
+    request_headers = Message()
+    for name, value in {
+        "Host": "127.0.0.1:34567", "Content-Type": "application/json",
+        **(headers or {}),
+    }.items():
+        request_headers[name] = value
+    raw = json.dumps(body).encode()
+    request_headers["Content-Length"] = str(len(raw))
+    handler = object.__new__(ResearchHandler)
+    handler.server = SimpleNamespace(origin=origin, token=token, research_host=host)
+    handler.headers = request_headers
+    handler.path = path
+    handler.rfile = BytesIO(raw)
+    handler.wfile = BytesIO()
+    response = {}
+    handler.send_response = lambda status: response.update(status=status)
+    handler.send_header = lambda name, value: response.setdefault("headers", {}).update({name: value})
+    handler.end_headers = lambda: None
+    handler.do_POST()
+    return response["status"], response["headers"], json.loads(handler.wfile.getvalue())
+
+
+def test_branch_cancellation_uses_authenticated_exact_task_route():
+    host = StubHost()
+    body = {
+        "requestId": "cancel-1", "runId": "run-1", "taskId": "task-1",
+        "expectedTaskVersion": 2, "reason": "Stop this selected branch",
+    }
+    path = "/api/live/branch-cancellations"
+
+    def post(payload, headers=None):
+        return _post_without_listener(host, path, payload, headers=headers)
+
+    assert post(body)[0] == 401
+    cookie = {"Cookie": "ora_session=synthetic-token"}
+    assert post(body, cookie)[0] == 403
+    assert post(body, {**cookie, "Origin": "https://untrusted.invalid"})[0] == 403
+    assert post(body, {"Authorization": "Bearer incorrect"})[0] == 401
+    auth = {"Authorization": "Bearer synthetic-token"}
+    assert post(body, {**auth, "Host": "untrusted.invalid"})[0] == 403
+    assert post({**body, "expectedTaskVersion": 0}, auth)[0] == 400
+    assert post({**body, "unexpected": True}, auth)[0] == 400
+    assert post({**body, "runId": "other-run"}, auth)[0] == 404
+    assert post({**body, "taskId": "other-task"}, auth)[0] == 404
+    assert post({**body, "expectedTaskVersion": 1}, auth)[0] == 409
+    assert post({**body, "requestId": "conflict"}, auth)[0] == 409
+    assert host.branch_cancellations == []
+    status, headers, receipt = post(body, auth)
+    assert status == 202 and headers["Cache-Control"] == "no-store"
+    assert receipt == {
+        "requestId": "cancel-1", "runId": "run-1", "taskId": "task-1",
+        "status": "cancelled", "reused": False,
+        "cancellationRef": {"kind": "mission_branch_cancellation", "id": "cancel-1", "version": 1},
+        "taskRef": {"kind": "board_proposal", "id": "task-1", "version": 2},
+    }
+    assert len(host.branch_cancellations) == 1
+
+
+def test_branch_cancel_is_explicitly_unavailable_on_legacy_host():
+    body = {
+        "requestId": "cancel-1", "runId": "run-1", "taskId": "task-1",
+        "expectedTaskVersion": 2, "reason": "Stop this selected branch",
+    }
+    status, _, response = _post_without_listener(
+        SimpleNamespace(), "/api/live/branch-cancellations", body,
+        headers={"Authorization": "Bearer synthetic-token"},
+    )
+    assert status == 501
+    assert response == {
+        "error": "Branch cancellation is unavailable for this local runtime."
+    }
+
+
 def test_reasoning_route_requires_exact_authenticated_local_read(server):
     app, host = server
     path = "/api/live/reasoning?runId=run-1&callId=call-1"
@@ -191,3 +288,35 @@ def test_headless_start_and_reconnect_use_same_authenticated_host(server, tmp_pa
     assert host.started[0].evidence_text == ""
     assert cli.connect_url(state) == app.launch_url
     assert len(host.started) == 1  # Reading/reconnecting never submits research.
+
+
+def test_headless_branch_cancel_uses_the_local_authenticated_route(tmp_path, capsys, monkeypatch):
+    parser = argparse.ArgumentParser()
+    cli.configure_mission(parser)
+    parsed = parser.parse_args(["cancel-branch", "--input", str(tmp_path / "cancel.json")])
+    assert parsed.mission_action == "cancel-branch"
+    connection = {"origin": "http://127.0.0.1:34567", "token": "synthetic-token"}
+    monkeypatch.setattr(cli, "_connection", lambda _state: connection)
+    captured = []
+
+    class Opener:
+        def open(self, req, timeout):
+            captured.append((req, timeout))
+            return BytesIO(json.dumps({"status": "cancelled"}).encode())
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *_args: Opener())
+    command = tmp_path / "cancel.json"
+    command.write_text(json.dumps({
+        "requestId": "operator-cancel", "runId": "run-1", "taskId": "task-1",
+        "expectedTaskVersion": 2, "reason": "End this selected branch",
+    }))
+    cli.mission_main(argparse.Namespace(
+        mission_action="cancel-branch", state_dir=tmp_path, input=command,
+    ), tmp_path)
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["status"] == "cancelled"
+    sent, timeout = captured[0]
+    assert sent.full_url == "http://127.0.0.1:34567/api/live/branch-cancellations"
+    assert sent.get_header("Authorization") == "Bearer synthetic-token"
+    assert json.loads(sent.data)["expectedTaskVersion"] == 2
+    assert timeout == 15

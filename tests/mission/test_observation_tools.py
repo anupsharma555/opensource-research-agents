@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from ora.agents.capabilities import validate_arguments
+import pytest
+
+from ora.agents.capabilities import CapabilityError, validate_arguments
 from ora.agents.json_shapes import validate_schema
 from ora.coordination.board import ref
 from ora.mission.observation_tools import (
@@ -281,6 +283,38 @@ def test_unresolved_wait_saves_decision_but_not_control_and_replays(tmp_path) ->
     assert notice["status"] == "replan_notification_available"
     assert notice["feedback"]["stranded_waits"][0]["reason"] == "no_recorded_future_wake"
     assert store.get(**updated)["body"]["phase"] == "waiting"
+
+
+@pytest.mark.parametrize("is_peer", [True, False])
+def test_wait_schema_requires_exact_branch_reference_and_handler_accepts_it(
+    tmp_path, is_peer,
+) -> None:
+    store = StateStore(tmp_path)
+    saved = fixture(store, dependency=not is_peer)
+    item = peer_dependency(saved) if is_peer else proposal_dependency(saved)
+    schema = OBSERVATION_TOOL_SCHEMAS["wait_for_dependencies"]
+    args = {"dependencies": [item], "reason": "Wait for the selected exact dependency"}
+    validate_arguments(schema, args)
+    for name in item:
+        incomplete = {key: value for key, value in item.items() if key != name}
+        with pytest.raises(CapabilityError):
+            validate_arguments(schema, {**args, "dependencies": [incomplete]})
+    prefix = "request" if is_peer else "proposal"
+    for invalid in (
+        {**item, f"{prefix}_version": 0},
+        {**item, "target_control_version": True},
+        {**item, "proposal_id" if is_peer else "request_id": "wrong-kind"},
+    ):
+        with pytest.raises(CapabilityError):
+            validate_arguments(schema, {**args, "dependencies": [invalid]})
+    with pytest.raises(CapabilityError):
+        validate_arguments(schema, {**args, "dependencies": []})
+    result = record_wait_choice(
+        store, "schema-handler-parity", control_ref=saved["a"],
+        response_ref=saved["response"], **args,
+    )
+    assert result["status"] == "wait_decision_saved"
+    assert result["control_delta"]["wait_for"][0]["kind"] == item["kind"]
 
 
 def test_answered_request_and_completed_prerequisite_return_feedback(tmp_path) -> None:

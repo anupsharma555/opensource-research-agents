@@ -177,6 +177,7 @@ export type Question1 = string;
 export type Requiredagentids = string[] | null;
 export type Status7 = string;
 export type Title3 = string | null;
+export type Version6 = number | null;
 export type Waitingreason1 = string | null;
 export type Workspacelabel = string | null;
 export type Runs = LiveRunSummary[];
@@ -431,6 +432,7 @@ export interface LiveRunSummary {
   requiredAgentIds?: Requiredagentids;
   status: Status7;
   title?: Title3;
+  version?: Version6;
   waitingReason?: Waitingreason1;
   workspaceLabel?: Workspacelabel;
 }

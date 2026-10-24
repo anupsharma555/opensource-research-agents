@@ -33,7 +33,7 @@ from .report_lineage import (
     report_text_access,
 )
 
-PROJECTION_VERSION = "stage4-atlas-v21"
+PROJECTION_VERSION = "stage4-atlas-v22"
 
 _REPORT_TEXT_UNAVAILABLE = "Report text unavailable because source-use permission changed."
 
@@ -82,6 +82,14 @@ def _task_display_numbers(store: StateStore, mission_id: str, root_task_id: str)
 def _host_diagnostic_view(store: StateStore, item: dict, mission_id: str) -> dict:
     """Keep an elapsed review interval distinct from a host failure."""
     body = item["body"]
+    if (body.get("status") == "peer_input_changed_before_dispatch"
+            and body.get("external_action") == "none"):
+        return {
+            "id": item["id"], "kind": "peer_input_refresh",
+            "status": "stopped_before_dispatch", "taskId": body.get("task_id"),
+            "message": "New peer information arrived before dispatch. The prepared request was stopped locally so its context can be refreshed.",
+            "occurredAt": item["created_at"],
+        }
     view = {
         "id": item["id"], "kind": body["error_class"], "status": "host_error",
         "message": body["message"], "occurredAt": body["recorded_at"],
@@ -619,7 +627,7 @@ def build_snapshot(
     active_call_refs = {
         canonical(control["body"]["call_ref"])
         for control in controls
-        if control["body"].get("phase") not in {"done", "deferred"}
+        if control["body"].get("phase") not in {"done", "deferred", "cancelled"}
         and isinstance(control["body"].get("call_ref"), dict)
     }
     for item in saved_attempts:
@@ -799,6 +807,8 @@ def build_snapshot(
             if phase == "done"
             else "deferred"
             if phase == "deferred"
+            else "cancelled"
+            if phase == "cancelled"
             else "waiting"
             if phase in {"waiting", "retry_at"} or capacity_wait
             else "running"
@@ -838,7 +848,8 @@ def build_snapshot(
                 "status": status,
             },
         )
-        if {"deferred": -1, "completed": 0, "queued": 1, "waiting": 2, "running": 3}[status] > {
+        if {"cancelled": -1, "deferred": -1, "completed": 0, "queued": 1, "waiting": 2, "running": 3}[status] > {
+            "cancelled": -1,
             "deferred": -1,
             "completed": 0,
             "queued": 1,
@@ -884,7 +895,10 @@ def build_snapshot(
             },
         )
     agents = list(agents_by_id.values())
-    root_status = "completed" if body["status"] == "completed" else "running"
+    root_status = (
+        "completed" if body["status"] == "completed" else
+        "cancelled" if body["status"] == "cancelled" else "running"
+    )
     mission_contribution = inspect_latency(store, run["id"])["first_accepted_contribution_at"]
     tasks.insert(
         0,
@@ -896,7 +910,7 @@ def build_snapshot(
             "latencyClass": None,
             "latencyBasis": "No single peer-authored estimate covers this whole mission; review task estimates.",
             "firstContributionAt": mission_contribution,
-            "activeOrWaiting": "completed" if root_status == "completed" else "active",
+            "activeOrWaiting": root_status if root_status in {"completed", "cancelled"} else "active",
             "attemptIds": [],
         },
     )

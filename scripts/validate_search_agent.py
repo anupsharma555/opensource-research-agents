@@ -150,11 +150,11 @@ def run_case(root: Path, folder: Path, *, execution_mode="live", deadline_second
     from ora.mission import MissionService
     from ora.observability.config import runtime_export_config
     from ora.observability.evaluation import record_evaluation_observation
-    from ora.retrieval.agent_validation_budget import AgentBudget, BudgetStop
+    from ora.retrieval.agent_validation_budget import AgentBudget, BudgetAdmissionStop, BudgetStop
     selected = {"request_id": request_id, "run_id": run_id,
                 "question": request_data["question"] if request_data else QUESTION,
                 "model": "openai/gpt-oss-120b", "credential_profile": credential_profile,
-                "reasoning": "high; native browser uses the existing low-effort turn",
+                "reasoning": "pending saved run configuration",
                 "max_model_calls": model_limit, "max_planned_tokens": token_limit,
                 "max_retrieval_attempts": retrieval_limit, "deadline_seconds": deadline_seconds,
                 "accounting_only": accounting_only, "until_complete": until_complete,
@@ -190,7 +190,7 @@ def run_case(root: Path, folder: Path, *, execution_mode="live", deadline_second
                      allow_vision=allow_vision) as budget:
         def observed_http(handler, http_class, request, **connection):
             if closed:
-                raise BudgetStop("case_closed")
+                raise BudgetAdmissionStop("case_closed")
             def perform(_handler, fullurl, data=None, timeout=None, **_kwargs):
                 result = original_http(_handler, http_class, fullurl, **connection)
                 if result.status >= 400:
@@ -226,6 +226,8 @@ def run_case(root: Path, folder: Path, *, execution_mode="live", deadline_second
                         "allow_vision": False,
                     }))
             assert run.run_id == run_id
+            selected["reasoning"] = host._run(run_id)["body"]["profile"]["reasoningSettings"]
+            _atomic_json(folder / "case.json", selected)
             while deadline_seconds is None or time.time() - started < deadline_seconds:
                 host._drive_run(host._run(run_id))
                 status = host._run(run_id)["body"]["status"]

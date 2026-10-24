@@ -17,7 +17,13 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from pydantic import ValidationError
 
-from ora.contracts.models import LiveFollowupRequest, LiveStartRequest
+from ora.contracts.models import (
+    LiveBranchCancelRequest,
+    LiveFollowupRequest,
+    LiveRunCancelRequest,
+    LiveStartRequest,
+    LiveUserInputRequest,
+)
 
 MAX_BODY_BYTES = 1_048_576
 
@@ -181,6 +187,28 @@ class ResearchHandler(BaseHTTPRequestHandler):
                 receipt = self.server.research_host.start(LiveStartRequest.model_validate(body))
             elif path == "/api/live/followups":
                 receipt = self.server.research_host.followup(LiveFollowupRequest.model_validate(body))
+            elif path == "/api/live/user-inputs":
+                command = LiveUserInputRequest.model_validate(body)
+                submit = getattr(self.server.research_host, "submit_user_input", None)
+                if not callable(submit):
+                    return self._json(501, {"error": "User input is unavailable for this local runtime."})
+                receipt = submit(command)
+            elif path == "/api/live/branch-cancellations":
+                command = LiveBranchCancelRequest.model_validate(body)
+                cancel_branch = getattr(self.server.research_host, "cancel_branch", None)
+                if not callable(cancel_branch):
+                    return self._json(501, {
+                        "error": "Branch cancellation is unavailable for this local runtime."
+                    })
+                receipt = cancel_branch(command)
+            elif path == "/api/live/run-cancellations":
+                command = LiveRunCancelRequest.model_validate(body)
+                cancel_run = getattr(self.server.research_host, "cancel_run", None)
+                if not callable(cancel_run):
+                    return self._json(501, {
+                        "error": "Run cancellation is unavailable for this local runtime."
+                    })
+                receipt = cancel_run(command)
             else:
                 return self._json(404, {"error": "Unknown live command."})
             return self._json(202, receipt.model_dump(by_alias=True, mode="json"))

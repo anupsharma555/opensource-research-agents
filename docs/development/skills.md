@@ -12,7 +12,9 @@ diagnostics and linked technical evidence,
 [`os-quick-run`](../../.agents/skills/os-quick-run/SKILL.md) for one immediate,
 bounded live API case followed by that saved-run account,
 [`os-groq-usage`](../../.agents/skills/os-groq-usage/SKILL.md) for daily Groq token
-accounting by credential profile and dated quota observations, and
+accounting by credential profile and dated quota observations,
+[`os-corpus-maintenance`](../../.agents/skills/os-corpus-maintenance/SKILL.md) for
+offline corpus readiness and versioned archive/index update planning, and
 [`os-review-atlas`](../../.agents/skills/os-review-atlas/SKILL.md) for visual
 review against exact saved records. These are not instructions loaded into
 research agents. The project-local

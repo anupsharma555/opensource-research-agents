@@ -29,18 +29,22 @@ def _schema(properties: dict, required: list[str]) -> dict:
     }
 
 
-_DEPENDENCY = _schema(
-    {
-        "kind": {"type": "string", "enum": ["peer_request", "proposal_dependency"]},
-        "request_id": {"type": "string"},
-        "request_version": {"type": "integer"},
-        "proposal_id": {"type": "string"},
-        "proposal_version": {"type": "integer"},
-        "target_control_id": {"type": "string"},
-        "target_control_version": {"type": "integer"},
-    },
-    ["kind", "target_control_id", "target_control_version"],
-)
+_DEPENDENCY = {
+    "anyOf": [
+        _schema(
+            {
+                "kind": {"type": "string", "enum": [kind]},
+                f"{prefix}_id": {"type": "string", "minLength": 1},
+                f"{prefix}_version": {"type": "integer", "minimum": 1},
+                "target_control_id": {"type": "string", "minLength": 1},
+                "target_control_version": {"type": "integer", "minimum": 1},
+            },
+            ["kind", f"{prefix}_id", f"{prefix}_version",
+             "target_control_id", "target_control_version"],
+        )
+        for kind, prefix in (("peer_request", "request"), ("proposal_dependency", "proposal"))
+    ],
+}
 
 OBSERVATION_TOOL_SCHEMAS = {
     "estimate_latency": _schema(
@@ -54,8 +58,8 @@ OBSERVATION_TOOL_SCHEMAS = {
     ),
     "wait_for_dependencies": _schema(
         {
-            "dependencies": {"type": "array", "items": _DEPENDENCY},
-            "reason": {"type": "string"},
+            "dependencies": {"type": "array", "items": _DEPENDENCY, "minItems": 1},
+            "reason": {"type": "string", "minLength": 1},
         },
         ["dependencies", "reason"],
     ),
@@ -244,7 +248,10 @@ def record_wait_choice(
                     "target_control_id",
                     "target_control_version",
                 }:
-                    raise ObservationToolError("Peer wait needs exact request and target control")
+                    raise ObservationToolError(
+                        "Peer wait needs request_id, request_version, "
+                        "target_control_id and target_control_version"
+                    )
                 input_ref = {
                     "kind": "mail_request",
                     "id": item["request_id"],

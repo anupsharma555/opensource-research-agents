@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
+from typing import Any, Callable
 
 from ora.coordination.board import ref
 from ora.coordination.executor import ConcurrentExecutor
@@ -53,6 +53,68 @@ class ModelRecovery:
 
     def __init__(self, store: StateStore, executor: ConcurrentExecutor, session: ModelSession):
         self.store, self.executor, self.session = store, executor, session
+
+    def accept_captured_response(
+        self, *, control_ref: dict, work_ref: dict,
+        validate_current_tx: Callable[[Transaction], None],
+    ) -> dict:
+        """Resume exact saved model output, without another model or tool call."""
+        control = _exact(self.store, control_ref, "mission_task_control")
+        work = _exact(self.store, work_ref, "executor_work")
+        spec = self.executor._spec_from(work)
+        call_ref = {"kind": "agent_call", "id": spec.call_id,
+                    "version": spec.call_version}
+        run = self.store.get("mission_run", spec.run_id)
+        proposal = self.store.get("board_proposal", spec.proposal_ref["id"])
+        if (
+            spec.kind != "model" or (spec.handler_id, spec.handler_version)
+            != ("mission-model", "1")
+            or control["body"].get("phase") not in {"pending_model", "waiting"}
+            or control["body"].get("work_id") != spec.work_id
+            or control["body"].get("call_ref") != call_ref
+            or any(control["body"].get(key) != value for key, value in (
+                ("mission_id", spec.mission_id), ("run_id", spec.run_id),
+                ("task_id", spec.proposal_ref["id"]), ("actor_id", spec.actor_id),
+            ))
+            or work["body"].get("phase") != "result_unaccepted"
+            or run is None or run["body"].get("status") != "active"
+            or proposal is None or ref(proposal) != spec.proposal_ref
+            or proposal["body"].get("status") != "open"
+        ):
+            return {"status": "not_eligible"}
+        observation_ref = work["body"].get("result_ref")
+        observation = (self.store.get(**observation_ref)
+                       if isinstance(observation_ref, dict) else None)
+        intent_id = f"model-intent:{spec.call_id}:{spec.call_version}"
+        intent = self.store.get("model_request_intent", intent_id)
+        response = self.store.get("model_response_receipt", f"model-response:{intent_id}")
+        marker = self.store.get("model_dispatch_attempt", f"model-dispatch:{intent_id}")
+        cap = self.store.get("capacity_operation", self.executor._capacity_id(spec))
+        if (
+            observation is None or observation["kind"] != "executor_unaccepted_result"
+            or intent is None or response is None or marker is None or cap is None
+            or observation["body"].get("observed_receipt_ref") != ref(response)
+            or observation["body"].get("capacity_reconciled") is not True
+            or observation["body"].get("external_effect") != "known"
+            or observation["body"].get("work_id") != spec.work_id
+            or cap["body"].get("phase") != "known_unaccepted"
+            or cap["body"].get("output_ref") != observation["id"]
+            or cap["body"].get("cancel_requested") is True
+            or intent["body"].get("call_ref") != call_ref
+            or intent["body"].get("configuration_ref") != spec.configuration_ref
+            or tuple(intent["body"].get("source_refs", [])) != spec.input_refs
+            or marker["body"].get("status") != "captured"
+            or marker["body"].get("intent_ref") != ref(intent)
+            or marker["body"].get("call_ref") != call_ref
+            or marker["body"].get("receipt_ref") != ref(response)
+            or marker["body"].get("request_sha256") != intent["body"].get("request_sha256")
+            or response["body"].get("request_sha256") != intent["body"].get("request_sha256")
+        ):
+            return {"status": "not_eligible"}
+        return self.executor.accept_captured_model_response(
+            spec, ref(response), observation_ref,
+            validate_current_tx=validate_current_tx,
+        )
 
     def supersede_unknown_response(
         self,

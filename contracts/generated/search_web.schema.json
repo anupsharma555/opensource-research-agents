@@ -50,7 +50,7 @@
     },
     "refresh": {
       "default": false,
-      "description": "Reuse an identical saved search in this peer task by default. Set true to intentionally start fresh retrieval; different queries or options remain separate searches.",
+      "description": "Reuse identical provider/query/options within this mission using a separate operation for each peer. Set true to request fresh retrieval. Different terms, providers, modes or filters remain separate.",
       "title": "Refresh",
       "type": "boolean"
     }

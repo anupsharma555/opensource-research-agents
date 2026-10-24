@@ -5,8 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 
+import pytest
+
 from ora.observability import build_context_metrics
-from ora.observability.metrics import read_cache_observation
+from ora.observability.metrics import _usage, _usage_total, read_cache_observation
 from ora.state import StateStore
 from ora.state.store import canonical
 
@@ -114,6 +116,12 @@ def test_saved_usage_cache_coverage_reuse_and_restart(tmp_path):
     assert run_usage["cache_fraction"]["value"] == 100 / 300
     assert run_usage["cache_fraction"]["covered_calls"] == 2
     assert run_usage["cache_fraction"]["total_calls"] == 4
+    assert run_usage["cache_fraction_confirmed"] == {
+        "basis": "reported_cache_read_over_all_reported_input",
+        "value": 100 / 350, "status": "minimum", "cached_tokens": 100,
+        "reported_input_tokens": 350, "cache_reported_calls": 2,
+        "input_reported_calls": 3, "request_records_without_reported_input": 1,
+    }
     assert run_usage["reasoning_fraction"]["value"] == 3 / 10
     assert run_usage["reasoning_fraction"]["covered_calls"] == 1
     assert result["run_activity"]["model_call_count"] == 3
@@ -216,6 +224,8 @@ def test_provider_cache_observation_distinguishes_zero_missing_invalid_and_legac
     assert cache["reported_hit_calls"] == 1
     assert cache["reported_miss_calls"] == 1
     assert cache["eligible_input_coverage_fraction"] == 200 / 500
+    assert metrics["run_usage"]["cache_fraction_confirmed"]["value"] == 40 / 500
+    assert metrics["run_usage"]["cache_fraction_confirmed"]["status"] == "minimum"
     assert metrics["run_usage"]["cache_read"] == {
         "tokens": 40, "reported_calls": 2, "unknown_calls": 0,
         "not_reported_calls": 1, "invalid_calls": 1, "legacy_uncertain_calls": 1,
@@ -239,6 +249,46 @@ def test_provider_cache_observation_distinguishes_zero_missing_invalid_and_legac
         "usage": {"prompt_tokens": 10, "prompt_tokens_details": {"cached_tokens": 5}},
         "cache_observation": {"status": "reported_hit", "cached_tokens": 6},
     }) == {"status": "malformed"}
+    assert read_cache_observation({
+        "usage": {"prompt_tokens": 10},
+        "cache_observation": {"status": "not_reported", "field_presence": "details_absent"},
+    }) == {"status": "not_reported", "field_presence": "details_absent"}
+    assert read_cache_observation({
+        "usage": {"prompt_tokens": 10},
+        "cache_observation": {"status": "not_reported", "field_presence": "untrusted"},
+    }) == {"status": "malformed"}
+
+
+def test_confirmed_cache_share_excludes_preparation_and_preserves_unknowns():
+    def call(status, receipt=None, *, unresolved=False):
+        return {"status": status, "usage": _usage(receipt, unresolved=unresolved)}
+
+    zero = call("captured", {
+        "usage": {"prompt_tokens": 100},
+        "cache_observation": {"status": "reported_zero", "cached_tokens": 0},
+    })
+    prepared = call("prepared_only")
+    complete = _usage_total([zero, prepared])["cache_fraction_confirmed"]
+    assert complete["status"] == "complete" and complete["value"] == 0
+    assert complete["input_reported_calls"] == 1
+    assert complete["request_records_without_reported_input"] == 0
+
+    omitted = call("captured", {
+        "usage": {"prompt_tokens": 200},
+        "cache_observation": {"status": "not_reported"},
+    })
+    missing_input = call("captured", {"usage": {}}, unresolved=True)
+    partial = _usage_total([zero, omitted, missing_input, prepared])[
+        "cache_fraction_confirmed"
+    ]
+    assert partial["status"] == "minimum" and partial["value"] == 0
+    assert partial["reported_input_tokens"] == 300
+    assert partial["cache_reported_calls"] == 1
+    assert partial["input_reported_calls"] == 2
+    assert partial["request_records_without_reported_input"] == 1
+
+    unknown = _usage_total([omitted, prepared])["cache_fraction_confirmed"]
+    assert unknown["status"] == "unknown" and unknown["value"] is None
 
 
 def test_retrieval_attempts_are_scoped_to_run_actor_and_count_current_ids(tmp_path):
@@ -280,8 +330,7 @@ def test_retrieval_attempts_are_scoped_to_run_actor_and_count_current_ids(tmp_pa
     assert activity["observed_elapsed_seconds"] is not None
 
 
-def test_local_prefix_proxy_uses_captured_same_actor_requests_only(tmp_path):
-    store = StateStore(tmp_path)
+def _seed_reuse_run(store, *, response_status="complete"):
     _put(store, "mission_run", "run-a", {"mission_id": "mission-a"})
     for actor in ("actor-a", "actor-b"):
         _put(store, "agent_instance", actor, {
@@ -320,7 +369,7 @@ def test_local_prefix_proxy_uses_captured_same_actor_requests_only(tmp_path):
         receipt = _put(store, "model_response_receipt", f"model-response:{intent['id']}", {
             "mission_id": "mission-a", "intent_ref": _ref(intent), "call_ref": _ref(call),
             "task_id": "task-a", "attempt_id": f"attempt-{index}",
-            "request_sha256": digest, "status": "complete",
+            "request_sha256": digest, "status": response_status,
             "credential_profile": "synthetic_profile",
             "usage": {"prompt_tokens": 100, "completion_tokens": 10,
                       "total_tokens": 110},
@@ -332,6 +381,12 @@ def test_local_prefix_proxy_uses_captured_same_actor_requests_only(tmp_path):
         ))
         assert store.get("model_dispatch_attempt", marker["id"])["created_at"] >= receipt[
             "created_at"]
+
+
+@pytest.mark.parametrize("response_status", ["complete", "partial"])
+def test_local_prefix_proxy_uses_captured_same_actor_requests_only(tmp_path, response_status):
+    store = StateStore(tmp_path)
+    _seed_reuse_run(store, response_status=response_status)
     result = build_context_metrics(StateStore(tmp_path, read_only=True), "run-a")
     local = result["local_prefix_reuse"]
     assert local["status"] == "measured"
@@ -341,6 +396,11 @@ def test_local_prefix_proxy_uses_captured_same_actor_requests_only(tmp_path):
     assert local["estimated_repeated_message_tokens"] > 0
     assert 0 < local["estimated_message_prefix_token_fraction"] < 1
     assert local["eligible_request_coverage_fraction"] == 1
+    assert local["structural_coverage_status"] == "complete"
+    assert local["structural_measured_calls"] == 3
+    assert local["structural_measured_followup_pairs"] == 1
+    assert 0 < local["local_structural_input_reuse_fraction"] < 1
+    assert local == build_context_metrics(StateStore(tmp_path, read_only=True), "run-a")["local_prefix_reuse"]
     assert result["run_usage"]["cache_fraction"]["value"] is None
     assert "Shared synthetic guidance" not in json.dumps(result)
 
@@ -354,6 +414,8 @@ def test_local_prefix_proxy_uses_captured_same_actor_requests_only(tmp_path):
     assert missing["run_activity"]["model_captured_response_count"] == 3
     assert missing["local_prefix_reuse"]["status"] == "request_unavailable"
     assert missing["local_prefix_reuse"]["request_unavailable_calls"] == 3
+    assert missing["local_prefix_reuse"]["structural_unavailable_calls"] == 3
+    assert missing["local_prefix_reuse"]["local_structural_input_reuse_fraction"] is None
 
     second = store.get("model_response_receipt", "model-response:intent-1")
     store.transact("mismatch-receipt-profile", {}, lambda tx: tx.put(
@@ -365,3 +427,59 @@ def test_local_prefix_proxy_uses_captured_same_actor_requests_only(tmp_path):
     assert mismatched["local_prefix_reuse"]["eligible_requests"] == 2
     assert mismatched["local_prefix_reuse"]["request_unavailable_calls"] == 1
     assert mismatched["local_prefix_reuse"]["measured_pairs"] == 0
+    assert mismatched["local_prefix_reuse"]["structural_coverage_status"] == "partial"
+    assert mismatched["local_prefix_reuse"]["structural_unavailable_calls"] == 1
+
+
+def test_unknown_prior_response_is_not_a_cold_baseline_after_restart(tmp_path):
+    store = StateStore(tmp_path)
+    _seed_reuse_run(store)
+
+    class MissingPriorResponse(StateStore):
+        def get(self, kind, id, version=None):
+            if kind == "model_response_receipt" and id == "model-response:intent-0":
+                return None
+            return super().get(kind, id, version)
+
+    result = build_context_metrics(MissingPriorResponse(tmp_path, read_only=True), "run-a")
+    reuse = result["local_prefix_reuse"]
+    rows = {row["call_id"]: row for row in reuse["structural_input_calls"]}
+    assert rows["call-0"]["status"] == "unavailable"
+    assert rows["call-1"]["reason"] == "prior_request_unavailable"
+    assert rows["call-2"]["status"] == "baseline_no_predecessor"  # A different actor.
+    assert reuse["structural_coverage_status"] == "partial"
+    assert reuse["structural_unavailable_calls"] == 2
+    assert reuse["local_structural_input_reuse_fraction"] is None
+
+
+def test_confirmed_local_block_does_not_count_as_sent_or_break_reuse(tmp_path):
+    store = StateStore(tmp_path)
+    _seed_reuse_run(store)
+    baseline = build_context_metrics(store, "run-a")
+    call = _put(store, "agent_call", "blocked-call", {
+        "mission_id": "mission-a", "instance_id": "actor-a", "task_id": "task-a",
+        "attempt_id": "blocked-attempt", "provider": "groq",
+        "model_id": "openai/gpt-oss-120b",
+    })
+    blob, digest = _request(store)
+    intent = _put(store, "model_request_intent", "blocked-intent", {
+        "mission_id": "mission-a", "call_ref": _ref(call),
+        "task_id": "task-a", "instance_id": "actor-a", "attempt_id": "blocked-attempt",
+        "credential_profile": "synthetic_profile", "request_sha256": digest, "blob": blob,
+    })
+    marker = _put(store, "model_dispatch_attempt", "model-dispatch:blocked-intent", {
+        "mission_id": "mission-a", "intent_ref": _ref(intent), "call_ref": _ref(call),
+        "request_sha256": digest, "credential_profile": "synthetic_profile",
+        "status": "attempted_external_effect",
+    })
+    store.transact("local-block", {}, lambda tx: tx.put(
+        "model_dispatch_attempt", marker["id"],
+        {**marker["body"], "status": "blocked_before_external_effect"}, expected_version=1,
+    ))
+    result = build_context_metrics(store, "run-a")
+    blocked = next(row for row in result["calls"] if row["call_id"] == call["id"])
+    assert blocked["status"] == "blocked_before_http"
+    assert blocked["dispatch_recorded"] is False
+    assert result["run_activity"]["model_dispatch_recorded_count"] == baseline[
+        "run_activity"]["model_dispatch_recorded_count"]
+    assert result["local_prefix_reuse"] == baseline["local_prefix_reuse"]

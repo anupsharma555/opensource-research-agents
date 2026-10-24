@@ -143,6 +143,29 @@ def test_missing_budget_and_uncaptured_usage_do_not_fabricate_metrics(tmp_path):
     assert "osra.estimated.input_tokens" not in attributes
 
 
+def test_admission_demand_exports_as_diagnostic_not_usage(tmp_path):
+    store = StateStore(tmp_path)
+    _seed(store, failed=True, usage_reported=False)
+    receipt = store.get("model_response_receipt", "response-1")
+    store.transact("admission-measurement", {}, lambda tx: tx.put(
+        receipt["kind"], receipt["id"], {**receipt["body"], "token_measurement": {
+            "schema": "ora.model.token_measurement.v1",
+            "local_input_estimate": 100, "provider_admission_tokens": 120,
+            "provider_admission_limit_tokens": 110,
+            "reported_input_tokens": None, "private": "DO_NOT_EXPORT",
+        }}, expected_version=receipt["version"],
+    ))
+    project_run(store, "mission-1", run_id="run-1")
+    model = next(item for item in store.records(EXPORT_KIND)
+                 if item["body"]["name"] == "osra.model.call")
+    attributes = model["body"]["attributes"]
+    assert attributes["osra.admission.requested_tokens"] == 120
+    assert attributes["osra.admission.limit_tokens"] == 110
+    assert "gen_ai.usage.input_tokens" not in attributes
+    assert attributes["osra.usage.input_tokens.status"] == "unknown"
+    assert "DO_NOT_EXPORT" not in str(model)
+
+
 @pytest.mark.parametrize("observation,amount,status", [
     ({"status": "reported_hit", "cached_tokens": 60}, 60, "reported"),
     ({"status": "reported_zero", "cached_tokens": 0}, 0, "reported"),
@@ -519,6 +542,9 @@ def test_run_summary_is_weighted_versioned_and_readable_without_private_input(tm
     assert values["osra.summary.input_percent"] == round(150 / 180 * 100, 3)
     assert values["osra.summary.output_percent"] == round(30 / 180 * 100, 3)
     assert values["osra.summary.cache_read_percent"] == 10.0
+    assert values["osra.summary.cache_confirmed_percent"] == round(10 / 150 * 100, 3)
+    assert values["osra.summary.cache_confirmed_status"] == "minimum"
+    assert values["osra.summary.cache_confirmed_input_calls"] == 2
     assert values["osra.summary.cache_covered_calls"] == 1
     assert values["osra.summary.cache_total_calls"] == 2
     assert values["osra.summary.cache_coverage_status"] == "partial"
@@ -528,11 +554,10 @@ def test_run_summary_is_weighted_versioned_and_readable_without_private_input(tm
     assert values["osra.summary.retrieval_recorded_attempt_count"] == 0
     assert "osra.summary.retrieval_http_attempt_count" not in values
     assert values["osra.summary.reasoning_output_percent"] == 25.0
-    assert ("Cache: 10.0% of input cached on reporting records (10 tokens); "
-            "1/2 saved request records with paired detail (partial coverage"
-            in values["output.value"])
-    assert "1/2 captured responses had paired cache and input detail" in values["output.value"]
-    assert "Whole-run cached-input percentage unknown" in values["output.value"]
+    assert ("Cache: confirmed cached share of reported input 6.7% "
+            "(10/150 tokens; 1/2 input-reporting calls with detail; "
+            "confirmed minimum; omitted cache detail remains unknown)" in values["output.value"])
+    assert "10.0% of input cached on reporting records" not in values["output.value"]
     assert "Provider tokens (reported subset): 150 input, 30 output" in values["output.value"]
     assert values["output.value"] == render_summary_output(values)
     assert values["osra.summary.call_count"] == 2
@@ -559,6 +584,9 @@ def test_run_summary_is_weighted_versioned_and_readable_without_private_input(tm
     assert store.get(**second["summary_ref"])["body"]["attributes"][
         "osra.summary.cache_read_percent"
     ] == round(20 / 110 * 100, 3)
+    assert store.get(**second["summary_ref"])["body"]["attributes"][
+        "osra.summary.cache_confirmed_percent"
+    ] == round(20 / 160 * 100, 3)
     sent = []
     result = export_pending(store, _config(), mission_id="mission-summary",
                             run_id="run-summary",
@@ -608,13 +636,16 @@ def _cache_summary(store: StateStore, observation: dict, cached_tokens: int | No
 
 @pytest.mark.parametrize(("observation", "cached_tokens", "expected"), [
     ({"status": "not_reported"}, None,
-     "Cache: Not reported by Groq (0/1 saved request records); cached-input percentage unknown."),
+     "Cache: confirmed cached share of reported input unknown "
+     "(0/1 input-reporting calls with detail)"),
     ({"status": "reported_zero", "cached_tokens": 0}, 0,
-     "Cache: 0.0% cached input (0 tokens); 1/1 saved request records with paired detail "
-     "(complete coverage; 0 reported hit, 1 reported zero)."),
+     "Cache: confirmed cached share of reported input 0.0% "
+     "(0/100 tokens; 1/1 input-reporting calls with detail; "
+     "complete detail for reported input)."),
     ({"status": "reported_hit", "cached_tokens": 30}, 30,
-     "Cache: 30.0% cached input (30 tokens); 1/1 saved request records with paired detail "
-     "(complete coverage; 1 reported hit, 0 reported zero)."),
+     "Cache: confirmed cached share of reported input 30.0% "
+     "(30/100 tokens; 1/1 input-reporting calls with detail; "
+     "complete detail for reported input)."),
 ])
 def test_summary_output_cache_reporting_is_prominent_and_precise(
     tmp_path, observation, cached_tokens, expected,
@@ -623,6 +654,7 @@ def test_summary_output_cache_reporting_is_prominent_and_precise(
     summary = _cache_summary(store, observation, cached_tokens)
     output = summary["body"]["attributes"]["output.value"]
     assert expected in output
+    assert output.count("\nCache:") == 1
     assert len(output) < 1600
 
 
@@ -636,6 +668,10 @@ def test_partial_cache_output_separates_saved_markers_from_actual_http_attempts(
         "osra.summary.cache_total_calls": 8,
         "osra.summary.cache_read_percent": 31.3,
         "osra.summary.cache_read_tokens": 1792,
+        "osra.summary.input_tokens": 16000,
+        "osra.summary.cache_confirmed_percent": 11.2,
+        "osra.summary.cache_confirmed_status": "minimum",
+        "osra.summary.cache_confirmed_input_calls": 7,
         "osra.summary.cache_hit_calls": 1,
         "osra.summary.cache_miss_calls": 0,
         "osra.summary.cache_not_reported_calls": 6,
@@ -648,14 +684,51 @@ def test_partial_cache_output_separates_saved_markers_from_actual_http_attempts(
     }
     output = render_summary_output(attributes)
     assert "Actual HTTP attempts (validation ledger): 7 model, 2 retrieval" in output
-    assert "1/8 saved request records with paired detail" in output
-    assert "1/7 captured responses had paired cache and input detail" in output
-    assert "31.3% of input cached on reporting records" in output
-    assert "Whole-run cached-input percentage unknown" in output
+    assert ("Cache: confirmed cached share of reported input 11.2% "
+            "(1,792/16,000 tokens; 1/7 input-reporting calls with detail; "
+            "confirmed minimum; omitted cache detail remains unknown)" in output)
+    assert "Cache records: 8 saved request records (1 without reported input)" in output
+    assert "31.3% of input cached on reporting records" not in output
     assert "8 pre-provider model dispatch markers, 7 captured responses" in output
     assert "1 model/figure request record with errors or unresolved status" in output
     assert "Markers do not establish HTTP attempts" in output
     assert "8 model HTTP attempts" not in output
+
+
+def test_unknown_cache_output_uses_input_reporting_calls_not_prepared_records():
+    attributes = {
+        "osra.summary.status": "active",
+        "osra.summary.input_tokens": 38979,
+        "osra.summary.cache_confirmed_status": "unknown",
+        "osra.summary.cache_confirmed_input_calls": 7,
+        "osra.summary.cache_covered_calls": 0,
+        "osra.summary.cache_total_calls": 11,
+        "osra.summary.prepared_only_count": 3,
+        "osra.summary.cache_not_reported_calls": 7,
+        "osra.summary.cache_unknown_calls": 4,
+        "osra.summary.evaluation_model_http_attempts": 8,
+        "osra.summary.evaluation_retrieval_http_attempts": 0,
+        "osra.summary.evaluation_outcome": "model_http_error",
+    }
+    output = render_summary_output(attributes)
+    assert "0/7 input-reporting calls with detail" in output
+    assert "11 saved request records (3 preparation-only and 1 other record" in output
+    assert "Input usage unknown on 1 ledger-counted model HTTP attempt" in output
+    assert "Actual HTTP attempts (validation ledger): 8 model, 0 retrieval" in output
+    assert "cached share of reported input unknown" in output
+    assert "0.0% cached" not in output
+    assert "0/11 calls" not in output
+
+
+def test_legacy_cache_output_remains_readable_without_confirmed_metric():
+    output = render_summary_output({
+        "osra.summary.status": "active",
+        "osra.summary.cache_total_calls": 1,
+        "osra.summary.cache_covered_calls": 0,
+        "osra.summary.cache_not_reported_calls": 1,
+    })
+    assert ("Cache: Not reported by Groq (0/1 saved request records); "
+            "cached-input percentage unknown.") in output
 
 
 def test_summary_output_reports_controller_stop_separately_from_active_mission(tmp_path):
@@ -900,6 +973,54 @@ def test_outbound_local_overlap_requires_consistent_counts_and_fraction():
                          ('estimated_repeated_message_tokens', 101),
                          ('message_prefix_percent', 50.0)]:
         assert not _valid_local_reuse_attributes({**values, 'osra.local_reuse.' + key: invalid})
+
+
+def test_run_structural_reuse_exports_counts_not_inputs_or_step_identities(tmp_path):
+    from ora.observability.metrics import build_context_metrics
+    from tests.observability.test_metrics import _seed_reuse_run
+
+    store = StateStore(tmp_path)
+    _seed_reuse_run(store, response_status="partial")
+    reuse = build_context_metrics(store, "run-a")["local_prefix_reuse"]
+    report = _diagnostic_report()
+    report["local_prefix_reuse"] = reuse
+    projected = project_diagnostic_summary(store, report)
+    body = store.get(**projected["export_ref"])["body"]
+    attrs = body["attributes"]
+    assert attrs["osra.local_reuse.structural_input_percent"] == round(
+        100 * reuse["local_structural_input_reuse_fraction"], 3)
+    assert "Local input reuse:" in attrs["output.value"]
+    assert "3/3 request records measured" in attrs["output.value"]
+    assert "first requests included at zero local reuse" in attrs["output.value"]
+    assert "Not reported by Groq" in attrs["output.value"]
+    assert not any(key.startswith("gen_ai.usage.") for key in attrs)
+    for private in ("Shared synthetic guidance", "actor-a", "call-0", "synthetic_profile"):
+        assert private not in str(body)
+    sent = []
+    assert export_pending(store, _config(), mission_id=projected["mission_id"],
+                          sender=lambda _config, row: sent.append(row) or True)["sent"] == 1
+    assert len(sent) == 1
+
+
+def test_structural_reuse_guard_rejects_wrong_denominator_and_missing_coverage():
+    from ora.observability.export import _local_reuse_attributes, _valid_local_reuse_attributes
+    from ora.observability.prefix_reuse import analyze_local_prefix_reuse
+    from tests.observability.test_prefix_reuse import _candidate
+
+    reuse = analyze_local_prefix_reuse([_candidate(1, "Same"), _candidate(2, "Same")])
+    attrs = _local_reuse_attributes(reuse)
+    assert attrs["osra.local_reuse.structural_input_percent"] == 50.0
+    assert _valid_local_reuse_attributes(attrs)
+    for key, value in (("structural_input_percent", 100),
+                       ("structural_measured_calls", 3),
+                       ("local_structural_input_tokens", 1),
+                       ("structural_coverage_status", "baseline_only")):
+        assert not _valid_local_reuse_attributes({**attrs, "osra.local_reuse." + key: value})
+
+    baseline = _local_reuse_attributes(analyze_local_prefix_reuse([_candidate(1, "Same")]))
+    assert "osra.local_reuse.structural_input_percent" not in baseline
+    assert baseline["osra.local_reuse.structural_coverage_status"] == "baseline_only"
+    assert _valid_local_reuse_attributes(baseline)
 
 
 def test_named_tool_projection_is_measured_private_and_restart_safe(tmp_path):

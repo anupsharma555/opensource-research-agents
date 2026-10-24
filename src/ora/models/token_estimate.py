@@ -21,7 +21,8 @@ from ora.live.provider import MODEL
 LEGACY_BASIS = "ora.request_bytes_div4_times1_25.v1"
 TOKENIZER_BASIS_V1 = "ora.o200k_harmony_ordinary_canonical_json_plus128.v1"
 TOKENIZER_BASIS_V2 = "ora.o200k_harmony_ordinary_canonical_json.v2"
-TOKENIZER_BASIS = "ora.o200k_harmony_ordinary_canonical_json.v3"
+TOKENIZER_BASIS_V3 = "ora.o200k_harmony_ordinary_canonical_json.v3"
+TOKENIZER_BASIS = "ora.o200k_harmony_ordinary_canonical_json.v4"
 ASSET_SHA256 = "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d"
 ASSET_PATH = Path(__file__).parent / "assets" / "o200k_base.tiktoken"
 _V1_JSON_ALLOWANCE = 128
@@ -52,7 +53,8 @@ def _legacy(raw: bytes, reason: str | None) -> TokenEstimate:
     )
 
 
-def _ordinary_request_shape(raw: bytes, *, historical_output_cap: bool) -> str | None:
+def _ordinary_request_shape(raw: bytes, *, historical_output_cap: bool,
+                            allow_medium_effort: bool) -> str | None:
     try:
         body = json.loads(raw)
         encoded = json.dumps(
@@ -71,7 +73,8 @@ def _ordinary_request_shape(raw: bytes, *, historical_output_cap: bool) -> str |
         return "unsupported_request_shape"
     if body["model"] != MODEL:
         return "selected_model_mismatch"
-    if (body["reasoning_effort"] != "high" or body["include_reasoning"] is not True
+    efforts = ("medium", "high") if allow_medium_effort else ("high",)
+    if (body["reasoning_effort"] not in efforts or body["include_reasoning"] is not True
             or body["stream"] is not False
             or historical_output_cap and body["max_completion_tokens"] != 8192):
         return "unsupported_reasoning_or_stream"
@@ -216,7 +219,8 @@ def estimate_request_tokens(raw: bytes, *, basis: str = "auto") -> TokenEstimate
     if type(raw) is not bytes:
         raise TypeError("Exact request bytes are required")
     if type(basis) is not str or basis not in {
-        "auto", LEGACY_BASIS, TOKENIZER_BASIS_V1, TOKENIZER_BASIS_V2, TOKENIZER_BASIS,
+        "auto", LEGACY_BASIS, TOKENIZER_BASIS_V1, TOKENIZER_BASIS_V2,
+        TOKENIZER_BASIS_V3, TOKENIZER_BASIS,
     }:
         raise ValueError("Unknown token estimate basis")
     if basis == LEGACY_BASIS:
@@ -224,6 +228,7 @@ def estimate_request_tokens(raw: bytes, *, basis: str = "auto") -> TokenEstimate
     strict = basis != "auto"
     reason = _ordinary_request_shape(
         raw, historical_output_cap=basis in {TOKENIZER_BASIS_V1, TOKENIZER_BASIS_V2},
+        allow_medium_effort=basis in {"auto", TOKENIZER_BASIS},
     )
     if reason:
         if strict:

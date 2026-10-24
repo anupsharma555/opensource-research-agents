@@ -2,7 +2,7 @@
 name: os-groq-usage
 description: Track saved Groq token usage by credential profile with a private daily log, seven-day view, and dated quota observations.
 metadata:
-  version: "0.2.1"
+  version: "0.2.3"
 ---
 
 # OS Groq Usage Tracking
@@ -69,6 +69,19 @@ explicit `--daily-limit 200000` provides arithmetic planning estimates only.
 - The helper extracts a timestamped daily-token `Limit / Used / Requested` observation
   from an exact linked 429 error, when retained. Its retry time means when that
   request may be retried, not when an entire day's allowance resets.
+- Include a per-profile quota table with **Observed at**, **Used / daily limit**,
+  **Earliest retry for that request**, and **Full daily allowance available at**.
+  Show dates, times and timezone. The last column means the full observed daily
+  allowance (for example, 200K), not enough capacity for one request. Use
+  provider-confirmed times only when supported. Otherwise apply the requested
+  **planning assumption**: latest provider observation at or above 95% of its
+  daily limit (190K of 200K), plus 24 hours. Mark the date **assumed**; this is not
+  a verified Groq reset rule or a guarantee of a full balance. If no qualifying
+  observation exists, show Unknown. Do not substitute Retry-After or midnight.
+  Keep JSON `full_reset_at` null when unconfirmed and store the assumed time,
+  anchor, threshold and status separately in `assumed_full_reset_estimates`.
+  An elapsed estimate is unverified, not available capacity. Recalculate from
+  the latest evidence; further usage can invalidate the planning assumption.
 - Show provider-observed headroom with its timestamp. Current account-wide remaining
   tokens stay **unknown** without current provider evidence and matching scope.
 - A local estimate subtracts recorded total usage from an explicitly supplied

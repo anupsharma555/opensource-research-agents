@@ -33,7 +33,7 @@ from ora.evidence import read_source_window  # noqa: E402
 from ora.mission import MissionService  # noqa: E402
 from ora.mission.service import _key  # noqa: E402
 from ora.models import GroqSelectedAdapter, ModelSession  # noqa: E402
-from ora.models.groq import MODEL, URL  # noqa: E402
+from ora.models.groq import DEFAULT_REASONING_EFFORT, MODEL, URL  # noqa: E402
 from ora.state import StateStore  # noqa: E402
 from ora.state.store import canonical  # noqa: E402
 
@@ -112,8 +112,8 @@ class BatchBudget:
 
     def transport(self, request, *, timeout):
         packet = json.loads(request.data)
-        if request.full_url != URL or packet.get("model") != MODEL or packet.get("reasoning_effort") != "high" or packet.get("max_completion_tokens") != 8192:
-            self.stop("Selected model, endpoint, high reasoning or 8192-token output setting changed")
+        if request.full_url != URL or packet.get("model") != MODEL or packet.get("reasoning_effort") != DEFAULT_REASONING_EFFORT or packet.get("max_completion_tokens") != 8192:
+            self.stop("Selected model, endpoint, reasoning effort or 8192-token output setting changed")
             raise QualificationStop(self.data["stop_reason"])
         if self.data["stop_reason"] or self.calls >= self.max_calls:
             self.stop("Authorized cross-batch call allowance exhausted")
@@ -188,7 +188,8 @@ def advance_one(host, run_id: str, budget: BatchBudget, expected_tool: dict | No
 def plan(request_id: str, condition: str, profile: str, max_calls: int) -> dict:
     return {"schema": "ora.guided_recovery_plan.v1", "request_id": request_id,
             "run_id": _key("run-", request_id), "condition": condition,
-            "credential_profile": profile, "model": MODEL, "reasoning_effort": "high",
+            "credential_profile": profile, "model": MODEL,
+            "reasoning_effort": DEFAULT_REASONING_EFFORT,
             "max_batch_calls": max_calls, "planned_case_calls": 4,
             "protocol": "guided_reader_mechanism_comparison_not_spontaneous_discovery",
             "no_atlas_server": True, "no_credential_hold_changes": True,

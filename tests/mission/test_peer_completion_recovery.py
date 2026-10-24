@@ -7,7 +7,7 @@ import time
 
 from ora.contracts.models import LiveStartRequest
 from ora.coordination.board import ref
-from tests.mission.test_service import answer, service, tool
+from tests.mission.test_service import answer, serialized_peer_name, service, tool
 
 
 def _drive_until(host, run_id: str, predicate) -> None:
@@ -116,7 +116,7 @@ def test_invitation_and_unanswered_request_do_not_resolve_failed_peer_action(
 
     def transport(request, *, timeout):
         body = json.loads(request.data)
-        if body["messages"][0]["content"].startswith("You are Mxra"):
+        if serialized_peer_name(body) == "Mxra":
             return tool("respond_invitation", {"decision": "declined"}, 90)
         requests.append(body)
         step = len(requests)
@@ -183,7 +183,7 @@ def test_reviewed_peer_answer_allows_a_later_direct_revision(tmp_path, monkeypat
 
     def transport(request, *, timeout):
         body = json.loads(request.data)
-        if body["messages"][0]["content"].startswith("You are Mxra"):
+        if serialized_peer_name(body) == "Mxra":
             return answer("Separate initial peer work.", 90)
         sage_requests.append(body)
         step = len(sage_requests)

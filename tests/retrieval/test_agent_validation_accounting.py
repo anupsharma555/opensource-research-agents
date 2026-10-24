@@ -18,7 +18,7 @@ def test_unlimited_aggregate_requires_opt_in_and_persists_identity(tmp_path):
     with pytest.raises(ValueError, match="explicit authorization"):
         AgentBudget(path, accounting_only=True)
     with pytest.raises(ValueError, match="explicit authorization"):
-        AgentBudget(path, model_limit=None, token_limit=55_000, retrieval_limit=4)
+        AgentBudget(path, model_limit=None, token_limit=55_000, retrieval_limit=None)
 
     sent = []
 

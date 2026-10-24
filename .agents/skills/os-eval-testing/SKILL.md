@@ -2,7 +2,7 @@
 name: os-eval-testing
 description: Design and progressively execute realistic research-agent evaluations in OpenSource Research Agents, using natural-language tasks across selected context, evidence, tool, recovery and collaboration conditions. Use to create or compare eval cases, select the next useful test, or diagnose an evaluation; not for routine unit checks alone or claiming scientific validity from a harness pass.
 metadata:
-  version: 0.1.4
+  version: 0.1.8
 ---
 
 # Progressive research-agent evaluations
@@ -41,7 +41,8 @@ creating a task, comparison or withheld rubric; it includes adaptable examples.
 
 Before executing a case, give a short plain-language brief: the task and supplied
 material; any later update or condition; the specific behavior or uncertainty
-being tested; what observable outcome would support it; and the call/token ceiling.
+being tested; what observable outcome would support it; and the authorized token
+budget, with any separately requested call or run limits.
 Name the exact behavior, its trigger, and the saved evidence that would establish
 it. For a small set of checks, use a compact Behavior / Evidence table. Explain
 why the task gives that capability a useful job. Distinguish task success
@@ -87,11 +88,15 @@ a green result. Revise an uninformative case without leaking its answer.
    injected transport before any real request; no need to repeat unrelated suites.
 2. Select one natural task that can resolve the most important remaining gap.
    State what live execution adds beyond the existing offline evidence.
-3. Use existing live authorization and its explicit call/token/run ceiling.
-   If the ceiling is missing, propose the smallest useful one before calling a
-   provider. Do not turn a rough estimate or broad permission to test progressively
-   into unlimited calls. Explain each planned call's purpose where predictable;
-   autonomous paths have estimates, not guaranteed counts.
+3. Use existing live authorization and its aggregate token budget. A token budget
+   is sufficient without a separate call cap; add call or run caps only when the
+   user specifies them. Preserve any existing explicit limits unless the user
+   changes them. If no budget is authorized, propose the smallest useful one
+   before calling a provider. Count every attempted call and respect provider
+   request limits, but distinguish an estimated call count from a stopping rule.
+   Explain each planned call's purpose where predictable; autonomous paths have
+   estimates, not guaranteed counts. Verify that the runner enforces the chosen
+   budget mode before dispatch.
 4. Run serially by default, capture evidence, and inspect the first mismatch
    before spending on another case. Diagnose the failing layer and prefer offline
    fixes/replay. Expand only to answer a named unresolved question within the
@@ -114,7 +119,41 @@ concurrent provider work and preserve existing held work. Source fixtures can
 isolate model behavior without live search; external retrieval needs its own
 authorized scope.
 
+## Short live tests of observed failures
+
+Start with the failed behavior already observed, then choose the smallest
+realistic trigger using the normal runtime, tools and instructions. Allow enough
+model turns to observe the requested outcome: the first HTTP 200 or tool call is
+only an intermediate result. For two-agent communication, require an actual
+reply, recipient use, requester review and final incorporation where the task
+calls for them; question delivery alone is partial evidence. Before counting a
+peer review, verify that the substantive answer reached a captured sent model
+input through a preview or normal reader. A reference in a prepared packet or a
+recorded review action alone does not establish that the model saw the answer.
+Label staged
+single-recipient or guided probes as diagnostics. Declare the behavior evidence
+before each test, separately from minor answer imperfections, and classify the
+result as pass, imperfect pass, failed, inconclusive or unexercised. An imperfect
+pass still demonstrates the target behavior; record a minor answer defect
+separately. A missing required reply or review is not an imperfect pass. Inspect
+exact sent inputs, saved provider traces and actual effects. When the target
+behavior fails or the harness cannot establish it, diagnose before spending on
+another case, repair offline, then repeat within the existing authorized ledger
+limits. Claim improvement only with a matched comparison. Report one
+consistent local structural-input reuse percentage with its denominator and
+coverage, separately from provider-confirmed cache. Do not force a tool choice
+solely to make the test pass.
+
 ## Review and decide the next step
+
+For every live model test, inspect the saved provider-emitted reasoning for each
+inference step alongside its actual input, selected skills/actions and observed
+results. File presence or a reasoning-token count alone is not a content review.
+Record what the trace helps explain, any mismatch with execution, and missing or
+truncated captures; do not reconstruct unavailable text or treat the trace as
+proof of correctness. Read the [reasoning review procedure](references/runtime-and-receipts.md#review-provider-reasoning-for-every-live-test)
+before concluding the test. This review uses saved OSRA provider output, not
+Codex's internal reasoning, and adds no research-model calls or prompt tokens.
 
 Use `$os-qualify-run` from `../os-qualify-run/SKILL.md` for the selected saved
 run's execution and evidence review, and `$os-groq-usage` from

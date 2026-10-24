@@ -47,14 +47,18 @@ def observe_groq_cache(raw: Any) -> dict[str, str | int]:
     if normalized is None:
         return {"status": "unavailable"}
     details = raw.get("prompt_tokens_details", _MISSING)
-    if details is _MISSING or details is None:
-        return {"status": "not_reported"}
+    if details is _MISSING:
+        return {"status": "not_reported", "field_presence": "details_absent"}
+    if details is None:
+        return {"status": "not_reported", "field_presence": "details_null"}
     if not isinstance(details, dict):
-        return {"status": "malformed"}
+        return {"status": "malformed", "field_presence": "details_not_object"}
     cached = details.get("cached_tokens", _MISSING)
     if cached is _MISSING:
-        return {"status": "not_reported"}
+        return {"status": "not_reported", "field_presence": "cached_tokens_absent"}
+    if cached is None:
+        return {"status": "malformed", "field_presence": "cached_tokens_null"}
     if type(cached) is not int or not 0 <= cached <= normalized["prompt_tokens"]:
-        return {"status": "malformed"}
+        return {"status": "malformed", "field_presence": "cached_tokens_invalid"}
     return {"status": "reported_hit" if cached else "reported_zero",
             "cached_tokens": cached}

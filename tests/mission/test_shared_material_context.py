@@ -14,7 +14,7 @@ from ora.mission.context import ContextError
 from ora.mission.report_lineage import report_text_access
 from ora.models.session import SessionError
 from ora.retrieval.providers import HTTPResult
-from tests.mission.test_service import _search_spec, answer, service, tool
+from tests.mission.test_service import _search_spec, answer, serialized_peer_name, service, tool
 
 
 def _intent(host, control):
@@ -263,7 +263,7 @@ def test_source_backed_peer_title_pins_use_and_revocation_withholds_read(tmp_pat
     def model(request, *, timeout):
         packet = json.loads(request.data)
         calls.append(packet)
-        if "Mxra" in packet["messages"][0]["content"]:
+        if serialized_peer_name(packet) == "Mxra":
             assert packet_text[:80] in request.data.decode()
             return answer("Synthetic source-linked peer conclusion.", len(calls))
         index = json.loads(packet["messages"][-1]["content"])

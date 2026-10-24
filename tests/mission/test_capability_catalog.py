@@ -16,9 +16,14 @@ from ora.coordination.board import ref
 from ora.coordination.executor import WorkSpec
 from ora.mission import service as service_module
 from ora.mission.service import TOOL_PURPOSES, UNHANDLED_COMMON_TOOLS
-from ora.mission.tool_catalog import TOOL_DESCRIPTIONS, TOOL_SCHEMAS, tool_contract_matches
+from ora.mission.tool_catalog import (
+    PARALLEL_TOOLS,
+    TOOL_DESCRIPTIONS,
+    TOOL_SCHEMAS,
+    tool_contract_matches,
+)
 from ora.models.session import ModelSession
-from tests.mission.test_service import answer, drain, service, tool
+from tests.mission.test_service import answer, drain, serialized_peer_name, service, tool
 
 
 def _index(instructions: str) -> dict:
@@ -109,10 +114,14 @@ def test_every_available_tool_has_a_label_and_serialized_description(tmp_path, m
         "Catalog inspection does not call a provider"))
     try:
         complete = (COMMON_TOOL_IDS | TOOL_SCHEMAS.keys()) - UNHANDLED_COMMON_TOOLS
-        for catalog in (host.catalog, host.planning_v1_catalog, host.legacy_catalog):
-            expected = complete if catalog is host.catalog else complete - {"modify_plan"}
+        for catalog in (host.parallel_catalog, host.catalog,
+                        host.planning_v1_catalog, host.legacy_catalog):
+            expected = (complete if catalog is host.parallel_catalog
+                        else complete - PARALLEL_TOOLS if catalog is host.catalog
+                        else complete - PARALLEL_TOOLS - {"modify_plan", "decline_peer_request"})
             assert expected <= catalog.tools.keys()
-            assert ("modify_plan" in catalog.tools) is (catalog is host.catalog)
+            assert ("modify_plan" in catalog.tools) is (catalog in (host.parallel_catalog, host.catalog))
+            assert ("decline_peer_request" in catalog.tools) is (catalog in (host.parallel_catalog, host.catalog))
             descriptors = {name: catalog.tools[name].descriptor() for name in expected}
             assert all(TOOL_PURPOSES[name].strip() for name in expected)
             assert all(descriptors[name].get("description", "").strip() for name in expected)
@@ -149,7 +158,7 @@ def test_common_descriptions_reach_an_actual_request_with_unchanged_tool_access(
             return tool("board_read", {}, 1)
         result = next(json.loads(item["content"]) for item in packet["messages"]
                       if item.get("role") == "tool" and item.get("name") == "board_read")
-        assert set(result) == {"open_work", "optional_work"}
+        assert set(result) == {"open_work", "optional_work", "registered_peers"}
         return answer("The current open work was reviewed.", 2)
 
     host = service(tmp_path, monkeypatch, transport)
@@ -209,7 +218,7 @@ def test_research_peers_can_read_shared_work_without_requesting_access(tmp_path,
     def transport(request, *, timeout):
         packet = json.loads(request.data)
         packets.append(packet)
-        peer = packet["messages"][0]["content"].split("\n", 1)[0]
+        peer = serialized_peer_name(packet)
         attached = {item["function"]["name"] for item in packet["tools"]}
         # Reproduce provider validation at the actual request boundary.
         assert "board_read" in attached
@@ -222,7 +231,7 @@ def test_research_peers_can_read_shared_work_without_requesting_access(tmp_path,
             return tool("board_read", {}, len(packets))
         result = next(json.loads(item["content"]) for item in packet["messages"]
                       if item.get("role") == "tool" and item.get("name") == "board_read")
-        assert set(result) == {"open_work", "optional_work"}
+        assert set(result) == {"open_work", "optional_work", "registered_peers"}
         assert isinstance(result["open_work"], list)
         assert isinstance(result["optional_work"], list)
         assert "write_note" not in attached  # Unrelated optional tools remain deferred.
@@ -255,20 +264,20 @@ def test_critic_can_request_granted_note_tool_without_discovery(tmp_path, monkey
         step = len(packets)
         instructions = packet["messages"][0]["content"]
         paragraphs = instructions.split("\n\n")
-        assert paragraphs[0].startswith("You are ")
-        assert paragraphs[1].startswith("Call attached local functions directly;")
-        assert "request_first_local_functions" in paragraphs[1]
-        assert "request_capability" in paragraphs[1]
-        assert "selected_for_next_turn and an attached schema" in paragraphs[1]
-        assert "not_ready_local_functions data prerequisites" in paragraphs[1]
+        assert sum(part.startswith("You are ") for part in paragraphs) == 1
+        assert paragraphs[0].startswith("Call attached local functions directly;")
+        assert "request_first_local_functions" in paragraphs[0]
+        assert "request_capability" in paragraphs[0]
+        assert "selected_for_next_turn and an attached schema" in paragraphs[0]
+        assert "not_ready_local_functions data prerequisites" in paragraphs[0]
         assert instructions.count("Call attached local functions directly;") == 1
         assert instructions.index("selected_for_next_turn and an attached schema") < instructions.index(
             "Choose research and completion"
         ) < instructions.index("Role capability catalog: ")
-        assert "request_capability" in paragraphs[1] and "exact tool_id" in paragraphs[1]
-        assert "without attached schemas are not callable" in paragraphs[1]
-        assert "do not request them again" in paragraphs[1]
-        assert "native provider turn, never a local function" in paragraphs[1]
+        assert "request_capability" in paragraphs[0] and "exact tool_id" in paragraphs[0]
+        assert "without attached schemas are not callable" in paragraphs[0]
+        assert "do not request them again" in paragraphs[0]
+        assert "native provider turn, never a local function" in paragraphs[0]
         assert "Separately requested tools persist until release_capability" in instructions
         index = _index(instructions)
         tools = index["tools"]

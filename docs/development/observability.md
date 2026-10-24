@@ -6,6 +6,70 @@ optionally prepare metadata-only OpenTelemetry spans. Cloud export is a separate
 explicit operation, or an opt-in background observer on newly started live runs.
 Research runs do not require LangSmith or its dashboard.
 
+## Local input reuse across steps
+
+`ora.observability.prefix_reuse.analyze_local_prefix_reuse` is the shared local
+calculator. `build_context_metrics` joins exact saved request bytes to their
+dispatch and response records before calling it. A cut-off response still has
+measurable input; missing or uncertain records remain comparison barriers.
+Prepared-only requests do not count. No model call, instruction, or prompt token
+is added by this measurement.
+
+The run-level structural reuse percentage sums unchanged opening message tokens
+and identical whole tool definitions, then divides by measured message and tool
+tokens. Both quantities use the same local tokenizer. Each agent/task/provider/
+model/credential-profile scope starts with a zero-reuse baseline included in the
+denominator. A run with only baselines has no repeat-request percentage. Missing,
+unsupported, and overlapping comparisons are excluded with explicit coverage;
+they are never silently counted as zero. Text after the first difference and
+partially changed tool schemas are outside this conservative measure. It is not
+provider cache use, billed input, an avoided inference, or a billing discount.
+
+The existing follow-up message-prefix percentage remains available as a separate,
+narrower metric: it excludes first requests and tool definitions. Compare runs
+only with the same measurement basis and comparable scope/coverage. An average
+of step percentages is not a run percentage; use summed token numerators and
+denominators. Cross-run summaries may compare these values without pooling
+different credentials or treating a previous run as a warm provider cache.
+
+The calculator returns content-free per-request rows plus aggregate counts under
+`local_prefix_reuse`. The enabled runtime observer saves them in the existing
+`observability_context_snapshot` record, versioned by its metrics hash. LangSmith
+receives aggregate counts and percentages only, separately from provider cache
+telemetry. When tracing is disabled, the original requests remain saved but no
+observer snapshot is created; the read-only trace command reconstructs the same
+metrics. Save its JSON/Markdown as private report artifacts for those runs.
+`os-run-details` requires those links and scope/coverage in each full run report.
+
+```sh
+.venv/bin/python scripts/trace_run.py \
+  --state-dir .local/research --run-id <saved-run-id> --format json
+```
+
+This default command does not read credentials, change the run, or export traces.
+The Markdown view includes the per-request comparison table. New results derived
+from historical records should be labeled recomputed, with the analysis time;
+previously exported cloud summaries are not rewritten by a local report.
+
+## Token measurement fidelity
+
+New model receipts separate the local serialized-request estimate, any numeric
+request demand in a matching provider token-rate error, and actual input usage
+reported after inference. A 413/429 admission count is not a billed input count;
+missing usage remains unknown. The local trace renders these measurements
+side by side. Metrics-only model spans expose admission demand and limit as
+`osra.admission.requested_tokens` / `osra.admission.limit_tokens`, separate from
+`gen_ai.usage.*`. The explicit packing reserve is
+`osra.estimated.rate_input_headroom_tokens`. Error messages and organization
+identifiers stay private; existing receipts and sent exports are not rewritten.
+
+The shared scheduler admits one initial model request when token capacity is
+unknown for its quota domain. Saved provider feedback then governs normal
+concurrency. A completed attempt without token headers releases this startup
+gate rather than serializing all future work. Unknown external outcomes retain
+their existing reconciliation boundary. Limits and reset headers remain
+provider observations; see [Groq rate-limit semantics](https://console.groq.com/docs/rate-limits).
+
 ## Readable comparisons of saved API cases
 
 `scripts/report_api_runs.py` builds a local HTML comparison, a Markdown report,
@@ -76,6 +140,13 @@ and a stable short run identifier. Full questions and model answers stay local.
 A prepared inclusion or retained discovery
 hit does not establish that the model used evidence correctly.
 
+In Markdown, model requests with a matching dispatch marker or captured response
+appear separately from prepared-only and unmatched call records. A dispatch marker
+is a saved pre-transport observation; only a separate transport ledger can count
+HTTP attempts. An unmatched call manifest has no saved request intent and is not
+evidence of another prepared request. The JSON `loops` array retains all records
+for diagnostics; this presentation grouping does not change token totals.
+
 ## Tools selected in each loop
 
 The local trace report includes a tool table joined to exact saved model,
@@ -89,6 +160,9 @@ Tool-message delivery to the next captured model request and any later recovery
 are reported separately. Source text and references may also arrive in separate
 context packets, so a missing tool message does not mean that source information
 was absent.
+When the next captured request already contains the matching result, the Markdown
+later-delivery cell is a dash instead of repeating that same observation. A later
+recovery after an omitted next request remains visible.
 Delivery distinguishes the exact saved tool message from a shortened or
 permission-filtered host projection. A prepared packet or pre-transport dispatch
 marker alone proves neither HTTP delivery nor model receipt. A source reference
@@ -183,6 +257,9 @@ normalized: `reported_hit`, `reported_zero`, `not_reported`, `malformed`, or
 `unavailable`. Only valid reported values contribute to cache totals. Text,
 streaming and auxiliary figure responses share this classification; the legacy
 Groq provider retains it too. Interrupted streams are unavailable.
+The accompanying `field_presence` diagnostic distinguishes absent, null or
+malformed details from an absent, null or invalid cached-token value. It contains
+only a classification; provider text and request content are not exported.
 
 An absent cache field means **unknown**, not zero. Older normalized-only receipts
 retain usable reported cache values, but missing values become `legacy_uncertain`:
@@ -192,6 +269,13 @@ tokens. It includes complete/partial/unavailable coverage, reported hit and zero
 counts, call coverage, and the covered share of reported input tokens. For
 example, a 60% cached share on one reporting call is not a 60% whole-run saving.
 Unknown token totals remain null, and no billed savings are inferred.
+
+The additional `cache_fraction_confirmed` divides known cached input by **all
+reported input** in the run. With partial cache coverage it is a confirmed
+minimum, not the actual whole-run hit rate; with no cache counts it remains
+unknown. Its input-reporting-call denominator excludes prepared-only requests.
+Local and LangSmith summaries expose this measure alongside the narrower
+reporting-call fraction and coverage, so the two percentages remain interpretable.
 
 ## Local prompt reuse when provider cache counts are absent
 

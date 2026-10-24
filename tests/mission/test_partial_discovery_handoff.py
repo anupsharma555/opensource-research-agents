@@ -35,7 +35,7 @@ def test_partial_exa_and_scholarly_success_survive_restart_without_duplicate_eff
             return answer("A separate synthetic review can proceed.", 100)
         model_requests.append(body)
         turn = len(model_requests)
-        assert body["model"] == MODEL and body["reasoning_effort"] == "high"
+        assert body["model"] == MODEL and body["reasoning_effort"] == "medium"
         if turn == 1:
             return tool("search_scholarly", {
                 "route": "exa.search", "query": "synthetic comparison", "limit": 2,
