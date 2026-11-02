@@ -55,6 +55,30 @@ def _last_result(packet: dict, name: str) -> dict:
     ))
 
 
+def _wait_for_revised_document_completion(host: MissionService, run_id: str) -> None:
+    """Let the interrupted fetch callback settle under a finite wall-clock bound."""
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if errors := host._fixture_transport_errors:
+            raise errors[0]
+        host._drive_run(host._run(run_id))
+        if errors := host._fixture_transport_errors:
+            raise errors[0]
+        status = host._run(run_id)["body"]["status"]
+        if status == "completed":
+            return
+        if status != "active":
+            pytest.fail(f"Revised document run stopped as {status} before completion")
+        time.sleep(.005)
+    controls = host.store.records("mission_task_control")
+    work = host.store.records("executor_work")
+    pytest.fail(
+        "Revised document callback did not settle before deadline: "
+        f"controls={[item['body'].get('phase') for item in controls]}, "
+        f"work={[item['body'].get('phase') for item in work]}"
+    )
+
+
 def test_native_browser_discovery_retains_metadata_lead_then_scoped_result(tmp_path, monkeypatch):
     packets = []
     receipt_id = None
@@ -70,7 +94,9 @@ def test_native_browser_discovery_retains_metadata_lead_then_scoped_result(tmp_p
             catalog_text = packet["messages"][0]["content"]
             assert '"browser_search"' in catalog_text
             assert '"general-web-discovery"' in catalog_text
-            assert "not a local function" in catalog_text
+            assert any(boundary in catalog_text for boundary in (
+                "not a local function", "never a local function",
+            ))
             assert "Never emit a function call named browser_search" not in catalog_text
             assert {"type": "browser_search"} not in packet["tools"]
             assert packet["reasoning_effort"] == "medium"
@@ -425,7 +451,34 @@ def test_interrupted_browser_document_use_reconciles_only_original_work(
             return tool("request_capability", {"tool_id": "fetch_source"}, turn)
         if turn == 4:
             return tool("fetch_source", {"hit_id": selected["hit_id"]}, turn)
-        assert scenario in {"resume", "after_fetch", "revoked_use"}
+        if scenario in {"cancelled", "revised_proposal"}:
+            assert turn == 5
+            assert "Native browser search returns URL leads." not in json.dumps(packet["messages"])
+            assert not any(
+                item["role"] == "tool" and item.get("name") == "fetch_source"
+                for item in packet["messages"]
+            )
+            contexts = [
+                json.loads(item["content"]) for item in packet["messages"]
+                if item["role"] == "user"
+            ]
+            feedback = next(
+                item["host_feedback"] for item in contexts
+                if (item.get("host_feedback") or {}).get("status") == "wait_needs_peer_replan"
+            )
+            assert feedback["stranded_waits"][0]["waiting_reason"].startswith(
+                "Saved fetch_source result was not accepted after "
+                + ("cancellation" if scenario == "cancelled" else "task revision")
+            )
+            current_context = next(item for item in contexts if "task_ref" in item)
+            assert current_context["task_ref"]["version"] == (
+                1 if scenario == "cancelled" else 2
+            )
+            return tool("publish_result", {
+                "title": "Document result unavailable",
+                "text": "The saved document fetch did not supply accepted source evidence.",
+                "citations": [], "limitations": ["No permitted passage was read"],
+            }, turn)
         if scenario == "revoked_use":
             assert "Native browser search returns URL leads." not in json.dumps(packet["messages"])
             assert _last_result(packet, "fetch_source")["status"] == "source_unavailable"
@@ -559,11 +612,28 @@ def test_interrupted_browser_document_use_reconciles_only_original_work(
                         EvidenceLibrary(reopened.store), "revoked-browser-document-window",
                         ref(reopened.store.records("source_copy")[0]),
                     )
-        else:
+        elif scenario == "replacement_claim":
             for _ in range(4):
                 reopened._drive_run(reopened._run(run.run_id))
             assert len(calls) == 4
             assert reopened.store.records("source_use") == []
+        else:
+            if scenario == "revised_proposal":
+                _wait_for_revised_document_completion(reopened, run.run_id)
+            else:
+                drain(reopened, run.run_id, limit=35)
+            assert reopened._run(run.run_id)["body"]["status"] == "completed"
+            assert len(calls) == 5
+            stale_work = reopened.store.get("executor_work", work["id"])
+            assert stale_work["body"]["phase"] == "result_unaccepted"
+            observation = reopened.store.get(**stale_work["body"]["result_ref"])
+            assert observation["body"]["reason_code"] == (
+                "saved_local_tool_after_cancel" if scenario == "cancelled"
+                else "saved_local_tool_after_task_revision"
+            )
+            assert reopened.store.records("source_use") == []
+            assert reopened._control(run.run_id, "agent-synthesis")["body"][
+                "source_refs"] == []
         assert len(fetches) == 1
     finally:
         reopened.close()

@@ -4,6 +4,30 @@ The current [Python contract models](../../src/ora/contracts/models.py) accept `
 
 ## Three different versions
 
+The analysis tools add generated input contracts without changing existing
+command envelopes or the stored-record schema. New starts and follow-ups pin
+`analysis_tool_version=2`; saved version 1 runs retain the original
+`analyze_values` and `convert_units` tools, and runs without the marker do not
+gain analysis tools implicitly. Version 2 adds separate summary-statistics,
+contingency-table, paired-value, correlation, multiple-testing, descriptive and
+batch-conversion contracts. Source permissions and exact replay checks still
+apply. See [agent analysis](../development/agent-analysis.md).
+
+`LiveStartRequest.agentModels` is optional and is omitted from the historical
+request fingerprint when absent. New missions pin a complete alias-to-model
+catalog with `agent_model_binding_version=1`, including default choices;
+follow-ups inherit those bindings. Older runs keep their recorded selection.
+Reusing a request ID with changed choices is a conflict. Older strict hosts or
+clients need a matched update to use the added field; this is not negotiated
+mixed-version compatibility. See [mixed models](../development/mixed-models.md).
+
+New internal `capacity.quota_bridge.v1` credential cutovers may include a
+versioned `child_scope_snapshot` of existing model-lane debt. Current readers
+follow saved migration chains without rewriting old operations. An older bridge
+missing necessary pre-cutover proof blocks admission until reconciled; older
+runtime readers are not qualified for the added snapshot metadata. See the
+[quota migration boundaries](../development/mixed-models.md#scheduling-and-accounting).
+
 Parallel research adds canonical `ReadResearchActivityInput`, `RetainEvidenceInput`,
 `SearchEvidenceLibraryInput` and `FetchSourceInput` schemas and generated UI types.
 New missions/follow-ups pin `parallel_research_version=1`, select the new search

@@ -81,12 +81,12 @@ def test_full_catalog_modes_progress_and_exact_source_input(tmp_path, monkeypatc
                          if item.get('role') == 'user' and item.get('content', '').startswith('{')
                          and json.loads(item['content']).get('authority') == 'saved_host_source_index_not_source_instruction')
             inventory = index['inventory']
-            return tool('read_source_inventory', {'inventory_id': inventory['inventory_ref']['id'], 'inventory_version': inventory['inventory_ref']['version'], 'cursor': inventory['next_cursor'], 'limit': 1}, step)
-        if render and step == 10:
-            inventory = latest(packet, 'read_source_inventory')
+            # Both copies are already in the current inventory page. Read the
+            # rendered copy directly instead of paging past its end cursor.
+            assert inventory['next_cursor'] is None
             selected = next(item['fetch'] for item in inventory['items'] if 'ordinary_document_ref' not in item)
             return tool('read_source_window', {'source_id': selected['source_id'], 'source_version': selected['source_version'], 'block_offset': 0, 'char_offset': 0, 'char_limit': 1000}, step)
-        assert step == (11 if render else 8)
+        assert step == (10 if render else 8)
         assert (rendered_passage if render else passage) in json.dumps(packet)
         return answer('The synthetic source passage has been inspected.', step)
     failures = []
@@ -120,7 +120,7 @@ def test_full_catalog_modes_progress_and_exact_source_input(tmp_path, monkeypatc
             (tmp_path / 'packets.json').write_text(json.dumps(packets))
             print('Synthetic packet diagnostics:', tmp_path / 'packets.json')
         assert not failures, failures
-        assert len(packets) == (11 if render else 8), host._control(run.run_id, 'agent-synthesis')['body']
+        assert len(packets) == (10 if render else 8), host._control(run.run_id, 'agent-synthesis')['body']
         assert len(search_calls) == len(calls) == 1
         assert len(render_calls) == int(render)
         assert host.store.records('source_read_window')
@@ -200,8 +200,18 @@ def test_article_404_is_saved_and_model_can_choose_another_hit(tmp_path, monkeyp
             return tool('fetch_source', {'hit_id': hits[0]}, step)
         if step == 4:
             result = next(json.loads(m['content']) for m in packet['messages'] if m.get('name') == 'fetch_source')
-            assert result['http_status'] == 404 and result['negative_fetch_ref']
-            assert 'another saved hit' in result['next_action']
+            assert result['status'] == 'source_unavailable'
+            assert result['classification'] == 'http_error'
+            assert result['http_status'] == 404
+            assert result['model_input_status'] == 'not_granted'
+            assert result['hit_id'] == hits[0]
+            assert hits[1] in json.dumps(packet)
+            failed = host.store.records('shared_public_fetch')
+            assert len(failed) == 1
+            assert failed[0]['body']['phase'] == 'failed'
+            assert failed[0]['body']['http_status'] == 404
+            assert failed[0]['body']['reason'] == 'http_error'
+            assert failed[0]['body']['requested_url'] == 'https://example.org/missing'
             return tool('fetch_source', {'hit_id': hits[1]}, step)
         return answer('An alternative public document was retained; its evidence still needs inspection.', step)
     host = service(tmp_path, monkeypatch, model)
@@ -215,7 +225,10 @@ def test_article_404_is_saved_and_model_can_choose_another_hit(tmp_path, monkeyp
         run = host.start(LiveStartRequest(request_id='negative-search-continuation', question='Find a usable synthetic report.', agent_ids=['agent-synthesis']))
         drain(host, run.run_id, limit=20)
         assert len(packets) == 5 and len(calls) == 2
-        assert host.store.records('public_source_negative_fetch')[0]['body']['http_status'] == 404
+        assert sorted((item['body']['phase'], item['body'].get('http_status'))
+                      for item in host.store.records('shared_public_fetch')) == [
+            ('completed', None), ('failed', 404),
+        ]
         assert len(host.store.records('public_document_fetch')) == 1
         assert host._run(run.run_id)['body']['status'] == 'completed'
     finally:

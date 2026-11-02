@@ -117,37 +117,29 @@ def test_oversize_question_has_exact_reader_without_a_prefix(tmp_path):
     assert "q" * 100 not in canonical(cue)
 
 
-def test_cue_retries_after_required_index_compaction_before_optional_detail(tmp_path):
+def test_cue_survives_required_index_compaction_before_optional_detail(tmp_path):
     store = StateStore(tmp_path)
     saved = _fixture(store, body="Synthetic peer answer. " * 100)
     context = WorkingContext(store)
     control = store.get("mission_task_control", "requester-control")
-    calls, measured = [0], []
-    original = context._peer_answer_review_cue
-
-    def cue(*args, **kwargs):
-        calls[0] += 1
-        return original(*args, **kwargs)
-
-    def estimate(value):
-        amount = len(value)
-        if "peer_answer_review_cues" in value:
-            measured.append((calls[0], amount))
-        return amount
-
-    context._peer_answer_review_cue = cue
     pack = context.assemble(
         saved["call_ref"], saved["task_ref"], control_ref=ref(control),
-        allowance=1500, estimate_tokens=estimate,
+        allowance=1500, estimate_tokens=len,
     )
     index = json.loads(pack.messages[-1]["content"])
-    assert min(size for phase, size in measured if phase == 1) > 1500
-    assert min(size for phase, size in measured if phase == 2) <= 1500
-    assert calls[0] == 3  # refreshed after final visible history is selected
-    assert index["peer_answer_review_cues"][0]["question"] == (
-        "Please review this synthetic claim."
+    # Earlier duplicate-field removal may make the first attempt fit. The
+    # observable requirement is the same usable cue within the allowance.
+    assert len(pack.messages[-1]["content"]) <= 1500
+    cue = index["peer_answer_review_cues"][0]
+    assert cue["question"] == "Please review this synthetic claim."
+    assert cue["request_ref"] == saved["request_ref"]
+    assert cue["answer_ref"] == saved["answer_ref"]
+    assert cue["read_request"]["tool"] == "read_context_record"
+    assert {key: cue["read_request"][key] for key in ("kind", "id", "version")} == (
+        saved["report_ref"]
     )
     assert saved["report_ref"] not in pack.included_refs
+    assert context.context_source_dependency_refs(pack) == ()
 
 
 def test_review_cue_survives_delivered_message_version_and_tight_allowance(tmp_path):

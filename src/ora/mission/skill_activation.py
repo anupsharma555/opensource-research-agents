@@ -18,6 +18,8 @@ from ora.skills.registry import SkillDefinition, _checked_file, _read
 from ora.state import StateError
 
 LIFECYCLE_TOOLS = frozenset({"activate_skill", "release_skill", "release_capability"})
+ROLE_CATALOG_ID_SCHEMA = "ora.role_capability_catalog.ids.v1"
+ROLE_CATALOG_PURPOSE_SCHEMA = "ora.role_capability_catalog.purposes.v2"
 # These are existing host-granted mission tools, not new grants from skill prose.
 # Appraisal uses notes to preserve preliminary assessments and disagreements.
 SKILL_TOOLS = {
@@ -28,10 +30,12 @@ SKILL_TOOLS = {
 CALLABILITY_GUIDANCE = (
     "Call attached local functions directly; do not request them again. "
     "Catalog grants without attached schemas "
-    "are not callable: for request_first_local_functions, call request_capability "
-    "with exact tool_id, then "
-    "wait for selected_for_next_turn and an attached schema. Resolve "
-    "not_ready_local_functions data prerequisites first. Requesting browser_search "
+    "are not callable: use request_first_local_functions when listed, otherwise "
+    "request_first_rule and any unavailable_now exceptions. For an eligible "
+    "deferred local tool, call request_capability with exact tool_id, then wait "
+    "for selected_for_next_turn and an attached schema. Resolve "
+    "not_ready_local_functions data prerequisites first. discover_capabilities "
+    "is optional for a known eligible tool ID. Requesting browser_search "
     "selects a native provider turn, never a local function. Answer when sufficient."
 )
 
@@ -123,7 +127,10 @@ def checked_registry(root, role_id: str, pins: dict, selected: list[str]):
     return registry
 
 
-def catalog_prompt(pins: dict, active: list[str], tools: dict[str, str], *, lifecycle: bool) -> str:
+def catalog_prompt(
+    pins: dict, active: list[str], tools: dict[str, str], *, lifecycle: bool,
+    projection_version: int | None = None,
+) -> str:
     """Name role-granted skills and supported tools without loading their bodies or schemas."""
     skills = {
         name: {"purpose": pin["purpose"], "state": (
@@ -138,11 +145,33 @@ def catalog_prompt(pins: dict, active: list[str], tools: dict[str, str], *, life
         "or data. "
         if lifecycle else "Listed skills are already active. "
     )
+    if projection_version not in (None, 1, 2):
+        raise StateError("Unsupported role capability catalog projection")
+    if projection_version == 2 and (
+        not isinstance(tools, dict)
+        or any(not isinstance(name, str) or not name
+               or not isinstance(purpose, str) or not purpose.strip()
+               for name, purpose in tools.items())
+    ):
+        raise StateError("Purpose catalog needs nonempty tool names and purposes")
+    if projection_version == 1:
+        catalog = {"schema": ROLE_CATALOG_ID_SCHEMA, "skills": skills,
+                   "tool_ids": sorted(tools)}
+    elif projection_version == 2:
+        catalog = {"schema": ROLE_CATALOG_PURPOSE_SCHEMA, "skills": skills,
+                   "tools": dict(sorted(tools.items()))}
+    else:
+        catalog = {"skills": skills, "tools": dict(sorted(tools.items()))}
+    discovery = (
+        "discover_capabilities supplies deferred tool purposes and current access status"
+        if projection_version == 1 else
+        "discover_capabilities refreshes access status"
+    )
     return (
         "Role capability catalog: "
-        + json.dumps({"skills": skills, "tools": dict(sorted(tools.items()))}, separators=(",", ":"))
+        + json.dumps(catalog, separators=(",", ":"))
         + ". " + guidance
-        + "discover_capabilities refreshes access status; request read_skill_resource "
+        + discovery + "; request read_skill_resource "
         "for paged active-skill detail."
     )
 

@@ -78,6 +78,15 @@ candidate is `store.get(**hit_ref)["body"]["source"]`. The intake owner can
 accept that exact ref together with a separately fetched byte copy, declared
 rights basis, and identity check. A deeper article fetch creates another
 encounter; it does not rewrite the search hit's surface.
+
+New missions and follow-ups pin `fetch_source_autoattach_version: 1`. When a current, permitted scholarly hit has an original-source URL and `inspect_hit` is attached, the host can attach the granted `fetch_source` schema in the same turn. Explicit release still wins. This exposes a choice; it does not fetch, inspect, or promote the hit to checked evidence. The handler rechecks the exact current hit, shared-hit access and source-use limits when selected. Saved runs without the pin keep their original attachment policy. Saved request blobs are never rewritten; an eligible unclaimed pre-dispatch request can be superseded only through the host's existing recovery policy. Offline attachment tests establish the menu and permission checks; a natural model's selection and useful source reading need separate run evidence.
+
+A direct-web hit owned by another task or peer can expose permitted metadata
+without granting task-local fetch authority. Its metadata-only hint uses the same
+ownership check as `fetch_source` and points to an own-task search, a peer request
+for a checked finding, or a deliberately retained permitted library copy when one
+exists. It does not suggest fetching an ineligible hit or widen source access.
+
 For a returned published abstract, the hit and projection also expose
 `source_use_policy`: a versioned private-research-use decision with the exact
 abstract hash, HTTP-response hash, route, source URL, timestamp and source

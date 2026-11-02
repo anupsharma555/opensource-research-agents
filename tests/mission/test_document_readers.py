@@ -14,6 +14,7 @@ import pytest
 from ora.contracts.models import LiveStartRequest
 from ora.mission.service import MissionService
 from ora.models import GroqSelectedAdapter, ModelSession
+from ora.models.profiles import QWEN_MODEL, model_quota_scope
 from ora.retrieval.providers import HTTPResult
 from ora.state import StateStore
 from tests.evidence.test_document_ocr import synthetic_pdf
@@ -57,7 +58,8 @@ def test_vision_is_not_requestable_without_run_opt_in(tmp_path, monkeypatch):
                       if item.get("role") == "user"
                       and "trusted_host_attached_tool_availability" in item.get("content", ""))
         assert "inspect_figure" not in _tools(packet)
-        assert "inspect_figure" not in notice["request_first_local_functions"]
+        assert "inspect_figure" not in notice["call_now_local_functions"]
+        assert "Vision is not authorized" in notice["not_ready_local_functions"]["inspect_figure"]
         return answer("Vision was not enabled for this run.", 1)
 
     monkeypatch.setenv("GROQ_API_KEY", "synthetic-model-key")
@@ -239,7 +241,7 @@ def test_pdf_source_window_then_local_ocr_and_opted_in_figure(
             else:
                 pytest.fail("Captured figure rejection was not accepted as a tool result")
             receipt = host.store.records("figure_response_receipt")[0]
-            quota = host.store.get("capacity_quota", "groq-selected")["body"]
+            quota = host.store.get("capacity_quota", model_quota_scope("groq-selected", QWEN_MODEL))["body"]
             receipt_time = datetime.fromisoformat(
                 receipt["created_at"].replace("Z", "+00:00")
             ).timestamp()
@@ -247,10 +249,11 @@ def test_pdf_source_window_then_local_ocr_and_opted_in_figure(
             assert quota["blocked_until"] > host.store.clock()
             for _ in range(5):
                 host._drive_run(host._run(run.run_id))
-            assert len(packets) == 9  # No GPT-OSS call before the shared hold ends.
+            drain(host, run.run_id, limit=15)
+            assert len(packets) == 10  # A Qwen hold does not block GPT-OSS continuation.
         else:
             drain(host, run.run_id, limit=15)
-        assert len(packets) == (10 if vision_case == "success" else 9), {
+        assert len(packets) == (9 if vision_case == "uncertain" else 10), {
             "steps": [[item.get("name") for item in packet["messages"]
                        if item.get("role") == "tool"] for packet in packets],
             "control": host._control(run.run_id, "agent-synthesis")["body"]["phase"],
@@ -274,7 +277,8 @@ def test_pdf_source_window_then_local_ocr_and_opted_in_figure(
         assert len(figure_work) == 1
         spec = figure_work[0]["body"]["spec"]
         assert spec["kind"] == "model" and spec["call_id"] == ""
-        assert spec["quota_scopes"] == ["groq-selected"]
+        assert spec["quota_scopes"] == [model_quota_scope("groq-selected", QWEN_MODEL)]
+        assert spec["output_reservation_tokens"] == 1024
         assert spec["estimated_tokens"] >= 2048 + 1024
         if vision_case == "uncertain":
             assert figure_work[0]["body"]["phase"] == "pending"

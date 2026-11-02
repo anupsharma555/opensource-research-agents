@@ -1,0 +1,69 @@
+{
+  "$defs": {
+    "PValueObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "pValue": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Pvalue",
+          "type": "number"
+        },
+        "testId": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Testid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "testId",
+        "pValue"
+      ],
+      "title": "PValueObservation",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "alpha": {
+      "description": "Strictly between 0 and 1; endpoints are rejected by the canonical validator",
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Alpha",
+      "type": "number"
+    },
+    "familyId": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Familyid",
+      "type": "string"
+    },
+    "method": {
+      "enum": [
+        "benjamini_hochberg",
+        "benjamini_yekutieli"
+      ],
+      "title": "Method",
+      "type": "string"
+    },
+    "tests": {
+      "items": {
+        "$ref": "#/$defs/PValueObservation"
+      },
+      "maxItems": 200,
+      "minItems": 2,
+      "title": "Tests",
+      "type": "array"
+    }
+  },
+  "required": [
+    "tests",
+    "method",
+    "alpha",
+    "familyId"
+  ],
+  "title": "AdjustPValuesInput",
+  "type": "object"
+}

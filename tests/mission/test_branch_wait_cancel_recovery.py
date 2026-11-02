@@ -57,11 +57,6 @@ def test_accepted_fast_report_survives_held_sibling_callback_and_host_reopen(
     host = service(tmp_path, monkeypatch, transport)
     reopened = None
     try:
-        host.capacity.observe_headers(
-            "groq-selected", remaining_requests=100, remaining_tokens=50000,
-            token_limit=50000, reset_after=60,
-            observation_id="known-synthetic-branch-headroom",
-        )
         request = LiveStartRequest(
             request_id="held-independent-branch",
             question="Summarize two independent synthetic contributions",
@@ -72,6 +67,17 @@ def test_accepted_fast_report_survives_held_sibling_callback_and_host_reopen(
         run = host.start(request)
         original = host._run(run.run_id)["body"]
         assert original["source_refs"]
+        model_scopes = set()
+        for agent_id in request.agent_ids:
+            assert host._schedule_model(host._control(run.run_id, agent_id))
+            work = host._work_for(host._control(run.run_id, agent_id))
+            model_scopes.update(host.executor._spec_from(work).quota_scopes)
+        assert len(model_scopes) == 1
+        host.capacity.observe_headers(
+            model_scopes.pop(), remaining_requests=100, remaining_tokens=50000,
+            token_limit=50000, reset_after=60,
+            observation_id="known-synthetic-branch-headroom",
+        )
 
         def fast_accepted() -> bool:
             host._drive_run(host._run(run.run_id))

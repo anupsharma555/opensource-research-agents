@@ -91,6 +91,42 @@ def test_answer_reader_supplies_permitted_report_without_another_pointer_hunt(
         )
 
 
+def test_reactivated_shared_report_without_producer_lineage_stays_denied(tmp_path):
+    store = StateStore(tmp_path)
+    saved = _fixture(store)
+    context, pack, _index = _pack(store, saved, allowance=1800)
+    inclusion_ref = bind_no_source_pack(store, context, pack, "reactivated-legacy-report")
+    assert any(item.get("type") == "shared_material"
+               and item.get("fetch") == saved["report_ref"]
+               for item in pack.omitted)
+    control = store.get("mission_task_control", "responder-control")
+    proposal = store.get("board_proposal", saved["peer_task_ref"]["id"])
+    def reactivate(tx):
+        tx.put("mission_task_control", control["id"], {
+            **control["body"], "phase": "ready_model", "report_ref": None,
+        }, expected_version=control["version"])
+        tx.put("board_proposal", proposal["id"], {
+            **proposal["body"], "status": "open",
+        }, expected_version=proposal["version"])
+        return {"status": "reactivated"}
+
+    store.transact("reactivate-legacy-producer", {}, reactivate, mission_id="m")
+    card = context.read_omitted_page(
+        mission_id="m", actor_id="requester", task_id="requester-task",
+        inclusion_ref=inclusion_ref,
+        cursor=next(index for index, item in enumerate(pack.omitted)
+                    if item.get("fetch") == saved["report_ref"]),
+        limit=1,
+    )["items"][0]["summary"]
+    assert card == {"kind": "report", "status": "shared_material_unavailable"}
+    with pytest.raises(ContextError, match="Shared material is no longer available"):
+        context.read_omitted_record(
+            mission_id="m", actor_id="requester", task_id="requester-task",
+            inclusion_ref=inclusion_ref, pointer=saved["report_ref"],
+            offset=0, limit=2000,
+        )
+
+
 def test_long_peer_question_has_exact_reader_without_a_prefix(tmp_path):
     store = StateStore(tmp_path)
     saved = _fixture(store, body="A short synthetic assessment.")
@@ -267,7 +303,12 @@ def test_saved_answer_sidecar_is_removed_on_access_loss_before_replay(tmp_path, 
     assert receipt["status"] == "report_current_use_rechecked"
 
 
-def test_source_use_revocation_removes_saved_report_sidecar(tmp_path, monkeypatch):
+@pytest.mark.parametrize("policy_status", [
+    "revoked", "requires_source_policy_resolution",
+])
+def test_current_source_use_loss_removes_saved_report_sidecar(
+    tmp_path, monkeypatch, policy_status,
+):
     report_body = "A synthetic source-backed peer assessment."
     host = service(tmp_path, monkeypatch, lambda _request, **_kw: answer(report_body, 1))
     host.discovery_transport = lambda *_args, **_kw: HTTPResult(200, json.dumps({
@@ -343,11 +384,31 @@ def test_source_use_revocation_removes_saved_report_sidecar(tmp_path, monkeypatc
         use = host.store.resolve("source_use.copy", f"{copy_ref['id']}:{copy_ref['version']}")
         host.store.transact("revoke-answer-reader-source", {}, lambda tx: tx.put(
             "source_use", use["id"], {
-                **use["body"], "policy_status": "revoked", "allowed_uses": [],
+                **use["body"], "policy_status": policy_status,
+                "allowed_uses": (["model_input"] if policy_status ==
+                                 "requires_source_policy_resolution" else []),
             }, expected_version=use["version"]), mission_id=mission_id)
         after = host.context.read_omitted_record(**read_scope)
         assert after["text"] == first["text"]
         assert "related_report_window" not in after
         assert report_body not in canonical(after)
+        assert report_text_access(host.store, report)["status"] == (
+            "data_unavailable_due_source_use"
+        )
+
+        safe_note = host.notes.write(
+            "unrelated-safe-reader-note", mission_id=mission_id,
+            actor_id=requester["body"]["actor_id"],
+            task_ref=requester["body"]["proposal_ref"],
+            note_id="unrelated-safe-reader-note", category="note",
+            text="UNRELATED_SOURCE_FREE_READER_NOTE",
+        )
+        current = host.context.assemble(
+            requester["body"]["call_ref"], requester["body"]["proposal_ref"],
+            control_ref=ref(requester), note_refs=[safe_note],
+        )
+        serialized = canonical(current.messages)
+        assert report_body not in serialized
+        assert "UNRELATED_SOURCE_FREE_READER_NOTE" in serialized
     finally:
         host.close()

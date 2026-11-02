@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -23,6 +24,7 @@ from ora.agents.configuration import (
 from ora.coordination.traces import TraceContext, TraceJournal, ref
 from ora.evidence.library import EvidenceError
 from ora.evidence.local_text_quality import attest_local_text_quality_tx
+from ora.live.provider import MAX_RESPONSE_BYTES
 from ora.retrieval.providers import HTTPDispatchBlocked
 from ora.retrieval.redact import redact_text
 from ora.state import StateStore
@@ -30,7 +32,6 @@ from ora.state.source_lineage import inherited_public_source
 from ora.state.store import Transaction, canonical
 
 from .groq import (
-    MODEL,
     URL,
     CallConfiguration,
     GroqSelectedAdapter,
@@ -39,12 +40,17 @@ from .groq import (
     PreparedCall,
     SourceUse,
 )
+from .output_limits import output_limit_observation
+from .profiles import SUPPORTED_MODELS, supported_reasoning
 from .reasoning_artifacts import (
     export_receipt_reasoning,
     record_export_failure,
 )
 from .token_estimate import (
     LEGACY_BASIS,
+    QWEN_SURROGATE_BASIS,
+    QWEN_TEMPLATE_BASIS,
+    QWEN_TEMPLATE_LOW_BASIS,
     TOKENIZER_BASIS,
     TOKENIZER_BASIS_V1,
     TOKENIZER_BASIS_V2,
@@ -340,10 +346,18 @@ class ModelSession:
 
     def __init__(self, store: StateStore, project_root: Path, *,
                  adapter: GroqSelectedAdapter | None = None,
-                 journal: TraceJournal | None = None) -> None:
+                 journal: TraceJournal | None = None,
+                 limit_observer: Callable[[StateStore, dict], object] | None = None,
+                 capture_raw_success: bool = False) -> None:
+        if type(capture_raw_success) is not bool:
+            raise SessionError("Raw response capture opt-in must be boolean")
         self.store = store
         self.adapter = adapter or GroqSelectedAdapter(project_root)
+        if capture_raw_success and not callable(getattr(self.adapter, "invoke_with_raw", None)):
+            raise SessionError("Raw response capture needs the selected Groq adapter")
         self.journal = journal or TraceJournal(store)
+        self.limit_observer = limit_observer
+        self.capture_raw_success = capture_raw_success
 
     def _selection(self, call_id: str, call_version: int) -> tuple[dict, dict, dict]:
         if type(call_version) is not int or call_version < 1:
@@ -375,7 +389,8 @@ class ModelSession:
             raise SessionError("Call actor is unavailable in its mission")
         if _sha(saved["instructions"].encode()) != saved.get("instructions_sha256"):
             raise SessionError("Saved instructions changed")
-        if (body["provider"], body["endpoint"], body["model_id"]) != ("groq", URL, MODEL):
+        if (body["provider"] != "groq" or body["endpoint"] != URL
+                or body["model_id"] not in SUPPORTED_MODELS):
             raise SessionError("Selected provider, endpoint or model is unsupported")
         return call, config, actor
 
@@ -426,10 +441,7 @@ class ModelSession:
         if (type(settings) is not dict
             or set(settings) - {"max_completion_tokens", "stream", "unknown_source_policy",
                                 "response_format", "credential_profile", "quota_domain"}
-            or type(reasoning) is not dict
-            or set(reasoning) != {"reasoning_effort", "include_reasoning"}
-            or reasoning.get("reasoning_effort") not in ("medium", "high")
-            or reasoning.get("include_reasoning") is not True):
+            or not supported_reasoning(saved.get("model_id"), reasoning)):
             raise SessionError("Saved model settings are unsupported or unpinned")
         if (type(settings.get("max_completion_tokens")) is not int
             or type(settings.get("stream")) is not bool):
@@ -451,7 +463,8 @@ class ModelSession:
             instructions=saved["instructions"], provider=saved["provider"],
             endpoint=saved["endpoint"], model_id=saved["model_id"],
             reasoning_effort=reasoning["reasoning_effort"],
-            include_reasoning=reasoning["include_reasoning"],
+            include_reasoning=reasoning.get("include_reasoning"),
+            reasoning_format=reasoning.get("reasoning_format"),
             max_completion_tokens=settings["max_completion_tokens"],
             stream=settings["stream"],
             credential_profile=settings.get("credential_profile", "primary"),
@@ -761,7 +774,8 @@ class ModelSession:
                 or type(saved.get("tokens")) is not int
                 or saved.get("basis") not in {
                     LEGACY_BASIS, TOKENIZER_BASIS_V1, TOKENIZER_BASIS_V2,
-                    TOKENIZER_BASIS_V3, TOKENIZER_BASIS,
+                    TOKENIZER_BASIS_V3, TOKENIZER_BASIS, QWEN_SURROGATE_BASIS,
+                    QWEN_TEMPLATE_BASIS, QWEN_TEMPLATE_LOW_BASIS,
                 }):
             raise SessionError("Saved request token estimate is invalid")
         try:
@@ -841,7 +855,8 @@ class ModelSession:
             configuration_ref=body["configuration_ref"],
         )
 
-    def capture(self, intent_ref: dict[str, Any], outcome: ModelOutcome) -> dict:
+    def capture(self, intent_ref: dict[str, Any], outcome: ModelOutcome, *,
+                raw_success_response: bytes | None = None) -> dict:
         prepared = self.load(intent_ref)
         intent = self.store.get(**intent_ref)
         body = intent["body"]
@@ -850,14 +865,57 @@ class ModelSession:
             or outcome.request_sha256 != prepared.request.request_sha256):
             raise SessionError("Provider outcome does not match the prepared request")
         if (outcome.status in {"complete", "tool_requested"}
-            and outcome.returned_model != MODEL):
+            and outcome.returned_model != prepared.request.body["model"]):
             raise SessionError("Successful provider outcome did not return the selected model")
+        if raw_success_response is not None:
+            if (not self.capture_raw_success or type(raw_success_response) is not bytes
+                    or len(raw_success_response) > MAX_RESPONSE_BYTES
+                    or outcome.status == "failed" or outcome.error_kind is not None
+                    or outcome.http_status is not None
+                    or _sha(raw_success_response) != outcome.response_sha256):
+                raise SessionError("Raw provider response is outside the opted-in successful call")
         actor = self.store.get("agent_instance", body["instance_id"], 1)
         context = self._context(intent, actor)
         if outcome.reasoning_status in {"absent", "unknown", "unsupported"} and outcome.reasoning is not None:
             raise SessionError("Unavailable reasoning cannot contain text")
         if outcome.reasoning_status == "returned" and not outcome.reasoning:
             raise SessionError("Returned reasoning needs provider text")
+        rejected_status = outcome.failed_generation_status
+        if rejected_status not in {
+            "returned", "absent", "non_string", "invalid_unicode", "not_applicable",
+        }:
+            raise SessionError("Rejected generation has an unknown capture status")
+        if rejected_status != "not_applicable" and not (
+            outcome.status == "failed"
+            and outcome.http_status == 400
+            and isinstance(outcome.provider_error, dict)
+            and outcome.provider_error.get("type") == "invalid_request_error"
+            and outcome.provider_error.get("code") == "tool_use_failed"
+        ):
+            raise SessionError("Rejected generation belongs only to a provider tool rejection")
+        if (rejected_status == "returned") != isinstance(outcome.failed_generation, str):
+            raise SessionError("Rejected generation text and capture status disagree")
+        rejected_raw = (
+            outcome.failed_generation.encode("utf-8")
+            if outcome.failed_generation is not None else None
+        )
+        rejected_blob = self.store.put_blob(rejected_raw) if rejected_raw is not None else None
+        rejected_ref = (
+            {"kind": "restricted_failed_generation",
+             "id": f"provider-failed-generation:{intent['id']}", "version": 1}
+            if rejected_status != "not_applicable" else None
+        )
+        rejected_body = (
+            {**asdict(context), "schema": "ora.provider_failed_generation.v1",
+             "intent_ref": intent_ref, "request_sha256": body["request_sha256"],
+             "response_sha256": outcome.response_sha256,
+             "status": rejected_status, "blob": rejected_blob,
+             "text_sha256": _sha(rejected_raw) if rejected_raw is not None else None,
+             "text_bytes": len(rejected_raw) if rejected_raw is not None else None,
+             "origin": "provider_http_error", "access": "restricted_diagnostics",
+             "accepted_as_answer_or_tool": False}
+            if rejected_ref is not None else None
+        )
         safe_reasoning, redacted = (redact_text(outcome.reasoning)
                                     if outcome.reasoning is not None else (None, False))
         reasoning_blob = (self.store.put_blob(safe_reasoning.encode())
@@ -912,6 +970,16 @@ class ModelSession:
             "credential_profile": prepared.request.credential_profile,
             "quota_domain": prepared.request.quota_domain,
         }
+        if rejected_ref is not None:
+            receipt_body["failed_generation_ref"] = rejected_ref
+            receipt_body["failed_generation_status"] = rejected_status
+        if self.capture_raw_success:
+            receipt_body["raw_success_capture_requested"] = True
+        output_limit = output_limit_observation(
+            outcome.http_status, outcome.provider_error, prepared.request.body["model"]
+        )
+        if output_limit is not None:
+            receipt_body["output_rate_limit_observation"] = output_limit
         usage = [{"receipt_id": f"{intent['id']}:{outcome.provider_request_id or outcome.response_sha256 or 'unknown'}",
                   "scope": "groq:selected-model", "unit": key, "amount": value,
                   "basis": "observed"}
@@ -941,11 +1009,19 @@ class ModelSession:
             reasoning_record = tx.put("restricted_reasoning", reasoning_ref["id"], reasoning_body)
             if ref(reasoning_record) != reasoning_ref:
                 raise SessionError("Restricted reasoning reference changed")
+            if rejected_ref is not None:
+                rejected_record = tx.put(
+                    "restricted_failed_generation", rejected_ref["id"], rejected_body,
+                )
+                if ref(rejected_record) != rejected_ref:
+                    raise SessionError("Rejected generation reference changed")
             if raw_record is not None:
                 tx.link(reasoning_record, raw_record, "has_exact_provider_text")
             receipt = tx.put("model_response_receipt", receipt_id, receipt_body)
             tx.link(receipt, saved_intent, "responds_to")
             tx.link(receipt, reasoning_record, "has_restricted_reasoning")
+            if rejected_ref is not None:
+                tx.link(receipt, rejected_record, "has_restricted_failed_generation")
             marker = tx.get("model_dispatch_attempt", f"model-dispatch:{intent['id']}")
             if marker is not None:
                 if marker["body"].get("intent_ref") != intent_ref:
@@ -971,11 +1047,87 @@ class ModelSession:
 
         saved_ref = self.store.transact(f"model-response-save:{intent['id']}", receipt_body, save,
                                        mission_id=body["mission_id"])
+        if self.capture_raw_success:
+            try:
+                self._capture_optional_raw_success(
+                    intent_ref, saved_ref, outcome, raw_success_response,
+                    run_id=context.run_id,
+                )
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "Optional raw provider response capture could not be saved"
+                )
+        if self.limit_observer is not None:
+            try:
+                self.limit_observer(self.store, saved_ref)
+            except Exception:
+                # A packing hint must never undo or strand a captured response.
+                logging.getLogger(__name__).warning("Provider limit hint could not be saved")
         try:
             export_receipt_reasoning(self.store, saved_ref)
         except Exception as exc:
             record_export_failure(self.store, saved_ref, exc)
         return saved_ref
+
+    def _capture_optional_raw_success(
+        self, intent_ref: dict[str, Any], receipt_ref: dict[str, Any],
+        outcome: ModelOutcome, raw: bytes | None, *, run_id: str,
+    ) -> None:
+        """Keep diagnostic storage failures separate from the saved model outcome."""
+        status = "unavailable"
+        blob = None
+        if raw is not None:
+            try:
+                blob = self.store.put_blob(raw)
+                status = "captured"
+            except Exception:
+                status = "storage_failed"
+                logging.getLogger(__name__).warning(
+                    "Optional raw provider response blob could not be saved"
+                )
+        intent = self.store.get(**intent_ref)
+        capture_id = f"provider-response-capture:{intent_ref['id']}"
+        capture_body = {
+            "schema": "ora.provider_response_capture.v1",
+            "mission_id": intent["body"]["mission_id"], "run_id": run_id,
+            "intent_ref": intent_ref, "receipt_ref": receipt_ref,
+            "request_sha256": intent["body"]["request_sha256"],
+            "response_sha256": outcome.response_sha256,
+            "response_bytes": len(raw) if raw is not None else None,
+            "status": status, "blob": blob,
+            "diagnostic_code": "raw_blob_write_failed" if status == "storage_failed" else None,
+            "origin": "provider_http_success" if raw is not None else "no_eligible_response_bytes",
+            "access": "restricted_diagnostics",
+        }
+
+        def save(tx):
+            saved_intent = tx.get(**intent_ref)
+            saved_receipt = tx.get(**receipt_ref)
+            if (saved_intent != intent or saved_receipt is None
+                    or saved_receipt["body"].get("intent_ref") != intent_ref
+                    or saved_receipt["body"].get("request_sha256")
+                    != capture_body["request_sha256"]
+                    or saved_receipt["body"].get("response_sha256")
+                    != capture_body["response_sha256"]):
+                raise SessionError("Raw capture lost its exact normalized outcome")
+            captured = tx.put(
+                "restricted_provider_response_capture", capture_id, capture_body,
+            )
+            tx.link(captured, saved_intent, "responds_to")
+            tx.link(captured, saved_receipt, "captures_exact_response")
+            return ref(captured)
+
+        try:
+            self.store.transact(
+                f"raw-response-capture:{intent_ref['id']}", capture_body, save,
+                mission_id=capture_body["mission_id"],
+            )
+        except Exception:
+            # The normalized receipt has already committed. Do not turn this
+            # optional diagnostic into an uncertain dispatch or provider retry.
+            logging.getLogger(__name__).warning(
+                "Optional raw provider response capture status could not be saved"
+            )
 
     def invoke_capture(
         self, intent_ref: dict[str, Any], *,
@@ -1080,7 +1232,11 @@ class ModelSession:
         if "receipt_ref" in decision:
             return decision["receipt_ref"]
         try:
-            outcome = self.adapter.invoke(prepared.request)
+            if self.capture_raw_success:
+                outcome, raw_success_response = self.adapter.invoke_with_raw(prepared.request)
+            else:
+                outcome = self.adapter.invoke(prepared.request)
+                raw_success_response = None
         except HTTPDispatchBlocked:
             # The transport guard has confirmed that the opener was never
             # entered. Keep that proof on the exact dispatch marker so the
@@ -1102,4 +1258,4 @@ class ModelSession:
                                 {"intent_ref": intent_ref}, mark_blocked,
                                 mission_id=marker_body["mission_id"])
             raise
-        return self.capture(intent_ref, outcome)
+        return self.capture(intent_ref, outcome, raw_success_response=raw_success_response)

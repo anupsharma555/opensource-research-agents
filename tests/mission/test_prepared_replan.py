@@ -12,7 +12,72 @@ from ora.contracts.models import LiveStartRequest
 from ora.mission import service as service_module
 from ora.models.token_estimate import TOKENIZER_BASIS, estimate_request_tokens
 from ora.state.store import canonical
+from tests.mission.test_requested_window_recovery import _two_copy_read
 from tests.mission.test_service import service, tool
+from tests.mission.test_source_rich_preparation import _three_source_host
+
+
+def test_stale_whole_supplied_source_free_intent_replans_before_dispatch(
+    tmp_path, monkeypatch,
+):
+    host, run, sources, _texts = _three_source_host(
+        tmp_path, monkeypatch, items=20, limit=7600,
+    )
+    try:
+        # This queued source-free intent represents the earlier ID-only
+        # catalog. The new full-purpose v2 profile is tested separately; its
+        # larger initial packet is not the historical replan boundary.
+        saved_run = host._run(run.run_id)
+        host.store.transact(
+            "synthetic-stale-v1-catalog", {},
+            lambda tx: tx.put("mission_run", run.run_id, {
+                **saved_run["body"], "tool_catalog_projection_version": 1,
+            }, expected_version=saved_run["version"]),
+            mission_id=saved_run["body"]["mission_id"],
+        )
+        control = host._control(run.run_id, "agent-synthesis")
+        original_plan = service_module.plan_source_turn
+
+        def old_source_free_plan(store, pointer, **kwargs):
+            plan = original_plan(store, pointer, **kwargs)
+            return {**plan, "mode": "source_free_recovery", "source_inputs": [],
+                    "reason": "synthetic_prior_packer_limit"}
+
+        monkeypatch.setattr(service_module, "plan_source_turn", old_source_free_plan)
+        assert host._schedule_model(control)
+        pending = host._control(run.run_id, "agent-synthesis")
+        assert not any(pending["body"].get("selected_passage_refs", {}).values())
+        old_call = host.store.get(**pending["body"]["call_ref"])
+        old_intent = host.store.get(
+            "model_request_intent", f"model-intent:{old_call['id']}:{old_call['version']}",
+        )
+        old_work = host._work_for(pending)
+        host.executor._prepare(pending["body"]["mission_id"])
+        old_budget = host.store.get("mission_call_budget", old_call["id"])
+        assert old_budget["body"]["source_turn_mode"] == "source_free_recovery"
+        host._save("mission_call_budget", old_call["id"], {
+            **old_budget["body"], "estimator_version": "older_packer",
+        }, mission_id=pending["body"]["mission_id"])
+        monkeypatch.setattr(service_module, "plan_source_turn", original_plan)
+
+        assert host._supersede_stale_source_free_intent(pending)
+        revised = host._control(run.run_id, "agent-synthesis")
+        assert revised["body"]["phase"] == "ready_model"
+        assert host.store.get("executor_work", old_work["id"])["body"]["phase"] == "superseded"
+        assert host.store.get("model_request_intent", old_intent["id"]) == old_intent
+        assert host.store.get("model_dispatch_attempt",
+                              f"model-dispatch:{old_intent['id']}") is None
+        assert host._schedule_model(revised)
+        successor = host._control(run.run_id, "agent-synthesis")
+        call = host.store.get(**successor["body"]["call_ref"])
+        intent = host.store.get(
+            "model_request_intent", f"model-intent:{call['id']}:{call['version']}",
+        )
+        assert [item["id"] for item in intent["body"]["source_refs"]] == [
+            item["id"] for item in sources
+        ]
+    finally:
+        host.close()
 
 
 @pytest.mark.parametrize("capacity_acquired", [False, True])
@@ -122,6 +187,84 @@ def test_stale_source_free_intent_is_fenced_only_before_dispatch(
         )
         assert next_spec.estimated_tokens == estimate.tokens + prior_completion
         assert len(requests) == 1  # Neither supersession nor preparation dispatched a model call.
+    finally:
+        host.close()
+
+
+@pytest.mark.parametrize("boundary", ["safe", "acquired", "attempted", "revoked"])
+def test_stale_checked_window_intent_is_replanned_only_before_dispatch(
+    tmp_path, monkeypatch, boundary,
+):
+    host, run, actor, early, _late, window, _response = _two_copy_read(
+        tmp_path, monkeypatch, window_chars=1800, crowded=False,
+    )
+    try:
+        control = host._control(run.run_id, actor)
+        host._update_control(control, input_budget={
+            "observed_limit_tokens": 6800, "target_fraction": 1.0,
+        })
+        assert host._schedule_model(host._control(run.run_id, actor))
+        pending = host._control(run.run_id, actor)
+        old_ref = pending["body"]["call_ref"]
+        intent_id = f"model-intent:{old_ref['id']}:{old_ref['version']}"
+        old_intent = host.store.get("model_request_intent", intent_id)
+        old_work = host._work_for(pending)
+        spec = host.executor._spec_from(old_work)
+        host.executor._prepare(pending["body"]["mission_id"])
+        cap_id = host.executor._capacity_id(spec)
+        cap = host.store.get("capacity_operation", cap_id)
+        assert cap["body"]["phase"] in {"queued", "waiting"}
+        budget = host.store.get("mission_call_budget", old_ref["id"])
+        assert budget["body"]["source_turn_mode"] == "requested_window_recovery"
+        assert old_intent["body"]["source_refs"] == [early]
+        assert old_intent["body"]["source_decisions"][0]["passage_refs"] == window["passage_refs"]
+        host._save(
+            "mission_call_budget", old_ref["id"],
+            {**budget["body"], "estimator_version": "older_estimator"},
+            mission_id=pending["body"]["mission_id"],
+        )
+        if boundary == "acquired":
+            host._save("capacity_operation", cap_id, {
+                **cap["body"], "phase": "admitted", "owner": "synthetic-other-owner",
+                "reservation": True,
+            }, mission_id=pending["body"]["mission_id"])
+        elif boundary == "attempted":
+            host._save("capacity_operation", cap_id, {
+                **cap["body"], "attempts": [{"id": "synthetic-claimed-attempt"}],
+            }, mission_id=pending["body"]["mission_id"])
+        elif boundary == "revoked":
+            use_ref = host.context._source_status(host.store.get(**early))[
+                "current_source_use_ref"
+            ]
+
+            def revoke(tx):
+                previous = tx.get(**use_ref)
+                updated = tx.put(previous["kind"], previous["id"], {
+                    **previous["body"], "allowed_uses": [],
+                    "policy_status": "requires_source_policy_resolution",
+                }, expected_version=previous["version"])
+                return {"use_ref": {key: updated[key] for key in ("kind", "id", "version")}}
+
+            host.store.transact("synthetic-replan-revoke", {}, revoke,
+                                mission_id=pending["body"]["mission_id"])
+        if boundary != "safe":
+            assert host._supersede_stale_source_free_intent(pending) is False
+            assert host._work_for(pending) == old_work
+        else:
+            assert host._supersede_stale_source_free_intent(pending) is True
+            revised = host._control(run.run_id, actor)
+            assert revised["body"]["phase"] == "ready_model"
+            assert revised["body"]["work_id"] is None
+            assert host.store.get("executor_work", old_work["id"])["body"]["phase"] == "superseded"
+            assert host.store.get("capacity_operation", cap_id)["body"]["phase"] == "canceled"
+            assert host.store.get("agent_attempt", spec.attempt_id)["body"]["status"] == "superseded"
+            assert host._schedule_model(revised)
+            successor = host._control(run.run_id, actor)["body"]["call_ref"]
+            assert successor != old_ref
+            assert host.store.get("model_request_intent", f"model-intent:{successor['id']}:1")
+        assert host.store.get("model_request_intent", intent_id) == old_intent
+        assert host.store.get("model_dispatch_attempt", f"model-dispatch:{intent_id}") is None
+        assert host.store.get("model_response_receipt", f"model-response:{intent_id}") is None
     finally:
         host.close()
 

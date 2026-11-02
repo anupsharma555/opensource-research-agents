@@ -16,10 +16,11 @@ from tests.mission.test_user_input_delivery import _command, _until
 def test_long_direction_and_unverified_note_have_separate_read_routes_under_cap(
     tmp_path, monkeypatch,
 ):
+    # Keep the direction beyond both the tight input window and one reader page.
     direction = (
         "Revise this same task after a return. Three of the original eighteen cartons "
         "went back to the supplier. Report originally ordered, physically remaining, "
-        "and participant-distributable quantities separately. " * 8
+        "and participant-distributable quantities separately. " * 30
     )
     note = (
         "Unverified pasted worksheet note: every originally ordered kit remains "
@@ -99,15 +100,22 @@ def test_long_direction_and_unverified_note_have_separate_read_routes_under_cap(
         effective_allowances = []
 
         def cap_context(*args, **kwargs):
-            kwargs["allowance"] = min(kwargs["allowance"], 1135)
+            kwargs["allowance"] = min(kwargs["allowance"], 1300)
             effective_allowances.append(kwargs["allowance"])
             return original_assemble(*args, **kwargs)
 
         monkeypatch.setattr(host.context, "assemble", cap_context)
         _until(host, run.run_id, lambda: host._run(run.run_id)["body"]["status"] == "completed")
-        assert effective_allowances and max(effective_allowances) <= 1135
+        assert effective_allowances and max(effective_allowances) <= 1300
         second = max(host.store.records("model_request_intent"), key=lambda item: item["created_at"])
-        assert second["body"]["request_token_estimate"]["tokens"] <= 5600
+        estimate = second["body"]["request_token_estimate"]["tokens"]
+        budget = host.store.get("mission_call_budget", second["body"]["call_ref"]["id"])["body"]
+        # The 70% soft target is tried first; a required exact request may use
+        # the observed window while retaining prior-completion and rate headroom.
+        assert budget["rate_admission_policy"] == "estimate_pacing"
+        assert budget["rate_input_headroom_tokens"] > 0
+        assert budget["request_stage_token_estimate"]["final_input_tokens"] == estimate
+        assert estimate + budget["prior_completion_reservation"] + budget["rate_input_headroom_tokens"] <= 8000
         inclusion = host.store.get("context_inclusion", f"context:{second['id']}")
         for receipt, full_text in ((saved["direction"], direction), (saved["note"], note)):
             pointer = receipt.input_ref.model_dump()
@@ -120,7 +128,28 @@ def test_long_direction_and_unverified_note_have_separate_read_routes_under_cap(
                 inclusion_ref=ref(inclusion), pointer=pointer,
                 offset=0, limit=2000,
             )
-            assert full_text in read["text"]
+            projection = read["text"]
+            digest = read["projection_sha256"]
+            for _ in range(10):
+                if read["next_offset"] is None:
+                    break
+                next_request = read["next_request"]
+                assert next_request == {
+                    "tool": "read_context_record", "inclusion_id": inclusion["id"],
+                    **pointer, "offset": read["next_offset"], "limit": 2000,
+                }
+                read = host.context.read_omitted_record(
+                    mission_id=control["body"]["mission_id"],
+                    actor_id=control["body"]["actor_id"],
+                    task_id=control["body"]["task_id"],
+                    inclusion_ref=ref(inclusion), pointer=pointer,
+                    offset=next_request["offset"], limit=next_request["limit"],
+                )
+                assert read["projection_sha256"] == digest
+                projection += read["text"]
+            else:
+                pytest.fail("Exact input reader did not finish within ten pages")
+            assert full_text in projection
             with pytest.raises(ContextError):
                 host.context.read_omitted_record(
                     mission_id=control["body"]["mission_id"],
@@ -167,5 +196,101 @@ def test_deferred_reader_cue_requires_capability_before_exact_read(tmp_path, mon
             "inclusion_id": index["older_records"]["inclusion_id"],
             **receipt.input_ref.model_dump(), "offset": 0, "limit": 2000,
         }
+    finally:
+        host.close()
+
+
+def test_unavailable_reader_card_does_not_promote_long_direction_above_soft_target(
+    tmp_path, monkeypatch,
+):
+    direction = (
+        "Revise this same task after a return. Three of the original eighteen cartons "
+        "went back to the supplier. Report originally ordered, physically remaining, "
+        "and participant-distributable quantities separately. " * 30
+    )
+    note = (
+        "Unverified pasted worksheet note: every originally ordered kit remains "
+        "available. There is no author, receipt, date, or audit record for this claim. " * 8
+    )
+    packets, saved = [], {}
+
+    def transport(request, *, timeout):
+        packet = json.loads(request.data)
+        packets.append(packet)
+        if len(packets) == 1:
+            saved["direction"] = host.submit_user_input(
+                _command(host, run.run_id, direction).model_copy(
+                    update={"request_id": "unavailable-direction"}
+                )
+            )
+            saved["note"] = host.submit_user_input(
+                _command(host, run.run_id, note, "unverified_pasted_evidence").model_copy(
+                    update={"request_id": "unavailable-note"}
+                )
+            )
+            response = tool("publish_result", {
+                "title": "Initial count", "text": "The original count is 432 kits.",
+                "citations": [], "limitations": [],
+            }, 1)
+            response.headers = {
+                "x-request-id": "synthetic-first", "x-ratelimit-limit-tokens": "8000",
+                "x-ratelimit-remaining-tokens": "7000",
+                "x-ratelimit-reset-tokens": "1m",
+            }
+            return response
+        return answer("The correction needs an exact read.", 2)
+
+    host = service(tmp_path, monkeypatch, transport)
+    try:
+        run = host.start(LiveStartRequest(
+            request_id="unavailable-user-input-reader",
+            question="Count the kits in eighteen cartons.",
+            agent_ids=["agent-synthesis"],
+        ))
+        _until(host, run.run_id, lambda: (
+            "direction" in saved
+            and host._control(run.run_id, "agent-synthesis")["body"]["phase"] == "ready_model"
+        ))
+        control = host._control(run.run_id, "agent-synthesis")
+        host._update_control(control, input_budget={
+            "observed_limit_tokens": 8000, "target_fraction": .70,
+            "basis": "injected_provider_header_fixture", "actual_provider_observation": True,
+        })
+        original_assemble = host.context.assemble
+        preview_views = []
+
+        def cap_context(*args, **kwargs):
+            kwargs["allowance"] = min(kwargs["allowance"], 1300)
+            preview = kwargs.get("preview_call")
+            if preview is not None:
+                kwargs["preview_call"] = {
+                    **preview,
+                    "body": {
+                        **preview["body"],
+                        "exposed_tools": [
+                            name for name in preview["body"]["exposed_tools"]
+                            if name not in {"read_context_record", "request_capability"}
+                        ],
+                    },
+                }
+            pack = original_assemble(*args, **kwargs)
+            preview_views.append(json.loads(pack.messages[-1]["content"]))
+            return pack
+
+        monkeypatch.setattr(host.context, "assemble", cap_context)
+        _until(host, run.run_id, lambda: host._run(run.run_id)["body"]["status"] == "completed")
+        assert len(packets) == 2
+        index = json.loads(packets[1]["messages"][-1]["content"])
+        card = index.get("current_user_inputs", {}).get("direction")
+        assert card is None
+        assert any(
+            view.get("current_user_inputs", {}).get("direction", {}).get("ref")
+            == saved["direction"].input_ref.model_dump()
+            and view["current_user_inputs"].get("reader_status") == "unavailable_this_turn"
+            for view in preview_views
+        )
+        second = max(host.store.records("model_request_intent"), key=lambda item: item["created_at"])
+        budget = host.store.get("mission_call_budget", second["body"]["call_ref"]["id"])["body"]
+        assert budget["request_stage_token_estimate"]["admission_target_tokens"] == 5600
     finally:
         host.close()

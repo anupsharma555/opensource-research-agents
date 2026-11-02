@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "quantileMethod": {
+      "const": "linear",
+      "title": "Quantilemethod",
+      "type": "string"
+    },
+    "units": {
+      "anyOf": [
+        {
+          "maxLength": 40,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Units"
+    },
+    "values": {
+      "items": {
+        "maximum": 1000000000000.0,
+        "minimum": -1000000000000.0,
+        "type": "number"
+      },
+      "maxItems": 200,
+      "minItems": 2,
+      "title": "Values",
+      "type": "array"
+    }
+  },
+  "required": [
+    "values",
+    "quantileMethod"
+  ],
+  "title": "DescribeValuesInput",
+  "type": "object"
+}

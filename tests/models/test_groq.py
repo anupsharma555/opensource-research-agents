@@ -17,6 +17,10 @@ from ora.models import (
     ModelPreflightError,
     SourceUse,
 )
+from ora.models.groq import (
+    classify_required_tool_field_type_mismatch,
+    is_malformed_tool_generation_rejection,
+)
 
 CONFIG_HASH = "a" * 64
 SCHEMA = {"type": "object", "properties": {"answer": {"type": "string"}},
@@ -508,6 +512,90 @@ def test_http_error_is_typed_and_not_retried(
     assert outcome.retry_after_seconds == 2
     assert outcome.reasoning_status == "unknown"
     assert "private" not in str(outcome)
+
+
+@pytest.mark.parametrize(
+    ("status", "error", "expected"),
+    [
+        (400, {"type": "invalid_request_error", "code": "tool_use_failed",
+               "message": "Tool call rejected"}, "absent"),
+        (400, {"type": "invalid_request_error", "code": "tool_use_failed",
+               "message": "Tool call rejected", "failed_generation": {"arguments": "bad"}},
+         "non_string"),
+        (400, {"type": "invalid_request_error", "code": "tool_use_failed",
+               "message": "Tool call rejected", "failed_generation": "\ud800"},
+         "invalid_unicode"),
+        (401, {"type": "authentication_error", "code": "invalid_api_key",
+               "message": "Invalid key", "failed_generation": "Bearer synthetic-secret"},
+         "not_applicable"),
+    ],
+)
+def test_only_tool_rejection_captures_provider_failed_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int,
+    error: dict, expected: str,
+) -> None:
+    monkeypatch.setenv("GROQ_API_KEY", "synthetic-token")
+    raw = json.dumps({"error": error}).encode()
+
+    def rejected(_request, timeout):
+        raise urllib.error.HTTPError("https://api.groq.com", status, "rejected", {},
+                                     io.BytesIO(raw))
+
+    adapter = GroqSelectedAdapter(tmp_path, transport=rejected)
+    outcome = adapter.invoke(prepare(adapter))
+    assert outcome.failed_generation_status == expected
+    assert outcome.failed_generation is None
+    assert "synthetic-secret" not in repr(outcome)
+
+
+def test_required_top_level_type_mismatch_uses_exact_registered_schema() -> None:
+    tool = {"type": "function", "function": {
+        "name": "publish_result",
+        "parameters": {"type": "object", "properties": {
+            "citations": {"type": "array", "items": {"type": "object"}},
+        }, "required": ["citations"]},
+    }}
+    error = {"type": "invalid_request_error", "code": "tool_use_failed",
+             "message": ("tool call validation failed: parameters for tool publish_result "
+                         "did not match schema: errors: [`/citations`: expected array, "
+                         "but got string]")}
+    classify = classify_required_tool_field_type_mismatch
+    assert classify([tool], error) == ("publish_result", "citations", "array", "string")
+    assert classify([tool, tool], error) is None
+    assert classify([], error) is None
+    assert classify([tool], {**error, "code": "other"}) is None
+    assert classify([tool], {**error, "message": error["message"].replace(
+        "/citations", "/report/citations",
+    )}) is None
+    assert classify([tool], {**error, "message": error["message"].replace(
+        "expected array", "expected object",
+    )}) is None
+    optional = {**tool, "function": {**tool["function"], "parameters": {
+        **tool["function"]["parameters"], "required": [],
+    }}}
+    assert classify([optional], error) is None
+    union = {**tool, "function": {**tool["function"], "parameters": {
+        **tool["function"]["parameters"], "properties": {
+            "citations": {"type": ["array", "null"]},
+        },
+    }}}
+    assert classify([union], error) is None
+
+
+def test_generic_malformed_tool_generation_is_an_exact_provider_fingerprint() -> None:
+    error = {
+        "type": "invalid_request_error", "code": "tool_use_failed",
+        "message": "Failed to call a function. Please adjust your prompt. See "
+                   "'failed_generation' for more details.",
+    }
+    assert is_malformed_tool_generation_rejection(error)
+    assert not is_malformed_tool_generation_rejection({
+        **error, "code": "invalid_api_key",
+    })
+    assert not is_malformed_tool_generation_rejection({
+        **error, "message": error["message"] + " Another failure.",
+    })
+    assert not is_malformed_tool_generation_rejection(None)
 
 
 @pytest.mark.parametrize(

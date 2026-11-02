@@ -1,0 +1,11 @@
+{
+  "schema": "ora.synthetic_meta_analysis.v1",
+  "effect_scale": "unitless_synthetic",
+  "studies": [
+    {"study_id": "synthetic-a", "effect": -0.2, "variance": 0.04},
+    {"study_id": "synthetic-b", "effect": 0.1, "variance": 0.04},
+    {"study_id": "synthetic-c", "effect": 0.4, "variance": 0.09},
+    {"study_id": "synthetic-d", "effect": 0.9, "variance": 0.04},
+    {"study_id": "synthetic-e", "effect": 0.2, "variance": 0.16}
+  ]
+}

@@ -21,17 +21,17 @@ def test_prepared_guidance_explains_shared_outcome_and_keeps_direct_completion(
         packets.append(packet)
         instructions = packet["messages"][0]["content"]
         assert "publish_result saves your contribution and closes current work" in instructions
-        assert "Required work still governs run closure" in instructions
-        assert "Honor requested roles/outcomes" in instructions
-        assert "Read useful peer contributions or seek review" in instructions
+        assert "required work governs run closure" in instructions
+        assert "Keep your saved role" in instructions
+        assert "When the task explicitly requires peer or reciprocal assessment" in instructions
         assert "complementary perspective" in instructions
         assert "assumptions, alternatives and counterevidence" in instructions
-        assert "Ask focused questions" in instructions
-        assert "exact references" in instructions
-        assert "Review answers" in instructions
-        assert "titles establish no findings" in instructions
-        assert "Attribute peer input and disagreements" in instructions
-        assert "Finish directly when peer input adds no value" in instructions
+        assert "ask a focused question first" in instructions
+        assert "exact refs" in instructions
+        assert "Review peer replies with review_peer_answer and exact IDs" in instructions
+        assert "Titles alone establish no findings" in instructions
+        assert "attribute peer input" in instructions
+        assert "Finish directly when peer work is not required and adds no value" in instructions
         attached = {item["function"]["name"] for item in packet["tools"]}
         assert {"peer_request", "read_context_record", "publish_result"} <= attached
         text = "An independent synthetic contribution with no peer review claimed."

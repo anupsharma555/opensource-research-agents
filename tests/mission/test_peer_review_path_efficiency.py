@@ -13,6 +13,7 @@ import time
 import pytest
 
 from ora.contracts.models import LiveStartRequest
+from ora.models.profiles import QWEN_MODEL
 from ora.models.token_estimate import estimate_request_tokens
 from ora.state import StateStore
 from tests.mission.test_service import serialized_peer_name, service, tool
@@ -22,6 +23,8 @@ def _drive_until(host, run_id: str, predicate) -> None:
     deadline = time.monotonic() + 25
     while time.monotonic() < deadline:
         host._drive_run(host._run(run_id))
+        if errors := getattr(host, "_fixture_transport_errors", []):
+            raise errors[0]
         if predicate():
             return
         time.sleep(.005)
@@ -71,7 +74,8 @@ def _complete_visible_report(windows: list[dict]) -> str | None:
     [("inline", 120, None, False),
      ("paged", 2100, None, False),
      ("pressured_pair", 120, 5500, False),
-     ("pointer_guided_pair", 1300, None, True)],
+     ("pointer_guided_pair", 1300, None, True),
+     ("qwen_reply_route", 120, 6900, False)],
 )
 def test_peer_answer_review_mechanical_path(
     tmp_path, monkeypatch, case: str, body_chars: int, input_limit: int | None,
@@ -95,6 +99,12 @@ def test_peer_answer_review_mechanical_path(
     transport_failures: list[str] = []
     seen_answer = False
 
+    def selected_tool(name: str, arguments: dict, index: int):
+        response = tool(name, arguments, index)
+        if case == "qwen_reply_route":
+            response.payload["model"] = QWEN_MODEL
+        return response
+
     def choose(request, *, timeout):
         nonlocal seen_answer
         packet = json.loads(request.data)
@@ -103,10 +113,22 @@ def test_peer_answer_review_mechanical_path(
             assert not seen_answer
             names = {item["function"]["name"] for item in packet["tools"]}
             assert "publish_result" in names
-            return tool("publish_result", {
+            index = json.loads(packet["messages"][-1]["content"])
+            incoming = index["incoming_request"]
+            assert incoming["question"] == question
+            assert incoming["response_needed"] is True
+            assert incoming["saved_question_has_no_hidden_suffix"] is True
+            assert incoming["reply"] == {
+                "tool": "publish_result", "answer_request_id": request_id,
+            }
+            assert "reply_setup" not in incoming
+            reply_id = incoming["reply"]["answer_request_id"]
+            if case == "qwen_reply_route":
+                assert estimate_request_tokens(request.data).tokens <= 6900
+            return selected_tool("publish_result", {
                 "title": "Synthetic independent assessment", "text": report_body,
                 "citations": [], "limitations": ["Synthetic example only"],
-                "answer_request_id": request_id,
+                "answer_request_id": reply_id,
             }, 1)
 
         assert role == "Sage"
@@ -196,15 +218,16 @@ def test_peer_answer_review_mechanical_path(
             if desired not in names:
                 assert "request_capability" in names
                 choice_log.append("request_reader")
-                return tool("request_capability", {"tool_id": desired}, 100 + len(choice_log))
+                return selected_tool("request_capability", {"tool_id": desired},
+                                     100 + len(choice_log))
             choice_log.append("read_answer_pointer" if read_request["kind"] == "mail_answer"
                               else "read_report")
-            return tool(desired, read_request, 100 + len(choice_log))
+            return selected_tool(desired, read_request, 100 + len(choice_log))
 
         if "review_peer_answer" not in names:
             assert "request_capability" in names
             choice_log.append("request_review")
-            return tool("request_capability", {
+            return selected_tool("request_capability", {
                 "tool_id": "review_peer_answer",
             }, 100 + len(choice_log))
         assert complete is not None or inline_complete, (
@@ -214,6 +237,13 @@ def test_peer_answer_review_mechanical_path(
             item for key in ("peer_answer_review_cues", "peer_answer_previews")
             for item in index.get(key, [])
         ]
+        visible_review_routes.extend(
+            {"request_ref": item["ref"], "answer_ref": ref,
+             "question": item.get("question")}
+            for item in index.get("request_dispositions", [])
+            if item.get("action") == "review_peer_answer"
+            for ref in item.get("answer_refs", [])
+        )
         for message in packet["messages"]:
             if message.get("role") == "tool" and message.get("name") == "read_context_record":
                 result = json.loads(message["content"])
@@ -229,7 +259,7 @@ def test_peer_answer_review_mechanical_path(
             "The exact peer question must be visible in the current serialized request"
         )
         choice_log.append("review")
-        return tool("review_peer_answer", {
+        return selected_tool("review_peer_answer", {
             "request_id": request_id, "answer_id": answer_ref["id"],
             "disposition": "answered",
             "reason": "The synthetic peer assessment directly addresses the bounded question.",
@@ -251,10 +281,20 @@ def test_peer_answer_review_mechanical_path(
             question="Obtain one synthetic independent assessment and review it.",
             agent_ids=["agent-synthesis", "agent-critique"],
             required_agent_ids=["agent-synthesis", "agent-critique"],
+            **({"agent_models": {alias: {
+                "model": QWEN_MODEL, "reasoning_effort": "medium",
+                "max_completion_tokens": 960,
+            } for alias in ("agent-synthesis", "agent-critique")}}
+               if case == "qwen_reply_route" else {}),
         ))
         run_id = run.run_id
         requester = host._control(run_id, "agent-synthesis")
         responder = host._control(run_id, "agent-critique")
+        if case == "qwen_reply_route":
+            host._update_control(responder, input_budget={
+                "observed_limit_tokens": 6900, "target_fraction": 0.90,
+                "basis": "qualification_imposed_limit",
+            })
         host._update_control(
             requester, phase="retry_at", retry_at=time.time() + 86400,
             waiting_reason="Fixture waits for answer",
@@ -356,9 +396,13 @@ def test_peer_answer_review_mechanical_path(
             host.close()
     if case == "pressured_pair":
         current, counterfactual = outcomes
-        assert current["per_turn_input_tokens"][0] <= counterfactual[
-            "per_turn_input_tokens"
-        ][0]
+        assert input_limit is not None
+        # target_fraction is a soft packing preference. An exact selected
+        # review can use the observed bound after a complete-request preview.
+        assert all(tokens <= input_limit for outcome in outcomes
+                   for tokens in outcome["per_turn_input_tokens"])
+        assert current["review_callable_per_turn"][0] is True
+        assert counterfactual["review_callable_per_turn"][0] is False
         assert "request_review" not in current["choices"]
         assert "request_review" in counterfactual["choices"]
         assert current["requester_model_turns"] + 1 <= counterfactual[

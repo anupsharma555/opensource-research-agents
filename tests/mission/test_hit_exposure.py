@@ -48,9 +48,12 @@ def test_note_only_turn_can_publish_provisional_report_without_source_citations(
         assert all("inspect_hit" not in names(request) for request in requests)
         assert "request_capability" in names(requests[0])
         assert "citations: []" in requests[0]["messages"][0]["content"]
-        description = next(item["function"]["description"] for item in requests[0]["tools"]
-                           if item["function"]["name"] == "publish_result")
-        assert "inspected source/span pairs" in description
+        publish = next(item["function"] for item in requests[0]["tools"]
+                       if item["function"]["name"] == "publish_result")
+        assert "inspected source/span citations" in publish["description"]
+        citation_guidance = publish["parameters"]["properties"]["citations"]["description"]
+        assert "note IDs are not source IDs" in citation_guidance
+        assert "Use [] for a summary based only on task input or already read peer records" in citation_guidance
         report = host.store.records("report")[0]
         assert report["body"]["citations"] == []
         assert host.state(run.run_id).snapshot.mission.status == "completed"

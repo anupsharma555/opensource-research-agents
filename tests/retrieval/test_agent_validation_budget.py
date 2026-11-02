@@ -10,6 +10,12 @@ import pytest
 
 from ora.live.provider import MODEL, URL
 from ora.mission.figure_reading import VISION_MODEL
+from ora.models.token_estimate import (
+    QWEN_SURROGATE_BASIS,
+    QWEN_TEMPLATE_BASIS,
+    QWEN_TEMPLATE_LOW_BASIS,
+    estimate_request_tokens,
+)
 from ora.retrieval.agent_validation_budget import AgentBudget, BudgetStop
 
 
@@ -26,7 +32,10 @@ class Response(io.BytesIO):
         return self.headers
 
 
-def test_vision_requires_explicit_allowance_and_shares_model_attempt_cap(tmp_path):
+@pytest.mark.parametrize("allow_qwen_text", [False, True])
+def test_vision_requires_explicit_allowance_and_shares_model_attempt_cap(
+    tmp_path, allow_qwen_text,
+):
     packet = {"model": VISION_MODEL, "stream": False, "reasoning_effort": "none",
               "max_completion_tokens": 1024, "messages": [{"role": "user", "content": [
                   {"type": "text", "text": "Read the synthetic axis label"},
@@ -44,6 +53,7 @@ def test_vision_requires_explicit_allowance_and_shares_model_attempt_cap(tmp_pat
             budget.open(opener, object(), vision)
     assert not sent
     with AgentBudget(tmp_path / "enabled.json", allow_vision=True,
+                     allow_qwen_text=allow_qwen_text,
                      model_limit=1, token_limit=5000) as budget:
         budget.open(opener, object(), vision)
         entry = budget.data["model_attempts"][0]
@@ -54,6 +64,223 @@ def test_vision_requires_explicit_allowance_and_shares_model_attempt_cap(tmp_pat
             budget.open(opener, object(), request())
     assert len(sent) == 1
     assert "A" * 100 not in (tmp_path / "enabled.json").read_text()
+
+
+def qwen_text_request(tmp_path, *, reasoning_effort="medium"):
+    from ora.models.groq import CallConfiguration, GroqSelectedAdapter
+
+    config = CallConfiguration(
+        "synthetic-qwen", "a" * 64, "Use supplied evidence.",
+        model_id=VISION_MODEL, reasoning_effort=reasoning_effort, include_reasoning=None,
+        reasoning_format="parsed", max_completion_tokens=100,
+    )
+    prepared = GroqSelectedAdapter(tmp_path).prepare(
+        config, call_id="qwen-call", attempt_id="qwen-attempt",
+        task_category="fixture", phase="collect",
+        messages=[{"role": "user", "content": "Read the synthetic fixture"}],
+        tools=({"type": "function", "function": {
+            "name": "read_fixture", "parameters": {"type": "object", "properties": {},
+                                                   "additionalProperties": False},
+        }},),
+    )
+    raw = json.dumps(prepared.body, ensure_ascii=False, sort_keys=True,
+                     separators=(",", ":")).encode()
+    return urllib.request.Request(URL, data=raw, method="POST"), raw
+
+
+@pytest.mark.parametrize("policy", ["unknown", None, []])
+def test_qwen_estimate_policy_must_be_known_text(tmp_path, policy):
+    with pytest.raises(ValueError, match="Qwen estimate policy"):
+        AgentBudget(tmp_path / "invalid-policy.json", qwen_estimate_policy=policy)
+
+
+def test_qwen_text_requires_opt_in_and_reserves_native_input(tmp_path):
+    request, raw = qwen_text_request(tmp_path)
+    estimate = estimate_request_tokens(raw)
+    old = estimate_request_tokens(raw, basis=QWEN_SURROGATE_BASIS)
+    assert estimate.basis == QWEN_TEMPLATE_BASIS
+    assert estimate.tokens < old.tokens
+    sent = []
+
+    def opener(_self, value, **_kwargs):
+        sent.append(json.loads(value.data))
+        return Response(json.dumps({"model": VISION_MODEL, "usage": {"total_tokens": 20}}).encode())
+
+    with AgentBudget(tmp_path / "disabled.json") as budget:
+        with pytest.raises(BudgetStop, match="model_request_mismatch"):
+            budget.open(opener, object(), request)
+    assert sent == []
+
+    path = tmp_path / "enabled.json"
+    with AgentBudget(path, allow_qwen_text=True,
+                     qwen_estimate_policy="native_when_supported", model_limit=1,
+                     token_limit=estimate.tokens + 100, retrieval_limit=0) as budget:
+        budget.open(opener, object(), request)
+        entry = budget.data["model_attempts"][0]
+        assert entry["model"] == VISION_MODEL and entry["model_role"] == "reasoning"
+        assert entry["estimated_input_tokens"] == estimate.tokens
+        assert entry["token_estimate_basis"] == QWEN_TEMPLATE_BASIS
+        assert entry["planned_tokens"] == estimate.tokens + 100
+        assert entry["actual_tokens"] == 20
+        assert budget.data["planned_tokens"] == 20
+        assert budget.data["limits"]["allow_qwen_text"] is True
+        assert budget.data["limits"]["qwen_estimate_policy"] == "native_when_supported"
+        assert "allow_vision" not in budget.data["limits"]
+    assert sent[0]["reasoning_format"] == "parsed"
+    assert sent[0]["reasoning_effort"] == "medium"
+    assert sent[0]["tools"][0]["type"] == "function"
+    with pytest.raises(BudgetStop, match="budget_identity_mismatch"):
+        with AgentBudget(path, model_limit=1, token_limit=estimate.tokens + 100,
+                         retrieval_limit=0, allow_qwen_text=True):
+            pytest.fail("reopened native Qwen ledger under legacy estimate policy")
+
+
+def test_qwen_low_native_budget_uses_distinct_pinned_basis(tmp_path):
+    request, raw = qwen_text_request(tmp_path, reasoning_effort="low")
+    estimate = estimate_request_tokens(raw)
+    assert estimate.basis == QWEN_TEMPLATE_LOW_BASIS
+    sent = []
+
+    def opener(_self, value, **_kwargs):
+        sent.append(json.loads(value.data))
+        return Response(json.dumps({"model": VISION_MODEL, "usage": {
+            "total_tokens": 20,
+        }}).encode())
+
+    with AgentBudget(
+        tmp_path / "low-native.json", allow_qwen_text=True,
+        qwen_estimate_policy="native_when_supported", model_limit=1,
+        token_limit=estimate.tokens + 100, retrieval_limit=0,
+    ) as budget:
+        budget.open(opener, object(), request)
+        entry = budget.data["model_attempts"][0]
+        assert entry["estimated_input_tokens"] == estimate.tokens
+        assert entry["token_estimate_basis"] == QWEN_TEMPLATE_LOW_BASIS
+        assert entry["planned_tokens"] == estimate.tokens + 100
+        assert entry["actual_tokens"] == 20
+    assert sent[0]["reasoning_effort"] == "low"
+    assert sent[0]["reasoning_format"] == "parsed"
+
+
+@pytest.mark.parametrize(("change", "reason"), [
+    (lambda packet: packet.update(reasoning_effort="high"), "model_request_mismatch"),
+    (lambda packet: packet.update(reasoning_format="raw"), "model_request_mismatch"),
+    (lambda packet: packet.update(include_reasoning=True), "model_request_mismatch"),
+    (lambda packet: packet.update(extra_setting=True), "model_request_invalid"),
+    (lambda packet: packet["messages"].append({"role": "tool", "content": "orphan",
+                                               "tool_call_id": "none"}), "model_request_invalid"),
+    (lambda packet: packet.update(tools=[{"type": "browser_search"}]), "model_request_mismatch"),
+    (lambda packet: packet["messages"][1].update(content=[{
+        "type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="},
+    }]), "model_request_invalid"),
+])
+def test_qwen_text_rejects_unsupported_or_image_request_before_transport(
+    tmp_path, change, reason,
+):
+    request, raw = qwen_text_request(tmp_path)
+    packet = json.loads(raw)
+    change(packet)
+    request = urllib.request.Request(URL, data=json.dumps(
+        packet, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode(), method="POST")
+    sent = []
+
+    def opener(_self, _value, **_kwargs):
+        sent.append(1)
+        return response()
+
+    with AgentBudget(tmp_path / "invalid.json", allow_qwen_text=True,
+                     qwen_estimate_policy="native_when_supported") as budget:
+        with pytest.raises(BudgetStop, match=reason):
+            budget.open(opener, object(), request)
+        assert budget.data["model_attempts"] == []
+    assert sent == []
+
+
+def test_qwen_text_429_keeps_unknown_reservation_and_blocks_next_dispatch(tmp_path):
+    request, raw = qwen_text_request(tmp_path)
+    reservation = estimate_request_tokens(raw, basis=QWEN_SURROGATE_BASIS).tokens + 100
+    sent = []
+
+    def limited(_self, _value, **_kwargs):
+        sent.append(1)
+        raise urllib.error.HTTPError(URL, 429, "Too Many Requests", {}, io.BytesIO(b"{}"))
+
+    with AgentBudget(tmp_path / "qwen-429.json", allow_qwen_text=True,
+                     model_limit=None, token_limit=reservation, retrieval_limit=0) as budget:
+        with pytest.raises(urllib.error.HTTPError):
+            budget.open(limited, object(), request)
+        entry = budget.data["model_attempts"][0]
+        assert entry["state"] == "rate_limited"
+        assert entry["usage_status"] == "unreported_reservation_retained"
+        assert "actual_tokens" not in entry
+        assert budget.data["planned_tokens"] == reservation
+        with pytest.raises(BudgetStop, match="token_cap"):
+            budget.open(limited, object(), request)
+    assert sent == [1]
+
+
+def test_historical_qwen_surrogate_reservation_is_not_repriced_on_reopen(tmp_path):
+    model_request, raw = qwen_text_request(tmp_path)
+    historical = estimate_request_tokens(raw, basis=QWEN_SURROGATE_BASIS)
+    old_charge = historical.tokens + 100
+    path = tmp_path / "historical-qwen.json"
+    options = {"allow_qwen_text": True, "model_limit": None,
+               "token_limit": old_charge * 2, "retrieval_limit": 0}
+    with AgentBudget(path, **options):
+        pass
+    saved = json.loads(path.read_text())
+    old_entry = {"number": 1, "state": "rate_limited", "status": 429,
+                 "estimated_input_tokens": historical.tokens,
+                 "token_estimate_basis": QWEN_SURROGATE_BASIS,
+                 "output_reservation": 100, "planned_tokens": old_charge,
+                 "usage_status": "unreported_reservation_retained"}
+    saved["model_attempts"] = [old_entry]
+    saved["planned_tokens"] = old_charge
+    saved["peak_planned_tokens"] = old_charge
+    path.write_text(json.dumps(saved))
+    sent = []
+
+    def opener(_self, _request, **_kwargs):
+        sent.append(1)
+        return Response(json.dumps({"model": VISION_MODEL,
+                                    "usage": {"total_tokens": 20}}).encode())
+
+    with AgentBudget(path, **options) as budget:
+        assert budget.data["model_attempts"][0] == old_entry
+        budget.open(opener, object(), model_request)
+        assert budget.data["model_attempts"][0] == old_entry
+        assert budget.data["model_attempts"][1]["token_estimate_basis"] == QWEN_SURROGATE_BASIS
+        assert budget.data["model_attempts"][1]["estimated_input_tokens"] == historical.tokens
+    assert sent == [1]
+    with pytest.raises(BudgetStop, match="budget_identity_mismatch"):
+        with AgentBudget(path, **{**options,
+                                 "qwen_estimate_policy": "native_when_supported"}):
+            pytest.fail("legacy ledger changed estimate policy on resume")
+
+
+def test_qwen_nonfinite_tool_history_is_denied_before_http(tmp_path):
+    _request, raw = qwen_text_request(tmp_path)
+    packet = json.loads(raw)
+    packet["messages"].extend([
+        {"role": "assistant", "content": None, "tool_calls": [{
+            "id": "synthetic-tool", "type": "function",
+            "function": {"name": "read_fixture", "arguments": '{"value":[1e999]}'},
+        }]},
+        {"role": "tool", "name": "read_fixture", "tool_call_id": "synthetic-tool",
+         "content": "synthetic result"},
+        {"role": "user", "content": "Continue from the result."},
+    ])
+    invalid = urllib.request.Request(URL, data=json.dumps(
+        packet, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode(), method="POST")
+    sent = []
+    with AgentBudget(tmp_path / "nonfinite.json", allow_qwen_text=True,
+                     qwen_estimate_policy="native_when_supported") as budget:
+        with pytest.raises(BudgetStop, match="model_request_invalid"):
+            budget.open(lambda *_a, **_kw: sent.append(1), object(), invalid)
+        assert budget.data["model_attempts"] == []
+    assert sent == []
 
 
 def request(*, native=False, cap=100, secret="private prompt"):

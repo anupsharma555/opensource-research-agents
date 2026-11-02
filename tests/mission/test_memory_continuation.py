@@ -29,6 +29,9 @@ def _drive_until_peer_request_linked(host, run_id: str) -> dict:
             for item in control["body"].get("peer_action_obligations", [])
         ):
             return requests[0]
+        if any(item["body"].get("phase") == "model_response_lost"
+               for item in host.store.records("executor_work")):
+            raise AssertionError("Injected model transport failed before peer request linkage")
         time.sleep(0.01)
     raise AssertionError("Accepted peer request was not linked to the prior local rejection")
 
@@ -200,7 +203,7 @@ def test_absent_peer_can_be_invited_then_receive_multiline_request_under_same_mo
         if synthesis_turns == 1:
             instructions = body["messages"][0]["content"]
             assert "peer_request targets registered peers" in instructions
-            assert "invite absent configured roles to exact work first" in instructions
+            assert "invite absent roles first; invitation is not acceptance" in instructions
             assert "invite_peer" in instructions
             assert "agent-critique (Mxra)" not in instructions
             assert {"peer_request", "request_capability"} <= {

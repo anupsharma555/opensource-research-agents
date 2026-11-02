@@ -2,7 +2,7 @@
 name: os-groq-usage
 description: Track saved Groq token usage by credential profile with a private daily log, seven-day view, and dated quota observations.
 metadata:
-  version: "0.2.3"
+  version: "0.2.4"
 ---
 
 # OS Groq Usage Tracking
@@ -30,11 +30,14 @@ For quality and efficiency of an individual run, use `os-qualify-run` alongside 
    `.local/checks/groq-usage-daily-log.json`. Each invocation refreshes the selected
    day and six preceding local days from the selected saved records. The receipt
    includes the selected calendar day, a separate trailing 24-hour window, and a
-   seven-local-day view. Defaults use `openai/gpt-oss-120b`. For saved figure
-   calls, run a separate report with `--model qwen/qwen3.8-27b`; do not add
-   vision tokens to the GPT-OSS model's allowance. Use
-   `--date YYYY-MM-DD`, a timezone-aware `--as-of`, or `--model` for another scope.
-   Inspect both output files and the daily log update status.
+   seven-local-day view. Defaults use `openai/gpt-oss-120b`. Repeat `--model` to
+   get one combined model-by-profile summary and separate JSON/Markdown reports
+   and daily-log lanes for each model, for example `--model openai/gpt-oss-120b
+   --model qwen/qwen3.8-27b`. Qwen text and figure calls share that same model
+   lane; do not treat text and figure calls as different Qwen budgets or present
+   the GPT-OSS and Qwen allowances as one available balance. Use
+   `--date YYYY-MM-DD` or a timezone-aware `--as-of` to select the
+   observation. Inspect the combined summary, each model report, and log status.
 3. Account for unlabelled older calls. Resolve the exact saved configuration first.
    If historical execution evidence establishes that older calls used primary,
    supply `--legacy-primary-before <ISO timestamp>` and explain the evidence. These
@@ -90,6 +93,13 @@ explicit `--daily-limit 200000` provides arithmetic planning estimates only.
 - Profiles select keys, while quotas apply to organizations. Two keys, emails or
   the shared local `groq-selected` ledger do not establish quota independence.
   Retain existing primary holds and selected-profile policy.
+- Keep an agent bound to its selected model for its lifetime. When that model's
+  quota blocks work, wait for capacity or explicitly hand off at a checkpoint to
+  a new agent bound to another qualified model, with model and attempt lineage.
+  Do not automatically fall back within the same agent. Same-model credential
+  routing requires explicit authorization and recorded, verified organization
+  scope; another key is not a reset budget. See [accounting.md](references/accounting.md)
+  for model, cache, and quota boundaries.
 
 Keep receipts private and concise. Do not print keys, key fingerprints, account
 identifiers, prompts, provider reasoning or source bodies. No API call is needed

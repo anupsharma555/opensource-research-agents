@@ -5,6 +5,7 @@ import json
 import pytest
 
 from ora.coordination.board import ref
+from ora.mission.analysis_extended import EXTENDED_ANALYSIS_TOOL_SCHEMAS
 from ora.mission.context import ContextError, WorkingContext
 from ora.state import StateStore
 from tests.mission.test_context import fixture
@@ -12,17 +13,30 @@ from tests.mission.test_note_source_use import revoke, source_note
 from tests.mission.test_tool_result_paging import save_result
 
 
-@pytest.mark.parametrize("name", ["calculate", "search_saved_passages"])
+@pytest.mark.parametrize("name", [
+    "calculate", "analyze_values", "convert_units", "search_saved_passages",
+    *EXTENDED_ANALYSIS_TOOL_SCHEMAS,
+])
 @pytest.mark.parametrize("rejected", [False, True])
 def test_result_and_argument_revocation_before_and_after_preparation(tmp_path, name, rejected):
     store = StateStore(tmp_path)
     call, task = fixture(store)
     saved = source_note(store, task)
-    secret = "SYNTHETIC_SOURCE_DERIVED_VALUE"
+    secret = ("73829.25" if name in {"analyze_values", "convert_units"}
+              else "SYNTHETIC_SOURCE_DERIVED_VALUE")
     result = {"status": "rejected"} if rejected else {
-        "text": secret, "source_dependency_refs": [saved["copy"]],
+        **({"group_a": {"mean": secret}} if name == "analyze_values" else
+           {"value": secret} if name == "convert_units" else {"text": secret}),
+        "source_dependency_refs": [saved["copy"]],
     }
-    response, _ = save_result(store, call, name, result, arguments={"value": secret})
+    arguments = (
+        {"operation": "describe", "group_a": [73829.25, 73829.25]}
+        if name == "analyze_values" else
+        {"value": 73829.25, "from_unit": "gram", "to_unit": "milligram"}
+        if name == "convert_units" else
+        {"value": secret}
+    )
+    response, _ = save_result(store, call, name, result, arguments=arguments)
     store.transact("research-intent", {}, lambda tx: ref(tx.put(
         "model_request_intent", f"model-intent:{call['id']}:1", {
             "mission_id": "m", "call_ref": call, "source_refs": [],
@@ -36,10 +50,11 @@ def test_result_and_argument_revocation_before_and_after_preparation(tmp_path, n
     revoke(store, saved["use"])
     with pytest.raises(ContextError):
         context.context_source_dependency_refs(prepared)
-    replayed = context.assemble(call, task, tool_turn_refs=[response])
+    replayed_context = WorkingContext(StateStore(tmp_path))
+    replayed = replayed_context.assemble(call, task, tool_turn_refs=[response])
     assert secret not in json.dumps(replayed.messages)
     assert "data_unavailable_due_source_use" in json.dumps(replayed.messages)
-    assert context.context_source_dependency_refs(replayed) == ()
+    assert replayed_context.context_source_dependency_refs(replayed) == ()
 
 
 def test_saved_search_snippet_binds_source_even_without_source_in_producing_input(tmp_path):

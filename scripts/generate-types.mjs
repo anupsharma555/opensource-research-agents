@@ -5,6 +5,8 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compile } from 'json-schema-to-typescript';
+import Ajv2020 from 'ajv/dist/2020.js';
+import standaloneCode from 'ajv/dist/standalone/index.js';
 
 const repositoryRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const checkOnly = process.argv.includes('--check');
@@ -54,3 +56,24 @@ for (const [schemaName, fileName, typeName] of contracts) {
   }
 }
 process.stdout.write(checkOnly ? 'Generated UI types match the canonical schemas.\n' : 'Generated snapshot and live command types.\n');
+
+// Precompile response checks: browsers execute ordinary ESM, never new Function.
+const ajv = new Ajv2020({ strict: false, code: { source: true, esm: true }, allErrors: false });
+for (const name of ['live_state', 'live_receipt']) {
+  ajv.addSchema(JSON.parse(await readFile(resolve(repositoryRoot, `contracts/generated/${name}.schema.json`), 'utf8')), name);
+}
+let validators = standaloneCode(ajv, { validateLiveState: 'live_state', validateLiveReceipt: 'live_receipt' });
+validators = validators.replaceAll('require("ajv/dist/runtime/ucs2length").default', 'ucs2length');
+validators = '/* Generated from canonical response schemas. Do not edit. */\nimport ucs2lengthModule from "ajv/dist/runtime/ucs2length.js";\nconst ucs2length = ucs2lengthModule.default ?? ucs2lengthModule;\n' + validators;
+const declarations = `/* Generated response guards. Do not edit. */
+import type { LiveState } from './live-state';
+import type { LiveReceipt } from './live-receipt';
+export function validateLiveState(value: unknown): value is LiveState;
+export function validateLiveReceipt(value: unknown): value is LiveReceipt;
+`;
+for (const [name, contents] of [['live-validators.js', validators], ['live-validators.d.ts', declarations]]) {
+  const path = resolve(repositoryRoot, 'ui/src/generated', name);
+  if (checkOnly) {
+    if (await readFile(path, 'utf8').catch(() => '') !== contents) throw new Error(`Generated ${name} differs; run scripts/dev generate.`);
+  } else await writeFile(path, contents);
+}

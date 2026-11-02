@@ -108,12 +108,11 @@ def test_answer_arrival_reopens_its_requester_without_fabricating_opposite_reply
         assert seen["recipient_input"] is None
         context = _context(packet)
         answer_ref = outgoing["body"]["answer_refs"][0]
-        assert answer_ref in context["request_answer_refs"]
-        assert any(item["ref"]["id"] == outgoing["id"]
-                   and item["status"] in {"awaiting_review", "partial_awaiting_review"}
-                   for item in context["request_dispositions"])
         preview = next(item for item in context["peer_answer_previews"]
                        if item["answer_ref"] == answer_ref)
+        assert preview["request_ref"]["id"] == outgoing["id"]
+        assert preview["request_status"] in {"awaiting_review", "partial_awaiting_review"}
+        assert preview["report_delivery"] == "complete_in_input"
         assert preview["question"] == f"Please check {role}'s synthetic claim independently."
         assert preview["report"]["body"] == peer_text
         assert host.store.get("mail_request", requests[other])["body"]["status"] == "unanswered"

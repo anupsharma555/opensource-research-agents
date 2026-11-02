@@ -22,6 +22,7 @@ _REQUEST_FIELDS = frozenset(
         "model",
         "messages",
         "reasoning_effort",
+        "reasoning_format",
         "include_reasoning",
         "max_completion_tokens",
         "stream",
@@ -214,6 +215,9 @@ class ModelRecovery:
         config = _exact(self.store, spec.configuration_ref, "agent_configuration")
         if (
             set(request) - _REQUEST_FIELDS
+            or ("reasoning_format" in request and (
+                request.get("model") != "qwen/qwen3.8-27b"
+                or request["reasoning_format"] != "parsed"))
             or request.get("model") != call["body"].get("model_id")
             or request.get("tool_choice") != "auto"
             or request.get("parallel_tool_calls") is not False

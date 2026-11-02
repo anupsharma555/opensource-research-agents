@@ -1,5 +1,6 @@
 """Saved local messages keep delivery, requests and result review distinct."""
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ from ora.agents import AgentRegistry
 from ora.coordination.board import ProposalBoard, ref
 from ora.coordination.mailbox import PeerMailbox
 from ora.state import StateStore
+from ora.state.store import canonical
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -94,6 +96,62 @@ def test_delivery_ack_and_answer_are_distinct_with_nested_payload(tmp_path):
                               answer_id="late", responder_id=peers[1],
                               artifact_ref=answer_ref)["status"] == "rejected"
     assert len(store.get("mail_request", "request")["body"]["answer_refs"]) == 1
+
+
+def test_review_version_fence_is_atomic_and_legacy_replay_keeps_hash(tmp_path):
+    store, peers, cause = setup(tmp_path)
+    mail = PeerMailbox(store)
+    ask(mail, peers, cause)
+    artifact_ref = save_artifact(store)
+    mail.record_answer("versioned-answer", mission_id="mission", request_id="request",
+                       answer_id="answer-one", responder_id=peers[1],
+                       artifact_ref=artifact_ref)
+    current = store.get("mail_request", "request")
+    stale = mail.review_answer(
+        "stale-version-review", mission_id="mission", request_id="request",
+        reviewer_id=peers[0], answer_id="answer-one", disposition="answered",
+        reason="Synthetic review", expected_request_version=current["version"] - 1,
+        expected_answer_version=1,
+    )
+    assert stale["status"] == "rejected"
+    assert store.get("mail_request", "request")["body"]["status"] == "awaiting_review"
+    exact = mail.review_answer(
+        "exact-version-review", mission_id="mission", request_id="request",
+        reviewer_id=peers[0], answer_id="answer-one", disposition="answered",
+        reason="Synthetic review", expected_request_version=current["version"],
+        expected_answer_version=1,
+    )
+    assert exact["status"] == "accepted"
+    assert mail.review_answer(
+        "exact-version-review", mission_id="mission", request_id="request",
+        reviewer_id=peers[0], answer_id="answer-one", disposition="answered",
+        reason="Synthetic review", expected_request_version=current["version"],
+        expected_answer_version=1,
+    ) == exact
+
+    other_store, other_peers, other_cause = setup(tmp_path / "legacy")
+    other_mail = PeerMailbox(other_store)
+    ask(other_mail, other_peers, other_cause)
+    other_mail.record_answer("legacy-answer", mission_id="mission", request_id="request",
+                             answer_id="answer-one", responder_id=other_peers[1],
+                             artifact_ref=save_artifact(other_store))
+    legacy_args = dict(operation_id="legacy-review", mission_id="mission",
+                       request_id="request", reviewer_id=other_peers[0],
+                       answer_id="answer-one", disposition="answered",
+                       reason="Legacy synthetic review", requester_offline=False,
+                       availability_ref=None)
+    first = other_mail.review_answer(**legacy_args)
+    assert first["status"] == "accepted"
+    assert other_mail.review_answer(**legacy_args) == first
+    db = other_store._connect()
+    try:
+        saved_hash = db.execute("SELECT request_hash FROM operations WHERE id=?",
+                                ("legacy-review",)).fetchone()[0]
+    finally:
+        db.close()
+    assert saved_hash == hashlib.sha256(canonical({
+        "request": legacy_args, "mission_id": "mission", "fence": None,
+    }).encode()).hexdigest()
 
 
 def test_request_accepts_multiline_question_and_expected_artifact(tmp_path):

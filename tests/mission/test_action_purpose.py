@@ -258,6 +258,7 @@ def test_saved_purpose_v2_run_keeps_160_schema_and_configuration_on_reopen(
         historical_body = dict(saved_run["body"])
         historical_body.pop("action_purpose_tool_version")
         historical_body.pop("parallel_research_version")
+        historical_body.pop("reader_action_purpose_tool_version")
         host.store.transact(
             "fixture:saved-purpose-v2", {"run_id": run.run_id},
             lambda tx: tx.put("mission_run", run.run_id, historical_body,

@@ -477,6 +477,8 @@ class ResearchHost:
         # additions must not change the identity of an unchanged saved request.
         body.pop("requiredAgentIds", None)
         body.pop("credentialProfile", None)
+        if body.get("agentModels") is None:
+            body.pop("agentModels", None)
         if not request.allow_vision:
             body.pop("allowVision", None)
         return hashlib.sha256(_json(body).encode()).hexdigest()
@@ -504,6 +506,8 @@ class ResearchHost:
             raise LiveError("Vision calls need the shared mission runtime")
         if request.required_agent_ids:
             raise LiveError("Required contribution choices need the shared mission runtime")
+        if request.agent_models is not None:
+            raise LiveError("Agent model choices need the shared mission runtime")
         if request.credential_profile not in {None, "primary"}:
             raise LiveError("Backup credential selection needs the shared mission runtime")
         agents = self._agent_ids(request.agent_ids)

@@ -6,6 +6,8 @@ import json
 
 from ora.contracts.models import LiveStartRequest
 from ora.mission.passage_search import task_text_tool_availability
+from ora.mission.tool_catalog import UNHANDLED_COMMON_TOOLS
+from tests.mission.availability_assertions import catalog_tool_names, request_first_names
 from tests.mission.test_capability_catalog import _index
 from tests.mission.test_service import service
 
@@ -46,12 +48,14 @@ def test_retained_task_text_attaches_both_exact_navigation_tools(tmp_path, monke
             availability["call_now_local_functions"]
         )
         assert not {"search_saved_passages", "read_source_window"} & set(
-            availability["request_first_local_functions"]
+            request_first_names(packet, availability)
         )
-        assert len(_index(packet["messages"][0]["content"])["tools"]) == 54
-        assert packet["max_completion_tokens"] == 8192
         prepared = host._control(run.run_id, "agent-synthesis")
         call = host.store.get(**prepared["body"]["call_ref"])
+        assert catalog_tool_names(_index(packet["messages"][0]["content"])) == (
+            set(call["body"]["permitted_tools"]) - UNHANDLED_COMMON_TOOLS
+        )
+        assert packet["max_completion_tokens"] == 8192
         config = host.store.get("agent_configuration", call["body"]["configuration_id"], 1)
         limited = {**config, "body": {**config["body"], "permitted_tools": {
             name: descriptor for name, descriptor in config["body"]["permitted_tools"].items()
@@ -68,16 +72,22 @@ def test_retained_task_text_attaches_both_exact_navigation_tools(tmp_path, monke
             history = host._model_base_history(
                 prepared, [], exposed_tools, selected_source_refs=[], call=test_call,
             )
-            return next(json.loads(message["content"])["next_action"]
+            return next(json.loads(message["content"])
                         for message in history if "omitted_source_refs" in message["content"])
 
-        assert "Call attached read_source_window" in omitted_notice(
-            call["body"]["exposed_tools"]
+        attached_notice = omitted_notice(call["body"]["exposed_tools"])
+        assert attached_notice["omitted_source_refs"] == prepared["body"]["source_refs"]
+        assert attached_notice["source_text_status"] == "omitted_from_this_call_only"
+        assert attached_notice["next_action"] == (
+            "Call attached read_source_window for omitted text only if needed."
         )
         deferred = [name for name in call["body"]["exposed_tools"]
                     if name != "read_source_window"]
-        assert "request_capability with tool_id=read_source_window" in omitted_notice(
-            deferred
+        deferred_notice = omitted_notice(deferred)
+        assert deferred_notice["omitted_source_refs"] == attached_notice["omitted_source_refs"]
+        assert deferred_notice["next_action"] == (
+            "If needed now, request_capability(tool_id=read_source_window), "
+            "then read the exact omitted copy."
         )
     finally:
         host.close()

@@ -117,9 +117,23 @@ def test_short_abstract_option_reads_one_complete_checked_window_under_budget(
         estimate = estimate_request_tokens(request.data)
         assert estimate.basis == TOKENIZER_BASIS
         assert estimate.tokens + 215 <= 8000
-        window = _last_result(packet, "read_source_window")
-        assert window["returned_chars"] == 2671
-        assert window["next_cursor"] is None
+        if any(message.get("name") == "read_source_window"
+               for message in packet["messages"]):
+            window = _last_result(packet, "read_source_window")
+            assert window["returned_chars"] == 2671
+            assert window["next_cursor"] is None
+        else:
+            # A tight request can omit the redundant tool message while the
+            # complete checked passages remain in the selected source packet.
+            index = json.loads(packet["messages"][-1]["content"])
+            checked = index["last_checked_window"]
+            assert checked["source_text_status"] == (
+                "checked_window_passages_in_selected_source_packet"
+            )
+            assert checked["next_cursor"] is None
+            saved_window = host.store.get(**checked["window_ref"])
+            assert saved_window["body"]["char_limit"] == len(ABSTRACT)
+            assert saved_window["body"]["next_cursor"] is None
         return answer("The fictional complete abstract was read.", turn)
 
     host = service(tmp_path, monkeypatch, model)

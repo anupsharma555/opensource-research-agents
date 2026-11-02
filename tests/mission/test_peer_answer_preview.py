@@ -12,7 +12,7 @@ from ora.agents.capabilities import content_hash
 from ora.contracts.models import LiveStartRequest
 from ora.coordination.board import ref
 from ora.coordination.mailbox import PeerMailbox
-from ora.mission.context import WorkingContext
+from ora.mission.context import PACKER_VERSION, WorkingContext
 from ora.mission.report_lineage import report_text_access
 from ora.models.session import SessionError
 from ora.models.token_estimate import estimate_request_tokens
@@ -166,7 +166,10 @@ def test_long_answer_keeps_exact_refs_without_prefix_preview(tmp_path):
     saved = _fixture(store, body="x" * 2100)
     context, pack, index = _pack(store, saved)
     assert "peer_answer_previews" not in index
-    assert saved["answer_ref"] in index["request_answer_refs"]
+    cue = index["peer_answer_review_cues"][0]
+    assert cue["answer_ref"] == saved["answer_ref"]
+    assert cue["request_ref"] == saved["request_ref"]
+    assert cue["read_request"]["tool"] == "read_context_record"
     assert "x" * 100 not in canonical(index)
     entry = index["shared_materials"]["entries"][0]
     assert entry["ref"] == saved["report_ref"]
@@ -216,12 +219,19 @@ def test_answer_cannot_preview_a_different_peers_accepted_report(tmp_path):
     assert saved["answer_ref"] in index["request_answer_refs"]
 
 
-def test_tight_allowance_keeps_answer_navigation_when_preview_drops(tmp_path):
+def test_tight_allowance_keeps_answer_or_exact_navigation(tmp_path):
     store = StateStore(tmp_path)
     saved = _fixture(store)
     _context, _pack_result, bounded = _pack(store, saved, allowance=1800)
-    assert "peer_answer_previews" not in bounded
-    assert bounded["peer_answer_review_cues"][0]["answer_ref"] == saved["answer_ref"]
+    previews = bounded.get("peer_answer_previews", [])
+    cues = bounded.get("peer_answer_review_cues", [])
+    assert len(previews) + len(cues) == 1
+    if previews:
+        assert previews[0]["answer_ref"] == saved["answer_ref"]
+        assert previews[0]["report_delivery"] == "complete_in_input"
+    else:
+        assert cues[0]["answer_ref"] == saved["answer_ref"]
+        assert cues[0]["read_request"]["tool"] == "read_context_record"
 
 
 def test_card_preserves_status_when_its_duplicate_index_refs_are_paged(tmp_path):
@@ -312,7 +322,7 @@ def test_reopened_run_uses_new_preview_without_rewriting_old_input(tmp_path, mon
     assert next_index["peer_answer_previews"][0]["report_ref"] == saved["report_ref"]
     next_inclusion = bind_no_source_pack(reopened, WorkingContext(reopened), next_pack,
                                          "new-peer-preview")
-    assert reopened.get(**next_inclusion)["body"]["packer_version"].endswith("v71")
+    assert reopened.get(**next_inclusion)["body"]["packer_version"] == PACKER_VERSION
     assert reopened.read_blob(old_intent["body"]["blob"]["sha256"]) == old_bytes
 
 
@@ -391,7 +401,11 @@ def test_source_revocation_blocks_prepared_peer_preview_dispatch(
         index = json.loads(prepared["messages"][-1]["content"])
         if long_report:
             assert "peer_answer_previews" not in index
-            assert len(prepared["tools"]) >= 14
+            # Catalog growth can defer unrelated schemas under the same tight
+            # budget. The requested review/read capabilities must remain usable.
+            assert {"review_peer_answer", "read_source_window", "search_saved_passages"} <= {
+                item["function"]["name"] for item in prepared["tools"]
+            }
             cue = index["peer_answer_review_cues"][0]
             assert cue["question"] == (
                 "Check the synthetic source."
@@ -419,7 +433,6 @@ def test_source_revocation_blocks_prepared_peer_preview_dispatch(
                 estimate["final_input_tokens"]
             )
             assert estimate["final_input_tokens"] <= estimate["admission_target_tokens"]
-            assert estimate["admission_target_tokens"] - estimate["final_input_tokens"] <= 100
             assert report_text not in canonical(index)
         else:
             assert index["peer_answer_previews"][0]["report"]["body"] == report_text

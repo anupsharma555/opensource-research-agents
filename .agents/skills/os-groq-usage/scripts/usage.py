@@ -312,7 +312,7 @@ def build_report(calls: list[dict], *, as_of: datetime, day: date, zone: str,
             "status": "elapsed_unverified" if reset <= as_of else "future_assumption",
             "provider_confirmed": False,
         }
-    return {"schema": "ora.groq.usage.summary.v1", "skill_version": "0.2.3",
+    return {"schema": "ora.groq.usage.summary.v1", "skill_version": "0.2.4",
             "observed_at": as_of.isoformat(), "timezone": zone, "date": day.isoformat(),
             "model": model, "planning_daily_allowance": daily_limit, "periods": periods,
             "latest_provider_daily_quota_observations": latest,
@@ -438,6 +438,77 @@ def markdown(report: dict) -> str:
         lines += ["", f"Legacy primary attribution is inferred before {report['legacy_primary_before']}."]
     if report.get("deduplication", {}).get("conflicting_identities_excluded"):
         lines += ["", "Conflicting duplicate call identities were excluded; inspect the JSON coverage before relying on totals."]
+    return "\n".join(lines)
+
+
+def combined_markdown(reports: dict[str, dict]) -> str:
+    """Put model and profile on every row; never imply a shared token balance."""
+    first = next(iter(reports.values()))
+    selected_zone = ZoneInfo(first["timezone"])
+
+    def local_time(value: str | None) -> str:
+        return (stamp(value).astimezone(selected_zone).strftime("%b %d, %Y %I:%M:%S %p %Z")
+                if value else "Unknown")
+
+    lines = ["# Groq token usage by model and profile", "",
+             f"Observed: {first['observed_at']}",
+             f"Local date: {first['date']} ({first['timezone']})", "",
+             "Saved local calls only. Quota and reset evidence stays in its model/profile "
+             "lane; profiles do not prove separate organizations. "
+             "Current organization-wide remaining capacity is unknown."]
+    for period_name in ("calendar_day", "trailing_24_hours"):
+        lines += ["", f"## {period_name.replace('_', ' ').capitalize()}", "",
+                  "| Model | Profile | Calls | Input | Completion | Total | Incomplete usage | Planning headroom* |",
+                  "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
+        for model, report in reports.items():
+            for profile, row in report["periods"][period_name]["profiles"].items():
+                counts = row["token_totals"]
+                values = [row["captured_calls"], counts["prompt_tokens"]["known_sum"],
+                          counts["completion_tokens"]["known_sum"],
+                          counts["total_tokens"]["known_sum"],
+                          row["calls_with_incomplete_usage"],
+                          row["local_planning_headroom_ignoring_cache_and_unobserved_usage"]]
+                lines.append(f"| {model} | {profile} | " + " | ".join(
+                    f"{value:,}" if value is not None else "unknown" for value in values) + " |")
+    lines += ["", "## Seven local calendar days", "",
+              "| Date | Model | Primary total | Backup total | Unknown total | Observation |",
+              "| --- | --- | ---: | ---: | ---: | --- |"]
+    for model, report in reports.items():
+        for item in report["rolling_seven_days"]["days"]:
+            period = item["calendar_day"]
+            values = ["missing"] * len(PROFILES) if period is None else [
+                str(period["profiles"][profile]["token_totals"]["total_tokens"]["known_sum"])
+                if period["profiles"][profile]["token_totals"]["total_tokens"]["known_sum"]
+                is not None else "unknown" for profile in PROFILES]
+            lines.append(f"| {item['date']} | {model} | {' | '.join(values)} | "
+                         f"{item['observed_at'] or 'not observed'} |")
+    lines += ["", "## Latest daily-quota evidence", "",
+              f"Times shown in {first['timezone']}; historical observations, not current capacity.", "",
+              "| Model | Profile | Observed at | Used / daily limit | Earliest retry | Full allowance at |",
+              "| --- | --- | --- | ---: | --- | --- |"]
+    for model, report in reports.items():
+        for profile, observation in report["latest_provider_daily_quota_observations"].items():
+            if observation is None:
+                lines.append(f"| {model} | {profile} | Unknown | Unknown | Unknown | Unknown |")
+                continue
+            estimate = report["assumed_full_reset_estimates"].get(profile)
+            reset = observation.get("full_reset_at")
+            if reset is None and estimate:
+                label = ("assumed; elapsed, unverified" if
+                         estimate["status"] == "elapsed_unverified" else "assumed")
+                reset = f"{local_time(estimate['assumed_full_reset_at'])} ({label})"
+            else:
+                reset = local_time(reset)
+            lines.append(f"| {model} | {profile} | {local_time(observation['observed_at'])} | "
+                         f"{observation['used']:,} / {observation['limit']:,} | "
+                         f"{local_time(observation.get('retry_not_before'))} | {reset} |")
+    lines += ["", "*Planning headroom is per model and profile arithmetic from an explicit "
+              "allowance. It is not confirmed capacity. A nominal sum across model "
+              "allowances needs explicit quota scope and assumptions; it is not a shared, "
+              "per-call, or currently available balance. Profile headroom needs verified "
+              "independent organization scopes before summing. Retry timing does not "
+              "establish a full reset. "
+              "Missing usage and uncaptured calls remain unknown.", ""]
     return "\n".join(lines)
 
 
@@ -569,12 +640,15 @@ def main() -> None:
     parser.add_argument("--timezone", default="America/New_York")
     parser.add_argument("--date", type=date.fromisoformat)
     parser.add_argument("--as-of", type=stamp)
-    parser.add_argument("--model", default="openai/gpt-oss-120b")
+    parser.add_argument("--model", action="append", help="Repeat for separate model lanes")
     parser.add_argument("--daily-limit", type=int)
     parser.add_argument("--legacy-primary-before", type=stamp)
     args = parser.parse_args()
     if not args.state_dir and not args.supplement:
         parser.error("Select a saved state directory or standalone receipt")
+    models = list(dict.fromkeys(args.model or ["openai/gpt-oss-120b"]))
+    if any(not SAFE_MODEL.fullmatch(model) for model in models):
+        parser.error("Model IDs must be simple provider/model identifiers")
     as_of = args.as_of or datetime.now(timezone.utc)
     day = args.date or as_of.astimezone(ZoneInfo(args.timezone)).date()
     calls, sources = [], []
@@ -587,30 +661,54 @@ def main() -> None:
         calls.extend(found)
         sources.append({"path": str(path), "supplemental_calls": len(found)})
     calls, duplicates = deduplicate(calls)
-    report = build_report(calls, as_of=as_of, day=day, zone=args.timezone,
-                          model=args.model, daily_limit=args.daily_limit)
-    report.update({"sources": sources, "deduplication": duplicates,
-                   "legacy_primary_before": args.legacy_primary_before.isoformat()
-                   if args.legacy_primary_before else None})
     folder = ROOT / ".local/checks"
     folder.mkdir(parents=True, exist_ok=True)
     daily_path = folder / "groq-usage-daily-log.json"
-    for offset in range(6, 0, -1):
-        prior_day = day - timedelta(days=offset)
-        prior = build_report(calls, as_of=as_of, day=prior_day, zone=args.timezone,
-                             model=args.model, daily_limit=args.daily_limit)
-        prior.update({"sources": sources, "deduplication": duplicates,
-                      "legacy_primary_before": report["legacy_primary_before"]})
-        update_daily_log(daily_path, prior)
-    status, rolling = update_daily_log(daily_path, report)
-    report["daily_log"] = {"path": str(daily_path), "update_status": status,
-                           "scope": daily_scope(report)}
-    report["rolling_seven_days"] = rolling
-    stem = f"groq-usage-{day.isoformat()}-{uuid.uuid4().hex[:12]}"
+    reports, per_model_paths = {}, {}
+    for model in models:
+        report = build_report(calls, as_of=as_of, day=day, zone=args.timezone,
+                              model=model, daily_limit=args.daily_limit)
+        report.update({"sources": sources, "deduplication": duplicates,
+                       "legacy_primary_before": args.legacy_primary_before.isoformat()
+                       if args.legacy_primary_before else None})
+        for offset in range(6, 0, -1):
+            prior_day = day - timedelta(days=offset)
+            prior = build_report(calls, as_of=as_of, day=prior_day, zone=args.timezone,
+                                 model=model, daily_limit=args.daily_limit)
+            prior.update({"sources": sources, "deduplication": duplicates,
+                          "legacy_primary_before": report["legacy_primary_before"]})
+            update_daily_log(daily_path, prior)
+        status, rolling = update_daily_log(daily_path, report)
+        report["daily_log"] = {"path": str(daily_path), "update_status": status,
+                               "scope": daily_scope(report)}
+        report["rolling_seven_days"] = rolling
+        stem = f"groq-usage-{day.isoformat()}-{uuid.uuid4().hex[:12]}"
+        paths = [folder / (stem + suffix) for suffix in (".json", ".md")]
+        private_write(paths[0], json.dumps(report, indent=2) + "\n")
+        private_write(paths[1], markdown(report))
+        reports[model] = report
+        per_model_paths[model] = {"receipt": str(paths[0]), "summary": str(paths[1])}
+    if len(models) == 1:
+        print(json.dumps(per_model_paths[models[0]]))
+        return
+    combined = {"schema": "ora.groq.usage.multi-summary.v1", "skill_version": "0.2.4",
+                "observed_at": as_of.isoformat(), "date": day.isoformat(),
+                "timezone": args.timezone, "deduplication": duplicates,
+                "sources": sources, "models": {model: {
+                    **per_model_paths[model], "periods": report["periods"],
+                    "rolling_seven_days": report["rolling_seven_days"],
+                    "latest_provider_daily_quota_observations":
+                        report["latest_provider_daily_quota_observations"],
+                    "assumed_full_reset_estimates": report["assumed_full_reset_estimates"],
+                    "daily_log": report["daily_log"]} for model, report in reports.items()},
+                "current_account_wide_remaining_tokens": None,
+                "quota_independence_between_profiles": "not established by this report"}
+    stem = f"groq-usage-combined-{day.isoformat()}-{uuid.uuid4().hex[:12]}"
     paths = [folder / (stem + suffix) for suffix in (".json", ".md")]
-    private_write(paths[0], json.dumps(report, indent=2) + "\n")
-    private_write(paths[1], markdown(report))
-    print(json.dumps({"receipt": str(paths[0]), "summary": str(paths[1])}))
+    private_write(paths[0], json.dumps(combined, indent=2) + "\n")
+    private_write(paths[1], combined_markdown(reports))
+    print(json.dumps({"receipt": str(paths[0]), "summary": str(paths[1]),
+                      "model_reports": per_model_paths}))
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Pinned Groq GPT-OSS requests with source-use and conversation preflight.
+"""Pinned Groq model requests with source-use and conversation preflight.
 
 The host owns tool execution, retries, admission, and durable receipts. A call is
 one request; a continuation or repair must receive a new call and attempt ID.
@@ -29,6 +29,13 @@ from ora.live.provider import (
     _retry_after,
 )
 from ora.models.usage import normalize_groq_usage, observe_groq_cache
+
+from .profiles import (
+    QWEN_MODEL,
+    SUPPORTED_MODELS,
+    model_supports_native_browser,
+    supported_reasoning,
+)
 
 Phase = Literal["collect", "final"]
 Status = Literal["complete", "tool_requested", "partial", "failed"]
@@ -80,11 +87,12 @@ class CallConfiguration:
     endpoint: str = URL
     model_id: str = MODEL
     reasoning_effort: str = DEFAULT_REASONING_EFFORT
-    include_reasoning: bool = True
+    include_reasoning: bool | None = True
     max_completion_tokens: int = 8192
     stream: bool = False
     credential_profile: str = "primary"
     quota_domain: str = "groq-selected"
+    reasoning_format: str | None = None
 
 
 @dataclass(frozen=True)
@@ -106,7 +114,8 @@ class PreparedCall:
         return {
             "call_id": self.call_id, "attempt_id": self.attempt_id,
             "parent_call_id": self.parent_call_id, "task_category": self.task_category,
-            "phase": self.phase, "provider": "groq", "endpoint": URL, "model_id": MODEL,
+            "phase": self.phase, "provider": "groq", "endpoint": URL,
+            "model_id": self.body["model"],
             "configuration_id": self.configuration_id,
             "configuration_sha256": self.configuration_sha256,
             "credential_profile": self.credential_profile,
@@ -150,6 +159,12 @@ class ModelOutcome:
     cache_observation: dict[str, str | int] = field(
         default_factory=lambda: {"status": "unavailable"},
     )
+    failed_generation: str | None = field(default=None, repr=False)
+    failed_generation_status: Literal[
+        "returned", "absent", "non_string", "invalid_unicode", "not_applicable"
+    ] = (
+        "not_applicable"
+    )
 
     @property
     def executable_tool_calls(self) -> tuple[dict[str, Any], ...]:
@@ -162,7 +177,7 @@ class ModelOutcome:
             raise ModelPreflightError("only a complete tool request can be continued")
         message = {"role": "assistant", "content": self.content,
                    "tool_calls": list(self.tool_calls)}
-        if self.reasoning is not None:
+        if self.reasoning is not None and self.returned_model != QWEN_MODEL:
             message["reasoning"] = self.reasoning
         return message
 
@@ -215,6 +230,75 @@ _MISSING_REQUIRED_TOOL_ARGUMENT = re.compile(
     r"\[missing properties: '(?P<field>[A-Za-z_][A-Za-z0-9_]*)'\]$",
     re.IGNORECASE,
 )
+
+_REQUIRED_FIELD_TYPE_MISMATCH = re.compile(
+    r"^(?:Tool call validation failed: )?(?:tool call validation failed: )?"
+    r"parameters for tool (?P<tool>[A-Za-z_][A-Za-z0-9_]*) did not match schema: "
+    r"errors: \[`/(?P<field>[A-Za-z_][A-Za-z0-9_]*)`: expected "
+    r"(?P<expected>array|object|string|integer|number|boolean), but got "
+    r"(?P<observed>array|object|string|integer|number|boolean|null)\]$",
+    re.IGNORECASE,
+)
+
+_MALFORMED_TOOL_GENERATION_MESSAGE = (
+    "Failed to call a function. Please adjust your prompt. See 'failed_generation' "
+    "for more details."
+)
+
+
+def is_malformed_tool_generation_rejection(error: dict[str, Any] | None) -> bool:
+    """Recognize Groq's exact generic tool-generation rejection, not its draft."""
+    return bool(
+        isinstance(error, dict)
+        and error.get("type") == "invalid_request_error"
+        and error.get("code") == "tool_use_failed"
+        and error.get("message") == _MALFORMED_TOOL_GENERATION_MESSAGE
+    )
+
+
+def classify_required_tool_field_type_mismatch(
+    tools: list[dict[str, Any]], error: dict[str, Any] | None,
+) -> tuple[str, str, str, str] | None:
+    """Identify one provider-rejected top-level argument against its pinned schema.
+
+    This is diagnostic only. Generated arguments are never parsed, coerced or
+    executed from an HTTP error.
+    """
+    if (
+        not isinstance(error, dict)
+        or error.get("type") != "invalid_request_error"
+        or error.get("code") != "tool_use_failed"
+        or not isinstance(error.get("message"), str)
+    ):
+        return None
+    matched = _REQUIRED_FIELD_TYPE_MISMATCH.fullmatch(error["message"])
+    if matched is None:
+        return None
+    tool, field = matched.group("tool", "field")
+    expected = matched.group("expected").lower()
+    observed = matched.group("observed").lower()
+    if expected == observed:
+        return None
+    registered = [
+        item["function"] for item in tools
+        if isinstance(item, dict) and item.get("type") == "function"
+        and isinstance(item.get("function"), dict)
+        and item["function"].get("name") == tool
+    ]
+    if len(registered) != 1:
+        return None
+    schema = registered[0].get("parameters")
+    if (
+        not isinstance(schema, dict) or schema.get("type") != "object"
+        or not isinstance(schema.get("required"), list)
+        or field not in schema["required"]
+        or not isinstance(schema.get("properties"), dict)
+    ):
+        return None
+    property_schema = schema["properties"].get(field)
+    if not isinstance(property_schema, dict) or property_schema.get("type") != expected:
+        return None
+    return tool, field, expected, observed
 
 
 def is_selected_id_null_tool_rejection(error: dict[str, Any] | None) -> bool:
@@ -329,7 +413,8 @@ def _tool_failure_kind(prepared: PreparedCall, error: dict[str, Any] | None) -> 
     return classify_tool_failure_from_tools(prepared.body.get("tools", []), error)
 
 
-def _messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _messages(messages: list[dict[str, Any]], *, replay_reasoning: bool = True,
+              qwen: bool = False) -> list[dict[str, Any]]:
     if not isinstance(messages, list) or not messages:
         raise ModelPreflightError("messages must be a nonempty list")
     cleaned: list[dict[str, Any]] = []
@@ -341,6 +426,9 @@ def _messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         }:
             raise ModelPreflightError("message role is unsupported")
         role = raw["role"]
+        if qwen and role in {"system", "developer"}:
+            raise ModelPreflightError(
+                "Qwen requires pinned instructions as the only leading system message")
         if pending and role != "tool":
             raise ModelPreflightError("every assistant tool call needs its matching result")
         content = raw.get("content")
@@ -364,7 +452,8 @@ def _messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if "reasoning" in raw:
                 if not isinstance(raw["reasoning"], str):
                     raise ModelPreflightError("assistant reasoning must be returned text")
-                entry["reasoning"] = raw["reasoning"]
+                if replay_reasoning:
+                    entry["reasoning"] = raw["reasoning"]
         elif "reasoning" in raw or "tool_calls" in raw:
             raise ModelPreflightError("reasoning and tool calls belong to assistant tool turns")
         if role == "tool":
@@ -448,15 +537,25 @@ class GroqSelectedAdapter:
         if (len(configuration.configuration_sha256) != 64 or
             any(c not in "0123456789abcdef" for c in configuration.configuration_sha256)):
             raise ModelPreflightError("configuration needs an exact SHA-256")
-        if (configuration.provider, configuration.endpoint, configuration.model_id) != (
-            "groq", URL, MODEL,
-        ) or configuration.reasoning_effort not in ("medium", "high") or configuration.include_reasoning is not True:
+        reasoning = {"reasoning_effort": configuration.reasoning_effort}
+        if configuration.model_id == MODEL:
+            reasoning["include_reasoning"] = configuration.include_reasoning
+            if configuration.reasoning_format is not None:
+                reasoning["reasoning_format"] = configuration.reasoning_format
+        elif configuration.model_id == QWEN_MODEL:
+            reasoning["reasoning_format"] = configuration.reasoning_format
+            if configuration.include_reasoning is not None:
+                reasoning["include_reasoning"] = configuration.include_reasoning
+        if (configuration.provider != "groq" or configuration.endpoint != URL
+                or configuration.model_id not in SUPPORTED_MODELS
+                or not supported_reasoning(configuration.model_id, reasoning)):
             raise ModelPreflightError("selected Groq model and supported reasoning must stay pinned",
                                       reasoning_status="unsupported")
         if type(configuration.stream) is not bool:
             raise ModelPreflightError("stream setting must be boolean")
         budget = configuration.max_completion_tokens
-        if type(budget) is not int or not 1 <= budget <= 65536:
+        model_output_limit = 16384 if configuration.model_id == QWEN_MODEL else 65536
+        if type(budget) is not int or not 1 <= budget <= model_output_limit:
             raise ModelPreflightError("output budget must be within selected model limits")
         if phase not in {"collect", "final"}:
             raise ModelPreflightError("phase must be collect or final")
@@ -501,16 +600,22 @@ class GroqSelectedAdapter:
             if source.text is not None:
                 line["text"] = source.text
             source_lines.append(line)
-        cleaned = _messages(messages)
+        qwen = configuration.model_id == QWEN_MODEL
+        cleaned = _messages(messages, replay_reasoning=not qwen, qwen=qwen)
         # Caller messages may contain ordinary task text, but explicit denied source
         # copies are rejected above regardless of whether their route was direct/peer/cache.
         body: dict[str, Any] = {
-            "model": MODEL,
-            "messages": [{"role": "developer", "content": configuration.instructions},
+            "model": configuration.model_id,
+            "messages": [{"role": "system" if qwen else "developer",
+                          "content": configuration.instructions},
                          *cleaned],
-            "reasoning_effort": configuration.reasoning_effort, "include_reasoning": True,
+            "reasoning_effort": configuration.reasoning_effort,
             "max_completion_tokens": budget, "stream": configuration.stream,
         }
+        if configuration.model_id == QWEN_MODEL:
+            body["reasoning_format"] = "parsed"
+        else:
+            body["include_reasoning"] = True
         if source_lines:
             body["messages"].insert(1, {"role": "user", "content": json.dumps(
                 {"source_packets": source_lines}, ensure_ascii=False, separators=(",", ":"),
@@ -543,6 +648,8 @@ class GroqSelectedAdapter:
                 names.add(function["name"])
             if browser_search_seen and configuration.stream:
                 raise ModelPreflightError("browser_search requires a non-streaming response")
+            if browser_search_seen and not model_supports_native_browser(configuration.model_id):
+                raise ModelPreflightError("browser_search is unavailable for selected model")
             if browser_search_seen:
                 body["reasoning_effort"] = "low"
             body.update({"tools": list(tools), "tool_choice": "auto",
@@ -567,7 +674,14 @@ class GroqSelectedAdapter:
                             configuration.configuration_sha256, tuple(refs), body, request_hash,
                             configuration.credential_profile, configuration.quota_domain)
 
-    def invoke(self, prepared: PreparedCall) -> ModelOutcome:
+    def invoke_with_raw(self, prepared: PreparedCall) -> tuple[ModelOutcome, bytes | None]:
+        """Return bounded provider bytes only for an explicitly opted-in caller."""
+        captured: list[bytes] = []
+        outcome = self.invoke(prepared, _raw_success_sink=captured.append)
+        return outcome, captured[0] if captured else None
+
+    def invoke(self, prepared: PreparedCall, *,
+               _raw_success_sink: Callable[[bytes], None] | None = None) -> ModelOutcome:
         if _sha(prepared.body) != prepared.request_sha256:
             raise ModelPreflightError("prepared request changed before dispatch")
         encoded = _encoded(prepared.body)
@@ -602,27 +716,55 @@ class GroqSelectedAdapter:
             except (OSError, ValueError, TypeError, AttributeError):
                 raw_error, error = b"", None
             detail = None
+            failed_generation = None
+            failed_generation_status = "not_applicable"
             if isinstance(error, dict):
                 from ora.retrieval.redact import redact_text
 
                 detail = {key: redact_text(value)[0][:2048] for key in ("type", "code", "message")
                           if isinstance(value := error.get(key), str)}
+                if (
+                    exc.code == 400
+                    and error.get("type") == "invalid_request_error"
+                    and error.get("code") == "tool_use_failed"
+                ):
+                    candidate = error.get("failed_generation")
+                    failed_generation_status = (
+                        "absent" if "failed_generation" not in error else
+                        "returned" if isinstance(candidate, str) else "non_string"
+                    )
+                    if isinstance(candidate, str):
+                        try:
+                            candidate.encode("utf-8")
+                        except UnicodeEncodeError:
+                            failed_generation_status = "invalid_unicode"
+                        else:
+                            failed_generation = candidate
             return replace(failed, error_kind=_tool_failure_kind(prepared, detail) or failed.error_kind,
                            provider_error=detail,
-                           response_sha256=hashlib.sha256(raw_error).hexdigest() if raw_error else None)
+                           response_sha256=hashlib.sha256(raw_error).hexdigest() if raw_error else None,
+                           failed_generation=failed_generation,
+                           failed_generation_status=failed_generation_status)
         except (urllib.error.URLError, TimeoutError, OSError):
             return self._failed(prepared, "transport_error", started)
         if len(raw) > MAX_RESPONSE_BYTES:
             return self._failed(prepared, "response_too_large", started, 502, headers=headers)
         if prepared.body["stream"]:
-            return self.decode_stream(prepared, raw, started=started, headers=headers)
-        try:
-            payload = json.loads(raw)
-        except (ValueError, UnicodeError):
-            return replace(self._failed(prepared, "invalid_json", started, 502, headers=headers),
-                           response_sha256=hashlib.sha256(raw).hexdigest(), partial_response=raw)
-        return self.decode(prepared, payload, started=started, response_sha256=hashlib.sha256(raw).hexdigest(),
-                           headers=headers)
+            outcome = self.decode_stream(prepared, raw, started=started, headers=headers)
+        else:
+            try:
+                payload = json.loads(raw)
+            except (ValueError, UnicodeError):
+                return replace(self._failed(prepared, "invalid_json", started, 502, headers=headers),
+                               response_sha256=hashlib.sha256(raw).hexdigest(), partial_response=raw)
+            outcome = self.decode(
+                prepared, payload, started=started,
+                response_sha256=hashlib.sha256(raw).hexdigest(), headers=headers,
+            )
+        if (_raw_success_sink is not None and outcome.status != "failed"
+                and outcome.error_kind is None):
+            _raw_success_sink(raw)
+        return outcome
 
     def decode_stream(self, prepared: PreparedCall, raw: bytes, *,
                       started: float | None = None,
@@ -750,7 +892,7 @@ class GroqSelectedAdapter:
         if not isinstance(payload, dict):
             return self._failed(prepared, "invalid_response", started, 502)
         returned_model = payload.get("model")
-        if returned_model != MODEL:
+        if returned_model != prepared.body["model"]:
             return self._failed(prepared, "model_mismatch", started, 502,
                                 returned_model=returned_model if isinstance(returned_model, str) else None)
         choices = payload.get("choices")
@@ -788,7 +930,7 @@ class GroqSelectedAdapter:
             base = self._failed(prepared, kind, started, 502, headers=headers)
             return replace(base, response_sha256=response_sha256,
                            response_id=response_id, provider_request_id=request_id,
-                           returned_model=MODEL, finish_reason=finish, content=content,
+                           returned_model=prepared.body["model"], finish_reason=finish, content=content,
                            reasoning=reasoning, reasoning_status=reasoning_status,
                            usage=usage, timings={"wall_seconds": elapsed, **{
                                key: value for key, value in usage.items() if key.endswith("_time")
@@ -840,7 +982,7 @@ class GroqSelectedAdapter:
             except (ValueError, TypeError, KeyError):
                 status = "partial"
         return ModelOutcome(status, prepared.call_id, prepared.attempt_id, prepared.request_sha256,
-                            response_sha256, response_id, request_id, MODEL, finish, content, calls,
+                            response_sha256, response_id, request_id, prepared.body["model"], finish, content, calls,
                             reasoning, reasoning_status, usage, headers or {},
                             {"wall_seconds": elapsed, **{key: value for key, value in usage.items()
                                                           if key.endswith("_time")}},

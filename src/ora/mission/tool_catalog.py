@@ -30,9 +30,16 @@ from ora.contracts.models import (
     SearchEvidenceLibraryInput,
     SearchWebInput,
 )
+from ora.contracts.tool_schema import tool_schema as _plan_schema
 from ora.retrieval.catalog_tools import CATALOG_TOOL_DESCRIPTIONS, CATALOG_TOOL_SCHEMAS
 from ora.retrieval.discovery import available_routes
 
+from .analysis_extended import (
+    EXTENDED_ANALYSIS_TOOL_DESCRIPTIONS,
+    EXTENDED_ANALYSIS_TOOL_PURPOSES,
+    EXTENDED_ANALYSIS_TOOL_SCHEMAS,
+)
+from .analysis_tools import ANALYSIS_TOOL_DESCRIPTIONS, ANALYSIS_TOOL_SCHEMAS
 from .calculation import CALCULATION_TOOL_DESCRIPTION, CALCULATION_TOOL_SCHEMA
 from .observation_tools import OBSERVATION_TOOL_DESCRIPTIONS, OBSERVATION_TOOL_SCHEMAS
 
@@ -45,6 +52,7 @@ CORE_RESEARCH_TOOLS = frozenset(
         "publish_result",
         "board_read",
         "peer_request",
+        "peer_turn",
         "review_peer_answer",
         "read_context_page",
         "read_context_record",
@@ -53,7 +61,8 @@ CORE_RESEARCH_TOOLS = frozenset(
 # These defaults stay granted and requestable when their schemas cannot fit.
 # Explicit peer selections and active skill tools take precedence over deferral.
 DEFERABLE_CORE_TOOLS = frozenset({
-    "search_scholarly", "read_context_record", "peer_request", "review_peer_answer", "board_read",
+    "search_scholarly", "read_context_record", "peer_request", "review_peer_answer",
+    "peer_turn", "board_read",
 })
 CORE_INVITATION_TOOLS = frozenset(
     {"discover_capabilities", "request_capability", "respond_invitation", "read_context_page"}
@@ -61,6 +70,9 @@ CORE_INVITATION_TOOLS = frozenset(
 SOURCE_RECOVERY_TOOLS = frozenset({"read_source_inventory", "select_working_sources"})
 UNHANDLED_COMMON_TOOLS = frozenset({"claim_work", "peer_invite", "subscribe"})
 TOOL_PURPOSES = {
+    **EXTENDED_ANALYSIS_TOOL_PURPOSES,
+    "analyze_values": "Descriptive summaries or independent Welch p-values, degrees of freedom and optional two-sided intervals",
+    "convert_units": "Conversions among supported physical mass, length, time and volume units",
     "read_research_activity": "See peer research questions, searches, progress and gaps before repeating work",
     "retain_evidence": "Curate checked permitted evidence for reuse in later missions",
     "search_evidence_library": "Search retained evidence metadata or select one entry for checked reading",
@@ -89,6 +101,7 @@ TOOL_PURPOSES = {
     "evidence_lookup": "Find current copy's passage IDs and URL",
     "peer_invite": "Low-level invite; use invite_peer",
     "peer_request": "Ask a registered peer",
+    "peer_turn": "Combine bounded peer reply, review and follow-up work",
     "decline_peer_request": "Decline one directed request addressed to this peer",
     "request_capability": "Select permitted tool for next turn",
     "subscribe": "Low-level host subscription",
@@ -105,7 +118,7 @@ TOOL_PURPOSES = {
     "read_note": "Read own task note by ID",
     "read_source_window": "Read exact source window/citation spans",
     "read_source_inventory": "List saved copies and access during recovery",
-    "select_working_sources": "Select copies for next model turn",
+    "select_working_sources": "Choose copies for next model turn if they fit",
     "respond_invitation": "Accept, decline or counter invitation",
     "review_peer_answer": "Review answer to own request",
     "revise_work": "Revise exact current proposal",
@@ -192,6 +205,20 @@ def mission_action_purpose_v3_capability(item: Capability) -> Capability:
     return replace(item, version="3", schema={
         **item.schema,
         "properties": {**item.schema["properties"], "purpose": dict(ACTION_PURPOSE_FIELD_V3)},
+    })
+
+
+def mission_reader_purpose_capability(item: Capability) -> Capability:
+    """Offer an optional public purpose on a new-run reader descriptor only."""
+    if item.tool_id != "read_source_window":
+        return item
+    if item.version != "1" or item.schema != TOOL_SCHEMAS["read_source_window"]:
+        raise ValueError("Reader purpose needs the exact mission v1 schema")
+    return replace(item, version="2", schema={
+        **item.schema,
+        "properties": {
+            **item.schema["properties"], "purpose": dict(ACTION_PURPOSE_FIELD_V3),
+        },
     })
 
 
@@ -305,24 +332,6 @@ LEGACY_ACTIVATE_SKILL_SCHEMA = _schema(
 )
 
 
-def _plan_schema(model) -> dict:
-    """Inline canonical plan definitions for the existing bounded tool validator."""
-    schema = model.model_json_schema(by_alias=False)
-    definitions = schema.get("$defs", {})
-
-    def inline(value):
-        if isinstance(value, list):
-            return [inline(item) for item in value]
-        if not isinstance(value, dict):
-            return value
-        if "$ref" in value:
-            return inline(definitions[value["$ref"].removeprefix("#/$defs/")])
-        return {key: inline(item) for key, item in value.items()
-                if key not in {"$defs", "default", "pattern"}}
-
-    return inline(schema)
-
-
 LEGACY_SAVE_PLAN_SCHEMA = _plan_schema(LegacySavePlanInput)
 PARALLEL_TOOLS = frozenset({"read_research_activity", "retain_evidence", "search_evidence_library"})
 PARALLEL_FETCH_SOURCE_SCHEMA = _plan_schema(FetchSourceInput)
@@ -335,6 +344,8 @@ LEGACY_SAVE_PLAN_DESCRIPTION = (
 
 
 TOOL_SCHEMAS = {
+    **ANALYSIS_TOOL_SCHEMAS,
+    **EXTENDED_ANALYSIS_TOOL_SCHEMAS,
     "read_research_activity": _plan_schema(ReadResearchActivityInput),
     "retain_evidence": _plan_schema(RetainEvidenceInput),
     "search_evidence_library": _plan_schema(SearchEvidenceLibraryInput),
@@ -646,8 +657,55 @@ TOOL_SCHEMAS = {
 }
 TOOL_SCHEMAS.update(CATALOG_TOOL_SCHEMAS)
 TOOL_SCHEMAS.update(OBSERVATION_TOOL_SCHEMAS)
+_PEER_REPORT_FIELDS = {
+    "title": {"type": "string"},
+    "text": {"type": "string"},
+    "citations": {
+        "type": "array", "description": "Exact inspected source/span pairs; [] when none.",
+        "items": _schema({"source_id": {"type": "string"},
+                          "span_id": {"type": "string"}},
+                         ["source_id", "span_id"]),
+    },
+    "limitations": {"type": "array", "items": {"type": "string"}},
+}
+TOOL_SCHEMAS["peer_turn"] = _schema(
+    {
+        "report": _schema(
+            {
+                "kind": {"type": "string", "enum": ["reply", "revision"]},
+                "request_id": {"type": "string", "minLength": 1},
+                "request_version": {"type": "integer", "minimum": 1},
+                **_PEER_REPORT_FIELDS,
+            },
+            ["kind", *_PEER_REPORT_FIELDS],
+        ),
+        "review": _schema(
+            {
+                "request_id": {"type": "string", "minLength": 1},
+                "request_version": {"type": "integer", "minimum": 1},
+                "answer_id": {"type": "string", "minLength": 1},
+                "answer_version": {"type": "integer", "minimum": 1},
+                "disposition": {"type": "string", "enum": ["answered", "partly_answered"]},
+                "reason": {"type": "string", "minLength": 1},
+            },
+            ["request_id", "request_version", "answer_id", "answer_version",
+             "disposition", "reason"],
+        ),
+        "followup_request": _schema(
+            {
+                "target_instance_id": {"type": "string", "minLength": 1},
+                "question": {"type": "string", "minLength": 1},
+                "purpose": dict(ACTION_PURPOSE_FIELD_V3),
+            },
+            ["target_instance_id", "question"],
+        ),
+    },
+    [],
+)
 
 TOOL_DESCRIPTIONS = {
+    **ANALYSIS_TOOL_DESCRIPTIONS,
+    **EXTENDED_ANALYSIS_TOOL_DESCRIPTIONS,
     "read_research_activity": "Read a paged snapshot of this mission's peer questions, planned/running searches, progress and remaining gaps. Use it to complement peers' work; this starts no external retrieval. Follow next_request for omitted entries.",
     "retain_evidence": "Retain selected checked, permitted source copies with a brief relevance note for later missions. This curates evidence; it does not certify scientific conclusions. Candidate search snippets cannot be retained as checked sources.",
     "search_evidence_library": "Search the local evidence library by query for metadata only, or provide one returned entry_id to select a source for reading. Selection rechecks current permissions and returns exact reader references; it does not fetch the web or send source text automatically.",
@@ -677,7 +735,9 @@ TOOL_DESCRIPTIONS = {
     "discover_capabilities": "List this role's tools, purposes and current access. Does not enable tools.",
     "request_capability": "Select an exact request-first local tool_id absent from this request's attached schemas for next turn; call attached tools directly. Does not execute; browser_search is native.",
     "peer_request": "Ask a registered peer by exact instance ID or unique alias/name. "
-    "Include brief context and saved refs. Invite absent roles first.",
+    "Send a complete focused question with your current finding, exact uncertainty "
+    "and saved refs; avoid unfinished clauses. Invite absent roles first.",
+    "peer_turn": "Combine a peer report, exact answer review and independent follow-up in one turn. report.kind=reply keeps your task open and needs request_id/version; report.kind=revision finishes only after this turn's review saves and omits request_id/version. Invalid independent slots do not erase valid ones.",
     "decline_peer_request": "Decline a directed request addressed to you when you cannot answer it. "
     "Use the exact request ID and version from incoming_request, and give a brief reason. "
     "The requester receives your stated reason and chooses how to continue; this does not finish your task.",
@@ -704,18 +764,21 @@ TOOL_DESCRIPTIONS = {
     "read_source_inventory": "Page exact source-copy IDs, versions and use status without source text. "
     "Use inventory_id/version and cursor/limit from a source-free recovery turn. "
     "This lists saved copies; it does not search the web or read their text.",
-    "select_working_sources": "Choose exact saved source copies for the next model turn; "
-    "use source_refs from the inventory and its current expected_version. An empty list is "
-    "allowed. Returns the saved selection; source-use permissions are unchanged.",
-    "publish_result": "Save report and finish peer task. Cite claims with inspected source/span pairs; attribute peer input and include limits. Other work may continue.",
+    "select_working_sources": "Choose exact saved source copies for the next model turn when "
+    "the complete request fits; an oversized choice yields a source-free inventory. "
+    "use source_refs from the inventory and working_sources_expected_version from the "
+    "source-free notice (0 before a first selection). Source and inventory versions are "
+    "separate. An empty list is allowed; source-use permissions are unchanged.",
+    "publish_result": "Save report with inspected source/span citations and limits. Before submitting, verify every claim and limitation against inspected text: nonsignificance is not equivalence or noninferiority; preserve treatment-arm and subgroup qualifiers; missing abstract details are not proven absent from the study. To answer a peer, use the trusted incoming_request.reply.answer_request_id; attribute peer input. Other work may continue.",
     "review_peer_answer": "Review an answer to your request using request_id, answer_id, "
     "disposition answered or partly_answered, and reason. Saves your review, not a report.",
     "read_context_page": "List omitted saved record refs and previews by inclusion_id. "
     "Use a positive item limit and follow next_cursor. For full text, use a supplied "
     "read_request with read_context_record.",
-    "read_context_record": "Read authorized report, message, board or note text in bounded "
-    "windows. Use a supplied read_request or inclusion_id with exact kind/id/version. "
-    "Follow next_request; original sources use checked source readers.",
+    "read_context_record": "Read authorized saved record windows by supplied read_request "
+    "or exact inclusion_id/kind/id/version. Follow next_request; offset=0 with "
+    "next_offset=null ends this saved version, not source coverage. "
+    "Original source text uses read_source_window.",
     "write_note": "Save this actor's task note using note_id and text, with category "
     "note, hypothesis, contradiction, next_action or checkpoint. Use "
     "expected_version 0 for a new note or its exact current version to revise it. "

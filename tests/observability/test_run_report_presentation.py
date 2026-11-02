@@ -41,7 +41,7 @@ def test_failed_attempt_unknown_and_provider_omission_are_visible():
     markdown = render_markdown([row])
     assert "<script>" not in markdown
     assert "120 known tokens" in markdown
-    assert "| 1 | initial | 403 | 1 | Unknown | Unknown | Unknown | unavailable |" in markdown
+    assert "| 1 | initial | synthetic/model | 403 | 1 | Unknown | Unknown | Unknown | unavailable |" in markdown
     assert "Includes the pause before continuation" in output
     assert "Sum of measured HTTP durations: 2 seconds" in output
     assert "first two cases" not in output
@@ -59,6 +59,26 @@ def test_natural_timing_distinguishes_controller_from_shutdown():
     assert "Controller elapsed: 126.288 seconds" in rendered
     assert "Runner through shutdown: 127.195 seconds" in rendered
     assert "post-controller finalization: 0.907 seconds" in rendered
+
+
+def test_per_attempt_model_is_visible_without_guessing_legacy_natural_rows():
+    row = _row()
+    report = row["metrics"]
+    report.update(kind="natural_agent", model_label="mixed", mission_status="active")
+    report["attempts"][0]["model_id"] = "qwen/qwen3.8-27b"
+    report["attempts"][1]["model_id"] = "openai/gpt-oss-120b"
+    markdown = render_markdown([row])
+    html = render_html([row])
+    assert "| 1 | initial | qwen/qwen3.8-27b | 403 |" in markdown
+    assert "| 2 | continuation | openai/gpt-oss-120b | 200 |" in markdown
+    assert "<th>Model</th>" in html
+    assert "<td>qwen/qwen3.8-27b</td>" in html
+    assert "<td>openai/gpt-oss-120b</td>" in html
+    del report["attempts"][0]["model_id"]
+    assert "| 1 | initial | Unknown | 403 |" in render_markdown([row])
+    report["attempts"][0]["model_id"] = "<script>bad</script>"
+    assert "<script>bad</script>" not in render_html([row])
+    assert "&lt;script&gt;bad&lt;/script&gt;" in render_html([row])
 
 
 def test_reported_zero_and_partial_cache_share_remain_distinct():

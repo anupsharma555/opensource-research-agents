@@ -2,7 +2,11 @@
 
 import pytest
 
-from ora.models.token_measurement import measure_tokens
+from ora.models.token_measurement import (
+    input_limit_observation,
+    measure_tokens,
+    read_token_measurement,
+)
 
 MODEL = "synthetic/model"
 
@@ -21,9 +25,68 @@ def test_rate_error_preserves_numeric_admission_separately_from_unknown_usage(st
     assert result["provider_admission_tokens"] == 8200
     assert result["admission_minus_local_estimate"] == 800
     assert result["reported_input_tokens"] is None
+    assert result["provider_admission_scope"] == "combined_tokens_per_minute"
     assert result["usage_minus_local_estimate"] is None
     assert "synthetic-private" not in str(result)
     assert "message" not in result
+
+
+def test_itpm_refusal_preserves_typed_numeric_input_bound_without_account_text():
+    error = {"code": "rate_limit_exceeded", "type": "tokens", "message": (
+        f"Request too large for model `{MODEL}` in organization `synthetic-private` "
+        "on input tokens per minute (ITPM): Limit 7,000, Requested 7,030, try later."
+    )}
+    observation = input_limit_observation(413, error, MODEL)
+    assert observation == {"scope": "input_tokens_per_minute",
+                           "limit_tokens": 7000, "used_tokens": None,
+                           "requested_tokens": 7030}
+    result = measure_tokens(
+        estimate={"tokens": 6980, "basis": "synthetic"}, usage={},
+        http_status=413, provider_error=error, model=MODEL,
+    )
+    assert result["provider_admission_scope"] == "input_tokens_per_minute"
+    assert result["provider_admission_limit_tokens"] == 7000
+    assert result["provider_admission_tokens"] == 7030
+    assert result["admission_minus_local_estimate"] == 50
+    assert result["reported_input_tokens"] is None
+    assert read_token_measurement({"token_measurement": result})[
+        "provider_admission_scope"] == "input_tokens_per_minute"
+    assert "synthetic-private" not in str(result)
+
+
+def test_itpm_parser_accepts_explicit_used_count_without_counting_it_as_usage():
+    error = {"code": "rate_limit_exceeded", "type": "tokens", "message": (
+        f"Request too large for model `{MODEL}` on input tokens per minute "
+        "(ITPM): Limit 7,000, Used 100, Requested 7,030, retry later."
+    )}
+    observed = input_limit_observation(413, error, MODEL)
+    assert observed == {"scope": "input_tokens_per_minute", "limit_tokens": 7000,
+                        "used_tokens": 100, "requested_tokens": 7030}
+    measured = measure_tokens(estimate={"tokens": 6980}, usage={}, http_status=413,
+                              provider_error=error, model=MODEL)
+    assert measured["reported_input_tokens"] is None
+    assert measured["provider_admission_tokens"] == 7030
+
+
+@pytest.mark.parametrize("change", [
+    {"http_status": 429},
+    {"model": "another/model"},
+    {"message": "Request too large for model `synthetic/model` on tokens per minute (TPM): Limit 7000, Requested 7030."},
+    {"message": "Request too large for model `synthetic/model` on output tokens per minute (OTPM): Limit 7000, Requested 7030."},
+    {"message": "Request too large for model `synthetic/model` on input tokens per minute (ITPM): Limit 7000, Requested 6999."},
+    {"message": "Request too large for model `synthetic/model` on input tokens per minute (ITPM): Limit 0, Requested 7030."},
+    {"message": "Request too large for model `synthetic/model` on input tokens per minute (ITPM): Limit 7000, Requested 7030; on input tokens per minute (ITPM): Limit 7000, Requested 7030."},
+])
+def test_itpm_parser_denies_unmatched_or_ambiguous_limits(change):
+    error = {"code": "rate_limit_exceeded", "type": "tokens", "message": (
+        f"Request too large for model `{MODEL}` on input tokens per minute "
+        "(ITPM): Limit 7000, Requested 7030."
+    )}
+    status = change.get("http_status", 413)
+    model = change.get("model", MODEL)
+    error.update({key: value for key, value in change.items()
+                  if key not in {"http_status", "model"}})
+    assert input_limit_observation(status, error, model) is None
 
 
 def test_success_reports_usage_error_without_inventing_provider_admission():

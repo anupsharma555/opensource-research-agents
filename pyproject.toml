@@ -8,7 +8,11 @@ version = "0.1.0"
 description = "Persistent healthcare research agents for literature discovery, evidence synthesis, and peer review in a shared visual workspace."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-dependencies = ["pydantic==2.13.5", "tiktoken==0.11.0", "pillow==12.3.0"]
+dependencies = [
+    "pydantic==2.13.5", "tiktoken==0.11.0", "pillow==13.0.0",
+    "scipy==1.18.1", "pint==0.26.2", "httpx==0.28.1",
+    "tokenizers==0.23.3", "Jinja2==3.1.6",
+]
 
 [project.scripts]
 ora = "ora.cli:main"
@@ -20,7 +24,8 @@ observability = [
 ]
 
 [dependency-groups]
-dev = ["pytest==8.4.2", "ruff==0.14.0"]
+dev = ["pytest==9.0.3", "ruff==0.14.0", "hypothesis==6.170.14"]
+audit = ["pip-audit==2.10.1"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ora"]

@@ -43,6 +43,14 @@ If the user chose daily profile alternation, preserve its local timezone/date
 anchor in the private plan; do not automatically resume work or schedule runs.
 Key rotation is a user selection policy, not evidence that provider quota reset.
 
+For a case that copies code into a private runtime, verify the shared checkout
+before freezing it. During dispatch, check the immutable copied runtime and
+the exact outgoing packet. A per-request hash check of the mutable checkout can
+turn an unrelated concurrent edit into an opening-stage transport uncertainty
+after the budget has reserved tokens. If a local guard blocks before the network
+opener, save explicit blocked-before-effect proof; without that proof, retain the
+unknown-use reservation and do not replay the request as if it never left.
+
 Use existing authorization without repeated confirmation. A user-approved test
 does not silently release unrelated held work. If a selected profile is held,
 make any authorized change specific to the new test IDs, preserve the original

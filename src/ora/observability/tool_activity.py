@@ -55,6 +55,10 @@ def _ref(record: dict) -> dict:
     return {key: record[key] for key in ("kind", "id", "version")}
 
 
+def _effect_id(prefix: str, *parts) -> str:
+    return prefix + hashlib.sha256(canonical(parts).encode()).hexdigest()[:32]
+
+
 def _rows(store: StateStore, kind: str, mission_id: str):
     """Read only current heads in one mission before decoding record bodies."""
     after = ""
@@ -256,6 +260,169 @@ def _accepted_report(store: StateStore, run: dict, turn: dict) -> bool:
                 and producer["body"].get("run_id") == run["id"]
                 and report["body"].get("mission_id") == run["body"]["mission_id"]
                 and report["body"].get("run_id") == run["id"])
+
+
+def _peer_operation(store: StateStore, operation_id: str) -> dict | None:
+    """Read a committed local effect without exposing its request or text."""
+    try:
+        with sqlite3.connect(f"{store.db_path.as_uri()}?mode=ro", uri=True) as db:
+            row = db.execute("SELECT result FROM operations WHERE id=?", (operation_id,)).fetchone()
+        result = json.loads(row[0]) if row else None
+    except (sqlite3.Error, ValueError, TypeError):
+        return None
+    return result if isinstance(result, dict) else None
+
+
+def _peer_work(store: StateStore, run: dict, turn: dict,
+               candidates: list[dict]) -> tuple[dict, dict] | None:
+    matching = []
+    for work in candidates:
+        spec = work["body"].get("spec")
+        if (isinstance(spec, dict) and spec.get("handler_id") == "mission-tool"
+                and spec.get("mission_id") == run["body"].get("mission_id")
+                and spec.get("run_id") == run["id"]
+                and spec.get("actor_id") == turn["actor"]["id"]
+                and spec.get("call_id") == turn["call"]["id"]
+                and spec.get("call_version") == turn["call"]["version"]
+                and spec.get("attempt_id") == turn["intent"]["body"].get("attempt_id")
+                and work["body"].get("phase") == "completed"):
+            artifact = _exact(store, work["body"].get("result_ref"), "executor_artifact")
+            if artifact is not None:
+                matching.append((work, artifact))
+    return matching[0] if len(matching) == 1 else None
+
+
+def _peer_args(tool: dict) -> dict | None:
+    function = tool.get("function")
+    try:
+        args = json.loads(function.get("arguments")) if isinstance(function, dict) else None
+    except (ValueError, TypeError):
+        return None
+    return args if isinstance(args, dict) else None
+
+
+def _peer_turn_statuses(store: StateStore, run: dict, turn: dict, tool: dict,
+                        message: dict | None, work_pair: tuple[dict, dict] | None,
+                        *, published: bool) -> dict[str, str]:
+    """Project whitelisted per-slot states only when their saved effect agrees."""
+    if work_pair is None:
+        return {}
+    args = _peer_args(tool)
+    if args is None or not args or set(args) - {"report", "review", "followup_request"}:
+        return {}
+    work, artifact = work_pair
+    artifact_payload = artifact["body"].get("payload")
+    try:
+        content = json.loads(message["content"]) if message else None
+    except (ValueError, TypeError):
+        content = None
+    source = content if isinstance(content, dict) and content.get("status") == "peer_turn_recorded" else (
+        artifact_payload.get("result") if published and isinstance(artifact_payload, dict) else None
+    )
+    operations = source.get("operations") if isinstance(source, dict) else None
+    if not isinstance(operations, dict):
+        return {}
+    if set(operations) != {key for key, value in args.items() if value is not None}:
+        return {}
+    mission_id = run["body"]["mission_id"]
+    work_id = work["body"]["spec"].get("work_id")
+    statuses = {}
+    for slot, outcome in operations.items():
+        if not isinstance(outcome, dict) or not isinstance(outcome.get("status"), str):
+            return {}
+        status = outcome["status"]
+        selected = args[slot]
+        if slot == "review" and status == "review_saved":
+            op = _peer_operation(store, f"mission-peer-review:{work_id}:peer-turn:review")
+            request = _exact(store, outcome.get("request_ref"), "mail_request")
+            answer_ref = {"kind": "mail_answer", "id": selected.get("answer_id"),
+                          "version": selected.get("answer_version")} if isinstance(selected, dict) else None
+            status = "review_saved" if (
+                isinstance(selected, dict)
+                and isinstance(op, dict) and op.get("request_ref") == outcome.get("request_ref")
+                and request is not None and request["body"].get("mission_id") == mission_id
+                and type(selected.get("request_version")) is int
+                and request["version"] == selected["request_version"] + 1
+                and request["body"].get("requester_id") == turn["actor"]["id"]
+                and request["body"].get("reviewer_id") == turn["actor"]["id"]
+                and request["body"].get("status") == selected.get("disposition")
+                and request["body"].get("review", {}).get("reason") == selected.get("reason")
+                and answer_ref in request["body"].get("answer_refs", [])
+            ) else "unknown"
+        elif slot == "followup_request" and status == "request_saved":
+            request = _exact(store, outcome.get("request_ref"), "mail_request")
+            op = _peer_operation(store, f"mission-peer-request:{outcome.get('request_id')}")
+            status = "request_saved" if (
+                isinstance(op, dict) and op.get("request_ref") == outcome.get("request_ref")
+                and outcome.get("request_id") == _effect_id(
+                    "peer-request-", f"{work_id}:peer-turn:followup_request")
+                and request is not None and request["body"].get("mission_id") == mission_id
+                and request["body"].get("requester_id") == turn["actor"]["id"]
+                and request["body"].get("recipient_id") == outcome.get("recipient_id")
+                and (request["body"].get("cause_ref") or {}).get("id")
+                == turn["call"]["body"].get("task_id")
+            ) else "unknown"
+        elif slot == "report" and status == "reply_linked":
+            answer = _exact(store, outcome.get("answer_ref"), "mail_answer")
+            request = _exact(store, outcome.get("request_ref"), "mail_request")
+            report = _exact(store, outcome.get("report_ref"), "report")
+            op = _peer_operation(store, f"mission-peer-turn-answer:{answer['id']}") if answer else None
+            status = "reply_linked" if (
+                isinstance(selected, dict) and selected.get("kind") == "reply"
+                and isinstance(op, dict) and op.get("answer_ref") == outcome.get("answer_ref")
+                and answer is not None and request is not None and report is not None
+                and type(selected.get("request_version")) is int
+                and request["version"] == selected["request_version"] + 1
+                and answer["id"] == _effect_id(
+                    "peer-answer-", selected.get("request_id"), outcome.get("report_ref"))
+                and report["id"] == _effect_id(
+                    "report-", run["id"], turn["actor"]["id"], work_id)
+                and answer["body"].get("mission_id") == mission_id
+                and answer["body"].get("responder_id") == turn["actor"]["id"]
+                and answer["body"].get("artifact_ref") == outcome.get("report_ref")
+                and answer["body"].get("request_id") == selected.get("request_id")
+                and outcome.get("answer_ref") in request["body"].get("answer_refs", [])
+                and request["body"].get("recipient_id") == turn["actor"]["id"]
+                and report["body"].get("mission_id") == mission_id
+                and report["body"].get("run_id") == run["id"]
+                and report["body"].get("producer_attempt_ref", {}).get("id")
+                == turn["intent"]["body"].get("attempt_id")
+            ) else "unknown"
+        elif slot == "report" and status == "report_saved" and published:
+            status = "accepted_report" if (isinstance(selected, dict)
+                and selected.get("kind") == "revision"
+                and _exact(store, outcome.get("report_ref"), "report") is not None
+                and outcome["report_ref"].get("id") == _effect_id(
+                    "report-", run["id"], turn["actor"]["id"], work_id)
+                and _accepted_report(store, run, turn)) else "unknown"
+        elif status not in {"rejected", "blocked_dependency", "saved_not_linked",
+                            "saved_not_final"}:
+            status = "unknown"
+        statuses[slot] = status
+    return statuses
+
+
+def _peer_revision_board(store: StateStore, run: dict, turn: dict,
+                         tool: dict) -> bool:
+    args = _peer_args(tool)
+    report_args = args.get("report") if args else None
+    if (not isinstance(report_args, dict) or report_args.get("kind") != "revision"
+            or not isinstance(args.get("review"), dict)
+            or not _accepted_report(store, run, turn)):
+        return False
+    attempt = store.get("agent_attempt", turn["intent"]["body"].get("attempt_id"))
+    report_ref = attempt["body"].get("report_ref") if attempt else None
+    proposal = store.get("board_proposal", turn["call"]["body"].get("task_id"))
+    outcome = _exact(store, proposal["body"].get("outcome_ref"), "board_outcome") if proposal else None
+    return bool(
+        proposal and proposal["body"].get("mission_id") == run["body"]["mission_id"]
+        and proposal["body"].get("status") == "completed"
+        and outcome and outcome["body"].get("mission_id") == run["body"]["mission_id"]
+        and (outcome["body"].get("proposal_ref") or {}).get("id") == proposal["id"]
+        and (outcome["body"].get("actor_ref") or {}).get("id") == turn["actor"]["id"]
+        and outcome["body"].get("completes_task") is True
+        and report_ref in outcome["body"].get("result_refs", [])
+    )
 
 
 def _selection(store: StateStore, run: dict, turn: dict,
@@ -526,8 +693,23 @@ def build_tool_activity(store: StateStore, run_id: str) -> dict:
             continue
         exact_result = _result(store, response, tool_id, name)
         result, message = exact_result if exact_result else (None, None)
-        published = name == "publish_result" and _accepted_report(store, run, turn)
         call_key = (turn["call"]["id"], turn["call"]["version"])
+        work_pair = (_peer_work(store, run, turn, works_by_call.get(call_key, ()))
+                     if name == "peer_turn" else None)
+        peer_published_candidate = bool(
+            name == "peer_turn" and work_pair
+            and _peer_revision_board(store, run, turn, tool)
+        )
+        peer_statuses = (_peer_turn_statuses(
+            store, run, turn, tool, message, work_pair,
+            published=peer_published_candidate,
+        ) if name == "peer_turn" else {})
+        published = (
+            name == "publish_result" and _accepted_report(store, run, turn)
+            or peer_published_candidate
+            and peer_statuses.get("report") == "accepted_report"
+            and peer_statuses.get("review") == "review_saved"
+        )
         selected_capability = (
             _selection(store, run, turn, selections_by_call.get(call_key, ()))
             if name == "request_capability" else None
@@ -545,8 +727,18 @@ def build_tool_activity(store: StateStore, run_id: str) -> dict:
         )
         if execution not in {"executed", "accepted_report"}:
             reuse, reuse_basis = "unknown", None
-        if published:
+        if published and name == "publish_result":
             outcome = "completed"
+        elif name == "peer_turn" and work_status == "executed" and peer_statuses:
+            successful = {"reply_linked", "review_saved", "request_saved", "accepted_report"}
+            if all(status in successful for status in peer_statuses.values()):
+                outcome = "completed"
+            elif all(status in {"rejected", "blocked_dependency"}
+                     for status in peer_statuses.values()):
+                outcome = "rejected"
+            else:
+                outcome = "unknown"
+            reuse, reuse_basis = "unknown", None
         elif message is None:
             outcome = "unknown"
         elif name == "peer_request" and execution == "executed" and _saved_peer_request(
@@ -598,6 +790,8 @@ def build_tool_activity(store: StateStore, run_id: str) -> dict:
             "result_in_later_prepared_request": prepared,
             "result_in_later_dispatched_request": dispatched,
             "result_in_later_captured_request": captured,
+            **({"peer_operation_statuses": peer_statuses}
+               if name == "peer_turn" and peer_statuses else {}),
         })
     outcomes = Counter(step["outcome"] for step in steps)
     executions = Counter(step["execution_status"] for step in steps)

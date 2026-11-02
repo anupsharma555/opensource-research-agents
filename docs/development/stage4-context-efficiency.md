@@ -80,12 +80,29 @@ release it. Activation also exposes its associated optional tools. Releasing a
 skill removes those tools only when they are not independently requested.
 Core evidence and collaboration tools remain available.
 
-Every model input includes a compact role capability catalog: the names and
+New runs include a compact role capability catalog: the names and
 purposes of all supported granted tools, plus eligible skill names, purposes
 and active/available states. Unsupported host-internal entries are excluded.
 The model can choose `request_capability` directly from this catalog, without a
 discovery call. Full optional tool schemas and skill instructions still load
 only when selected; the catalog does not grant new permissions.
+
+New starts and follow-ups pin catalog projection v2, which restores the complete
+short tool-purpose map. Saved v1 runs retain their ID-only catalog and obtain
+purposes through discovery; runs without the version field retain their legacy
+full map. Previously saved request bytes are unchanged. A discovery result may
+omit repeated purposes only when every supported purpose exactly matches the
+full v2 catalog in the current pinned instructions. Other discovery details and
+an exact saved-result reader remain available. V1 results use ordinary bounded
+result pages, rather than replacing requested descriptions with only a count.
+
+An archived tool turn can also contain substantive public assistant text.
+`read_context_record` recovers that text through the exact completed-turn record,
+with owner/task lineage and current producing-source permissions and versions
+checked. Long text is paged; missing, empty and withheld text have separate
+statuses. This reader does not expose provider reasoning or rejected tool drafts.
+Offline coverage verifies these delivery and permission boundaries; whether a
+model reads and uses the material requires a separate live behavioral check.
 
 New turns also check whether hit inspection has a usable saved target.
 `inspect_hit` is attached only when a saved retrieval hit is eligible under the
@@ -159,6 +176,16 @@ avoidable overhead first, then check the complete packet and its completion
 reservation. Preserve provider feedback, real rejection repair, explicit run
 ceilings and the configured output cap; never infer that an unseen response
 consumed its full reservation.
+
+A verified Groq input-token-per-minute (ITPM) size refusal supplies a separate
+input bound from the combined TPM response header. The host revalidates its
+model, credential profile and exact request before retaining that bound across
+runs. Newly prepared requests leave at least 128 locally estimated input tokens
+of headroom, or the observed admission discrepancy plus 64 when larger. Both
+the packing preview and final serialized request must fit; a preview must retain
+the same current tool exchange and source inventory as final preparation.
+This protects individual requests. It does not implement a separate cumulative
+ITPM ledger or establish provider acceptance from a local estimate.
 
 Packer v48 pages older web lead cards through their exact saved-result reader
 when a checked source is selected under pressure. It also removes verified
@@ -300,6 +327,23 @@ is a completion subset; an output reservation is not consumption. A rejected
 request without usage remains unknown. Measure complete serialized requests and
 preserve the full capability catalog in before/after checks; a smaller prompt
 alone does not prove fewer turns, lower total usage, or a supported final answer.
+
+Supported Qwen medium-reasoning collection requests use the pinned local
+Tokenizers/Jinja chat-template estimator, including ordered assistant/tool
+history. Its [asset notice](../../src/ora/models/assets/QWEN_TOKENIZER_NOTICE.md)
+records provenance and hashes; no tokenizer is downloaded during a run. Groq's
+private rendering remains unverified, so this is an input estimate, not billing
+or cache-hit evidence. Unsupported settings and final response-schema requests
+retain the labelled byte surrogate. Exact saved requests replay their original
+estimator basis. Partial-template stage measurements may have signed adjustments;
+only the complete request count governs input admission.
+
+New Qwen validation cases pin `qwen_estimate_policy=native_when_supported` in
+their case and HTTP ledger. A resumed case retains its saved policy; an older
+ledger without the field retains `legacy_surrogate`. Continuation combines
+recorded charges without repricing past attempts and rejects policy drift.
+Input packing, output reservation and the aggregate evaluation allowance remain
+separate checks; a better estimate does not increase provider capacity.
 
 Admission estimator v9 also tries a temporary single-copy input when an explicit,
 successfully checked `read_source_window` cannot fit alongside the other selected

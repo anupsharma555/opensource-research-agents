@@ -13,6 +13,7 @@ from ora.mission.tool_catalog import DEFERABLE_CORE_TOOLS
 from ora.models.token_estimate import encode_context_token_ids, estimate_request_tokens
 from ora.state import StateStore
 from ora.state.store import canonical
+from tests.mission.availability_assertions import request_first_names
 from tests.mission.test_service import ROOT, answer, service, tool
 
 
@@ -63,8 +64,10 @@ def test_selected_review_remains_attached_after_pressure_deferral(tmp_path, monk
             agent_ids=["agent-synthesis"],
         ))
         control = host._control(run.run_id, "agent-synthesis")
+        # Keep the full synthetic source in this pressure-deferral fixture;
+        # the current normal catalog moved its exact fit boundary above 8K.
         host._update_control(control, input_budget={
-            "observed_limit_tokens": 8000, "target_fraction": 0.90,
+            "observed_limit_tokens": 8500, "target_fraction": 0.90,
         })
         for _ in range(300):
             host._drive_run(host._run(run.run_id))
@@ -113,8 +116,10 @@ def test_same_checkpoint_measures_carried_deferral_vs_full_menu(tmp_path, monkey
             agent_ids=["agent-synthesis"],
         ))
         control = original._control(run.run_id, "agent-synthesis")
+        # Preserve full source input before comparing the same configuration
+        # across two pressure-deferral branches.
         original._update_control(control, input_budget={
-            "observed_limit_tokens": 8000, "target_fraction": 0.90,
+            "observed_limit_tokens": 8500, "target_fraction": 0.90,
         })
         ordinary_schedule = original._schedule_model
         checkpointed = []
@@ -188,7 +193,11 @@ def test_same_checkpoint_measures_carried_deferral_vs_full_menu(tmp_path, monkey
     carried, baseline = prepared
     assert carried["config_ref"] == baseline["config_ref"]
     assert carried["source_refs"] == baseline["source_refs"]
-    assert carried["packet"]["messages"][1]["content"] == baseline["packet"]["messages"][1]["content"]
+    assert [message["role"] for message in carried["packet"]["messages"]] == [
+        message["role"] for message in baseline["packet"]["messages"]
+    ]
+    for index in (0, 1, 3, 4):
+        assert carried["packet"]["messages"][index] == baseline["packet"]["messages"][index]
     assert carried["packet"]["model"] == baseline["packet"]["model"]
     assert carried["packet"]["max_completion_tokens"] == baseline["packet"]["max_completion_tokens"]
     assert carried["packet"]["reasoning_effort"] == baseline["packet"]["reasoning_effort"]
@@ -204,8 +213,15 @@ def test_same_checkpoint_measures_carried_deferral_vs_full_menu(tmp_path, monkey
     )
     assert set(baseline["budget"]["exposed_tool_ids"]) == baseline["tools"]
     assert baseline["budget"]["deferred_core_tool_ids"] == []
+    for branch in (carried, baseline):
+        availability = json.loads(branch["packet"]["messages"][2]["content"])
+        assert availability["authority"] == "trusted_host_attached_tool_availability"
+        assert set(availability["call_now_local_functions"]) == branch["tools"]
+        assert request_first_names(branch["packet"], availability).isdisjoint(branch["tools"])
+    # Attached-tool notices and the packed context index can change with the
+    # menu. Compare the complete requests and schema cost, not message equality.
+    assert carried["tool_tokens"] < baseline["tool_tokens"]
     assert carried["tokens"] < baseline["tokens"]
-    assert carried["message_tokens"] == baseline["message_tokens"]
     (tmp_path / "attachment-proof.json").write_text(json.dumps({
         "schema": "ora.private_attachment_continuity.v1",
         "provider_socket_calls": 0,
@@ -264,8 +280,10 @@ def test_other_explicit_selection_and_release_keep_catalog_open(tmp_path, monkey
             agent_ids=["agent-synthesis"],
         ))
         control = host._control(run.run_id, "agent-synthesis")
+        # Keep full source and the first pressure-deferral choice available
+        # throughout the selected-tool release sequence.
         host._update_control(control, input_budget={
-            "observed_limit_tokens": 8000, "target_fraction": 0.90,
+            "observed_limit_tokens": 8500, "target_fraction": 0.90,
         })
         original_schedule = host._schedule_model
         raised_target = []

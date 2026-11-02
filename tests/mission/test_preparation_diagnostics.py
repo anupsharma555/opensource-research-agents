@@ -11,7 +11,7 @@ import pytest
 from ora.contracts.models import LiveStartRequest
 from ora.coordination.board import ref
 from ora.mission.context import ContextOverflow
-from ora.mission.tool_catalog import DEFERABLE_CORE_TOOLS
+from ora.mission.tool_catalog import TOOL_SCHEMAS
 from ora.models.token_estimate import TOKENIZER_BASIS
 from tests.mission.test_service import answer, drain, service
 
@@ -211,7 +211,9 @@ def test_complete_rejected_preview_saves_stage_counts_without_intent_or_dispatch
         assert host._repair_oversize(control, host._work_for(control), capacity)
         control = host._control(run.run_id, "agent-synthesis")
         host._update_control(
-            control, requested_capabilities=sorted(DEFERABLE_CORE_TOOLS),
+            # Explicitly selected function schemas cannot all fit this small
+            # observed window, even after optional context has been packed.
+            control, requested_capabilities=sorted(set(TOOL_SCHEMAS) - {"browser_search"}),
             feedback={"status": "synthetic_followup",
                       "next_action": "Review all required source handles. " * 80},
         )

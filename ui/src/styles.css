@@ -497,7 +497,7 @@ textarea, .request-layout select { width: 100%; border: 1px solid #cbd9ce; borde
 .live-agent-option { border-top: 1px solid #e4ece3; padding: 8px 0; }
 .live-agent-option details { margin: 5px 0 0 23px; }
 .live-agent-picker .live-required-option { margin: 6px 0 0 23px; color: #244c36; }
-.live-agent-picker small { color: #79917d; }
+.live-agent-picker small { color: #526e5c; }
 .live-call-inspector { margin-top: 22px; border-top: 1px solid #e2eae0; padding-top: 16px; }
 .live-call-scan { color: #476651; font-size: 12px; margin: 3px 0 10px; }
 .live-call-tool { border-left: 2px solid #dbe8da; margin: 9px 0; padding: 6px 0 6px 10px; }

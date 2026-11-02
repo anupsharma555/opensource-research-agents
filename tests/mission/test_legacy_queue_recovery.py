@@ -11,6 +11,9 @@ from ora.coordination.board import ref
 from ora.models.token_estimate import TOKENIZER_BASIS, estimate_request_tokens
 from tests.mission.test_service import answer, service
 
+# High enough for the rebuilt full catalog, below the saved legacy request.
+SYNTHETIC_OBSERVED_TOKEN_LIMIT = 10_000
+
 
 def old_overlimit_call(tmp_path, monkeypatch):
     sent = []
@@ -41,7 +44,8 @@ def old_overlimit_call(tmp_path, monkeypatch):
     )
     original_hash = intent["body"]["request_sha256"]
     assert intent["body"]["source_refs"] == source_refs
-    assert math.ceil(intent["body"]["blob"]["size"] / 4 * 1.25) > 8000
+    assert (math.ceil(intent["body"]["blob"]["size"] / 4 * 1.25)
+            > SYNTHETIC_OBSERVED_TOKEN_LIMIT)
 
     def old_estimate(tx):
         current = tx.get("capacity_operation", capacity_id)
@@ -53,15 +57,15 @@ def old_overlimit_call(tmp_path, monkeypatch):
     host.store.transact("synthetic-old-capacity", {}, old_estimate)
     assert len(host.capacity.reestimate_legacy_pending_models()) == 1
     capacity = host.capacity.get(capacity_id)
-    assert capacity["estimated_tokens"] > 8000
+    assert capacity["estimated_tokens"] > SYNTHETIC_OBSERVED_TOKEN_LIMIT
     host.capacity.observe_headers(
         spec.quota_scopes[0], remaining_requests=100, remaining_tokens=100,
-        token_limit=8000, reset_after_tokens=60,
+        token_limit=SYNTHETIC_OBSERVED_TOKEN_LIMIT, reset_after_tokens=60,
         observed_at=host.store.clock(),
     )
     status = host.capacity.legacy_overlimit_status(capacity_id, work["id"])
     assert status["status"] == "replan_allowed"
-    assert status["per_request_limit"] == 8000
+    assert status["per_request_limit"] == SYNTHETIC_OBSERVED_TOKEN_LIMIT
     assert sent == []
     return host, run, control, work, capacity_id, intent, original_hash, source_refs, selected_passages, sent
 
@@ -80,7 +84,9 @@ def test_legacy_overlimit_replans_without_mutating_saved_input(tmp_path, monkeyp
         assert current["body"]["phase"] == "ready_model"
         assert current["body"]["source_refs"] == source_refs
         assert current["body"]["selected_passage_refs"] == selected_passages
-        assert current["body"]["input_budget"]["observed_limit_tokens"] == 8000
+        assert current["body"]["input_budget"]["observed_limit_tokens"] == (
+            SYNTHETIC_OBSERVED_TOKEN_LIMIT
+        )
         assert host._schedule_model(current)
         new_call_ref = host._control(run.run_id, "agent-synthesis")["body"]["call_ref"]
         assert new_call_ref != control["body"]["call_ref"]
@@ -91,7 +97,7 @@ def test_legacy_overlimit_replans_without_mutating_saved_input(tmp_path, monkeyp
         request_bytes = host.store.read_blob(new_intent["body"]["blob"]["sha256"])
         estimate = estimate_request_tokens(request_bytes)
         assert estimate.basis == TOKENIZER_BASIS
-        assert estimate.tokens <= 8000
+        assert estimate.tokens <= SYNTHETIC_OBSERVED_TOKEN_LIMIT
         assert new_intent["body"]["request_token_estimate"] == {
             "tokens": estimate.tokens,
             "basis": estimate.basis,
@@ -106,9 +112,11 @@ def test_legacy_overlimit_replans_without_mutating_saved_input(tmp_path, monkeyp
         assert decisions[0]["allowed_for_model"] is True
         assert decisions[0]["use"] == "permitted"
         assert decisions[0]["unknown_policy"] == "reject"
-        assert host.store.get("mission_call_budget", new_call_ref["id"])["body"][
-            "source_turn_mode"
-        ] == "all_allowed_sources_fit"
+        new_budget = host.store.get("mission_call_budget", new_call_ref["id"])["body"]
+        assert new_budget["request_stage_token_estimate"]["estimated_demand_tokens"] <= (
+            SYNTHETIC_OBSERVED_TOKEN_LIMIT
+        )
+        assert new_budget["source_turn_mode"] == "all_allowed_sources_fit"
         assert sent == []
     finally:
         host.close()

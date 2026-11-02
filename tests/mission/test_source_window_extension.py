@@ -34,6 +34,7 @@ def test_requested_abstract_window_enters_fitting_exact_model_input(
     abstract = "DOI: 10.1234/window-extension. "
     abstract += "A" * (2661 - len(abstract))
     requests = []
+    fixture_errors = []
 
     def model_transport(request, *, timeout):
         body = json.loads(request.data)
@@ -53,8 +54,29 @@ def test_requested_abstract_window_enters_fitting_exact_model_input(
         ]
         prior = json.loads(tool_messages[-1]["content"]) if tool_messages else None
         if turn == 2:
-            assert prior is not None
-            return tool("inspect_hit", {"hit_id": prior["hits"][0]["hit_id"]}, turn)
+            if prior is not None:
+                hit_id = prior["hits"][0]["hit_id"]
+            else:
+                index = json.loads(body["messages"][-1]["content"])
+                if "latest_search_navigation" in index:
+                    navigation = index["latest_search_navigation"]
+                    assert navigation["status"] == "saved_search_leads_not_checked_source_text"
+                else:
+                    latest = index["recent_scholarly_searches"][-1]
+                    response = store.records("model_response_receipt")[0]
+                    assert latest["response_ref"] == {
+                        key: response[key] for key in ("kind", "id", "version")
+                    }
+                    navigation = {**latest["search"], "result_ref": latest["result_ref"]}
+                    assert navigation["status"] == "saved_tool_observation_not_evidence_use"
+                assert navigation["outcome"] == "success"
+                assert len(navigation["first_hit_ids"]) == 1
+                saved = store.get(**navigation["result_ref"])
+                original = json.loads(store.read_blob(saved["body"]["blob"]["sha256"]))
+                hit_id = navigation["first_hit_ids"][0]
+                assert hit_id == json.loads(original["content"])["hits"][0]["hit_id"]
+            assert "inspect_hit" in {item["function"]["name"] for item in body["tools"]}
+            return tool("inspect_hit", {"hit_id": hit_id}, turn)
         if turn == 3:
             assert prior is not None
             saved_result = store.get(**prior["saved_tool_result_ref"])
@@ -118,14 +140,23 @@ def test_requested_abstract_window_enters_fitting_exact_model_input(
 
     monkeypatch.setenv("GROQ_API_KEY", "synthetic-token")
     store = StateStore(tmp_path)
+
+    def checked_model_transport(*args, **kwargs):
+        try:
+            return model_transport(*args, **kwargs)
+        except (AssertionError, KeyError, StopIteration) as exc:
+            fixture_errors.append(exc)
+            raise
+
     session = ModelSession(store, ROOT, adapter=GroqSelectedAdapter(
-        ROOT, transport=model_transport,
+        ROOT, transport=checked_model_transport,
     ))
     host = MissionService(
         ROOT, tmp_path, model_session=session,
         discovery_transport=discovery_transport,
         execution_mode="offline_test", start_supervisor=False,
     )
+    host._fixture_transport_errors = fixture_errors
     try:
         run = host.start(LiveStartRequest(
             request_id=f"window-extension-{requested}",
@@ -150,7 +181,7 @@ def test_requested_abstract_window_enters_fitting_exact_model_input(
             assert len(receipts) == 3
             assert all(item["body"]["status"] == "tool_requested" for item in receipts)
             assert [item["body"]["usage"]["total_tokens"] for item in receipts] == [11] * 3
-            quota = store.get("capacity_quota", "groq-selected")
+            quota = store.get("capacity_quota", "model:groq-selected:openai/gpt-oss-120b")
             assert quota["body"]["observed_token_limit"] == 8000
             assert pending["estimated_tokens"] <= 8000
             assert pending["estimated_tokens"] + 33 > 8000

@@ -41,5 +41,9 @@ jobs:
         run: scripts/dev check
       - name: Exercise the portable repository skill helper
         run: .venv/bin/python .agents/skills/os-check-foundation/scripts/check.py --mode smoke
+      - name: Install the pinned browser and its OS prerequisites
+        run: scripts/dev browser-install --with-deps
+      - name: Verify the synthetic Atlas browser journeys
+        run: scripts/dev browser
       - name: Review intended tracked content
         run: .venv/bin/python scripts/check-publication.py

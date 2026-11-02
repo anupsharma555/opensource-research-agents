@@ -83,6 +83,10 @@ def test_v1_saved_calls_keep_full_save_revisions_without_new_modify_grant(tmp_pa
         r = tx.get('mission_run', run.run_id)
         body = r['body']
         body.pop('planning_tool_version')
+        # This saved planning-v1 run predates parallel tool catalogs. Leaving
+        # the new run's parallel pin would select its current planning schema.
+        body.pop('parallel_research_version', None)
+        body.pop('reader_action_purpose_tool_version', None)
         for catalog in body['skill_catalog'].values():
             catalog['task-planning'] = _pin(legacy_planning_skill(ROOT), True)
         return ref(tx.put('mission_run', run.run_id, body, expected_version=r['version']))

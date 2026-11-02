@@ -38,11 +38,11 @@ def test_groq_usage_rejects_invalid_totals_and_skips_invalid_optional_details():
 @pytest.mark.parametrize(("detail", "expected"), [
     ({"cached_tokens": 40}, {"status": "reported_hit", "cached_tokens": 40}),
     ({"cached_tokens": 0}, {"status": "reported_zero", "cached_tokens": 0}),
-    ({}, {"status": "not_reported"}),
-    ({"cached_tokens": None}, {"status": "malformed"}),
-    ({"cached_tokens": True}, {"status": "malformed"}),
-    ({"cached_tokens": 101}, {"status": "malformed"}),
-    ({"cached_tokens": -1}, {"status": "malformed"}),
+    ({}, {"status": "not_reported", "field_presence": "cached_tokens_absent"}),
+    ({"cached_tokens": None}, {"status": "malformed", "field_presence": "cached_tokens_null"}),
+    ({"cached_tokens": True}, {"status": "malformed", "field_presence": "cached_tokens_invalid"}),
+    ({"cached_tokens": 101}, {"status": "malformed", "field_presence": "cached_tokens_invalid"}),
+    ({"cached_tokens": -1}, {"status": "malformed", "field_presence": "cached_tokens_invalid"}),
 ])
 def test_cache_observation_distinguishes_reported_absent_and_malformed(detail, expected):
     raw = {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
@@ -55,18 +55,18 @@ def test_cache_observation_unavailable_without_valid_usage():
     assert observe_groq_cache({"prompt_tokens": True}) == {"status": "unavailable"}
     assert observe_groq_cache({
         "prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
-    }) == {"status": "not_reported"}
+    }) == {"status": "not_reported", "field_presence": "details_absent"}
     assert observe_groq_cache({
         "prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
         "prompt_tokens_details": None,
-    }) == {"status": "not_reported"}
+    }) == {"status": "not_reported", "field_presence": "details_null"}
 
 
 @pytest.mark.parametrize(("cached", "expected_observation"), [
     (40, {"status": "reported_hit", "cached_tokens": 40}),
     (0, {"status": "reported_zero", "cached_tokens": 0}),
-    (None, {"status": "not_reported"}),
-    ("invalid", {"status": "malformed"}),
+    (None, {"status": "not_reported", "field_presence": "details_absent"}),
+    ("invalid", {"status": "malformed", "field_presence": "cached_tokens_invalid"}),
 ])
 def test_streamed_final_usage_keeps_cache_field_quality(
     tmp_path, cached, expected_observation,

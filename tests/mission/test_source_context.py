@@ -12,8 +12,9 @@ from ora.mission.source_context import (
     save_source_inventory,
     save_working_sources,
     source_inventory_page,
+    working_source_selection_state,
 )
-from ora.state import StateStore
+from ora.state import StateConflict, StateStore
 from ora.state.store import canonical
 
 
@@ -109,6 +110,9 @@ def test_oversize_sources_get_exact_inventory_then_peer_selects_subset(tmp_path)
     first = source(store, "intake-a", "a", "A" * 3000)
     second = source(store, "intake-b", "b", "A small independent observation.")
     control_ref = control(store, [first, second])
+    assert working_source_selection_state(store, control_ref) == {
+        "expected_version": 0, "selection_ref": None, "selected_source_refs": [],
+    }
     plan = plan_source_turn(store, control_ref, source_input_allowance_tokens=300)
     assert plan["mode"] == "source_free_recovery"
     assert plan["reason"] == "exact_source_text_exceeds_allowance"
@@ -148,6 +152,16 @@ def test_oversize_sources_get_exact_inventory_then_peer_selects_subset(tmp_path)
         selected_source_refs=[second],
     )
     assert chosen["version"] == 1
+    assert working_source_selection_state(store, control_ref) == {
+        "expected_version": 1, "selection_ref": chosen,
+        "selected_source_refs": [second],
+    }
+    with pytest.raises(StateConflict, match="Working-source selection changed"):
+        save_working_sources(
+            store, "stale-working-choice", control_ref=control_ref,
+            response_ref=response(store, "call-2"), selected_source_refs=[first],
+            expected_version=0,
+        )
     selected = plan_source_turn(store, control_ref, source_input_allowance_tokens=300)
     assert selected["mode"] == "model_working_set"
     assert [item["copy_ref"] for item in selected["source_inputs"]] == [second]

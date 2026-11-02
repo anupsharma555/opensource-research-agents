@@ -10,7 +10,7 @@ import { LiveRequestForm } from './LiveRequestForm';
 import sample from '../public/sample-run.json';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: vi.fn(() => true) }));
-afterEach(() => { cleanup(); window.sessionStorage.removeItem('atlas-live-draft:synthetic-workspace'); vi.clearAllMocks(); vi.mocked(isTauri).mockReturnValue(true); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); window.sessionStorage.removeItem('atlas-live-draft:synthetic-workspace'); vi.clearAllMocks(); vi.mocked(isTauri).mockReturnValue(true); });
 
 const agents: LiveAgent[] = [
   { id: 'agent-synthesis', name: 'Sage', role: 'Evidence synthesis', skillVersion: 'synthesis-v1' },
@@ -69,7 +69,7 @@ it('restores and saves the unsent native question, evidence, and peer choices', 
   expect(screen.getByLabelText('Pasted source evidence')).toHaveValue(draft.evidenceText);
   expect(screen.getByRole('checkbox', { name: "Wait for Mira's contribution before completing this request" })).toBeChecked();
   await waitFor(() => expect(writes.length).toBeGreaterThan(0));
-  expect(JSON.parse(writes.at(-1)!)).toEqual({ ...draft, credentialChoice: 'default' });
+  expect(JSON.parse(writes.at(-1)!)).toEqual({ ...draft, runMode: 'review', credentialChoice: 'default' });
   expect(onSubmit).not.toHaveBeenCalled();
 });
 
@@ -253,7 +253,7 @@ it.each([
   await waitFor(() => expect(saves).toBe(1));
   if (firstResult instanceof Error) {
     expect(screen.getByLabelText('Research question or follow-up')).toHaveValue(recovered.question);
-    expect(savedPayload).toEqual({ ...recovered, credentialChoice: 'default' });
+    expect(savedPayload).toEqual({ ...recovered, runMode: 'solo', credentialChoice: 'default' });
   }
   expect(loads).toBe(2);
   expect(onSubmit).not.toHaveBeenCalled();
@@ -285,4 +285,31 @@ it('saves the frozen request ID before sending and retries that ID after storage
   await userEvent.setup().click(screen.getByRole('button', { name: 'Retry same request' }));
   await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
   expect(onSubmit).toHaveBeenCalledWith(first);
+});
+
+it('saves the browser frozen request before the submission handler can dispatch it', async () => {
+  vi.mocked(isTauri).mockReturnValue(false);
+  const user = userEvent.setup();
+  let savedAtDispatch: LiveStartRequest | null = null;
+  const onSubmit = vi.fn(async (request: LiveStartRequest | LiveFollowupRequest) => {
+    savedAtDispatch = JSON.parse(window.sessionStorage.getItem('atlas-live-draft:synthetic-workspace')!).pendingRequest;
+    expect(savedAtDispatch).toEqual(request);
+  });
+  render(form(onSubmit));
+  await user.type(screen.getByLabelText('Research question or follow-up'), 'Synthetic browser request.');
+  await user.click(screen.getByRole('button', { name: 'Start research' }));
+  expect(onSubmit).toHaveBeenCalledTimes(1);
+  expect(savedAtDispatch).not.toBeNull();
+});
+
+it('does not dispatch a browser command if its frozen identity cannot be saved', async () => {
+  vi.mocked(isTauri).mockReturnValue(false);
+  const user = userEvent.setup();
+  const onSubmit = vi.fn(async () => {});
+  render(form(onSubmit));
+  await user.type(screen.getByLabelText('Research question or follow-up'), 'Synthetic browser request.');
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Synthetic quota failure', 'QuotaExceededError'); });
+  await user.click(screen.getByRole('button', { name: 'Start research' }));
+  expect(onSubmit).not.toHaveBeenCalled();
+  expect(screen.getByText(/This draft could not be saved/)).toBeVisible();
 });

@@ -10,6 +10,7 @@ import json
 import mimetypes
 import re
 import secrets
+import threading
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -24,8 +25,10 @@ from ora.contracts.models import (
     LiveStartRequest,
     LiveUserInputRequest,
 )
+from ora.live.updates import stream_updates, supports_updates
 
 MAX_BODY_BYTES = 1_048_576
+MAX_UPDATE_STREAMS = 8
 
 
 class LocalResearchServer(ThreadingHTTPServer):
@@ -35,8 +38,18 @@ class LocalResearchServer(ThreadingHTTPServer):
         self.research_host = host
         self.web_root = web_root.resolve()
         self.token = secrets.token_urlsafe(32)
+        self.updates_stopped = threading.Event()
+        self.update_slots = threading.BoundedSemaphore(MAX_UPDATE_STREAMS)
         super().__init__(("127.0.0.1", port), ResearchHandler)
         self.origin = f"http://127.0.0.1:{self.server_port}"
+
+    def shutdown(self):
+        self.updates_stopped.set()
+        super().shutdown()
+
+    def server_close(self):
+        self.updates_stopped.set()
+        super().server_close()
 
     @property
     def launch_url(self):
@@ -50,7 +63,8 @@ class ResearchHandler(BaseHTTPRequestHandler):
         # Paths, headers and request bodies may contain private research details.
         pass
 
-    def _headers(self, status, content_type="application/json", *, cookie=False, length=0):
+    def _headers(self, status, content_type="application/json", *, cookie=False, length=0,
+                 updates=False):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(length))
@@ -60,15 +74,22 @@ class ResearchHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; "
                          "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
                          "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+        if updates and supports_updates(self.server.research_host):
+            self.send_header("X-Atlas-Updates", "sqlite-invalidation-v1")
         if cookie:
             self.send_header("Set-Cookie", f"ora_session={self.server.token}; "
                              "HttpOnly; SameSite=Strict; Path=/")
         self.end_headers()
 
-    def _json(self, status, value, *, cookie=False):
+    def _json(self, status, value, *, cookie=False, updates=False):
         payload = json.dumps(value, ensure_ascii=False).encode("utf-8")
-        self._headers(status, cookie=cookie, length=len(payload))
-        self.wfile.write(payload)
+        try:
+            self._headers(status, cookie=cookie, length=len(payload), updates=updates)
+            self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError):
+            # Obsolete viewer GETs are intentionally aborted. A lost response
+            # does not undo a saved command or justify another error response.
+            self.close_connection = True
 
     def _local_origin(self):
         if self.headers.get("Host") != urlsplit(self.server.origin).netloc:
@@ -114,12 +135,15 @@ class ResearchHandler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/api/"):
             if not self._authenticated():
                 return self._json(401, {"error": "Open this app through the local live launcher."})
+            if parsed.path == "/api/live/updates":
+                return stream_updates(self)
             try:
                 query = parse_qs(parsed.query)
                 run_id = query.get("runId", [None])[0]
                 if parsed.path == "/api/live/state":
                     state = self.server.research_host.state(run_id)
-                    return self._json(200, state.model_dump(by_alias=True, mode="json"))
+                    return self._json(200, state.model_dump(by_alias=True, mode="json"),
+                                      updates=True)
                 if parsed.path == "/api/live/calls":
                     if not run_id:
                         raise ValueError("A runId is required to inspect calls.")

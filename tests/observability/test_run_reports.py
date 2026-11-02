@@ -98,6 +98,9 @@ def test_natural_report_joins_saved_receipt_to_exact_validation_ledger(tmp_path)
     assert report["timing"]["measured_http_seconds_sum"] == 1
     assert report["attempts"][0]["http_duration_seconds"] == 1
     assert report["attempts"][0]["cache_observation"] == "reported_hit"
+    assert report["model_label"] == "openai/gpt-oss-120b"
+    assert report["attempts"][0]["model_id"] == "openai/gpt-oss-120b"
+    assert report["attempts"][0]["actor_id"] == "actor-a"
     assert "private.example" not in json.dumps(report)
     assert "secret-value" not in json.dumps(report)
     assert "response_sha256" not in json.dumps(report)
@@ -128,6 +131,125 @@ def test_natural_report_joins_saved_receipt_to_exact_validation_ledger(tmp_path)
     _save(case_dir / "budget.json", budget)
     with pytest.raises(StateError, match="ledger disagree"):
         load_run_report(case_dir, kind="natural_agent")
+
+
+def _per_agent_model_case(tmp_path, call_models, *, budget_models=None,
+                          unmatched_error_model=None):
+    case_dir = tmp_path / "per-agent"
+    store = StateStore(case_dir / "state")
+    _put(store, "mission_run", "run-models", {
+        "mission_id": "mission-models", "question": "Assess synthetic evidence.",
+        "status": "completed",
+    })
+    budget_models = budget_models or call_models
+    rows = []
+    for index, (call_model, budget_model) in enumerate(
+        zip(call_models, budget_models, strict=True), 1,
+    ):
+        actor_id = f"actor-{index}"
+        request_hash = chr(ord("a") + index) * 64
+        response_hash = chr(ord("c") + index) * 64
+        _put(store, "agent_instance", actor_id, {
+            "mission_id": "mission-models", "run_id": "run-models",
+        })
+        call = _put(store, "agent_call", f"call-{index}", {
+            "mission_id": "mission-models", "instance_id": actor_id,
+            "task_id": f"task-{index}", "model_id": call_model,
+        })
+        intent = _put(store, "model_request_intent", f"intent-{index}", {
+            "mission_id": "mission-models", "call_ref": _ref(call),
+            "request_sha256": request_hash,
+        })
+        _put(store, "model_response_receipt", f"model-response:intent-{index}", {
+            "mission_id": "mission-models", "intent_ref": _ref(intent),
+            "request_sha256": request_hash, "response_sha256": response_hash,
+            "status": "complete", "usage": {
+                "prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150,
+            },
+        })
+        rows.append({
+            **_budget_row(index, 200, request=request_hash,
+                          response=response_hash, actual_tokens=150,
+                          start=1000.0 + 2 * index, end=1001.0 + 2 * index),
+            "model": budget_model,
+        })
+    if unmatched_error_model is not None:
+        rows.append({
+            **_budget_row(len(rows) + 1, 429, request="f" * 64,
+                          response=None, start=1000.0 + 2 * (len(rows) + 1),
+                          end=1001.0 + 2 * (len(rows) + 1)),
+            "model": unmatched_error_model,
+        })
+    budget = _budget(rows)
+    _save(case_dir / "budget.json", budget)
+    _save(case_dir / "case.json", {
+        "run_id": "run-models", "question": "Assess synthetic evidence.",
+        "model": "openai/gpt-oss-120b", "model_selection": "per_agent",
+        "agent_model_bindings": {
+            "agent-synthesis": {"model": (
+                call_models[0] if call_models else "openai/gpt-oss-120b"
+            )},
+            "agent-critique": {"model": (
+                call_models[1] if len(call_models) > 1 else "qwen/qwen3.8-27b"
+            )},
+        },
+        "credential_profile": "synthetic_profile",
+    })
+    _save(case_dir / "observation.json", {
+        "run_id": "run-models", "outcome": "completed",
+        "mission_status": "completed", "model_attempts": len(rows),
+        "retrieval_attempts": 0, "elapsed_seconds": 10.0,
+        "controller_elapsed_seconds": 9.0,
+        "post_controller_finalization_seconds": 1.0,
+    })
+    record_evaluation_observation(store, "run-models", budget, "completed", 9.0)
+    return case_dir
+
+
+@pytest.mark.parametrize("models, expected", [
+    (["qwen/qwen3.8-27b", "qwen/qwen3.8-27b"], "qwen/qwen3.8-27b"),
+    (["openai/gpt-oss-120b", "qwen/qwen3.8-27b"], "mixed"),
+    (["openai/gpt-oss-120b"], "openai/gpt-oss-120b"),
+])
+def test_natural_report_labels_models_actually_sent(tmp_path, models, expected):
+    case_dir = _per_agent_model_case(tmp_path, models)
+    report = load_run_report(case_dir, kind="natural_agent")
+    assert report["model_label"] == expected
+    assert [row["model_id"] for row in report["attempts"]] == models
+    assert [row["actor_id"] for row in report["attempts"]] == [
+        f"actor-{index}" for index in range(1, len(models) + 1)
+    ]
+    assert all(row["model_evidence"] == "saved_call_and_http_ledger"
+               for row in report["attempts"])
+    assert report["usage"]["input"]["reported_tokens"] == 100 * len(models)
+
+
+def test_per_agent_case_without_http_has_no_inferred_gpt_model(tmp_path):
+    case_dir = _per_agent_model_case(tmp_path, [])
+    report = load_run_report(case_dir, kind="natural_agent")
+    assert report["model_label"] == "no-model-attempt"
+    assert report["attempts"] == []
+
+
+def test_natural_report_rejects_budget_model_that_contradicts_saved_call(tmp_path):
+    case_dir = _per_agent_model_case(
+        tmp_path, ["qwen/qwen3.8-27b"],
+        budget_models=["openai/gpt-oss-120b"],
+    )
+    with pytest.raises(StateError, match="Budget model differs"):
+        load_run_report(case_dir, kind="natural_agent")
+
+
+def test_unmatched_error_declares_sent_model_without_inventing_actor(tmp_path):
+    case_dir = _per_agent_model_case(
+        tmp_path, [], unmatched_error_model="qwen/qwen3.8-27b",
+    )
+    report = load_run_report(case_dir, kind="natural_agent")
+    assert report["model_label"] == "qwen/qwen3.8-27b"
+    assert report["attempts"][0]["model_id"] == "qwen/qwen3.8-27b"
+    assert report["attempts"][0]["model_evidence"] == "http_ledger_only"
+    assert "actor_id" not in report["attempts"][0]
+    assert report["attempts"][0]["usage_status"] != "reported"
 
 
 def test_direct_wire_probe_keeps_reported_zero_distinct_from_unknown(tmp_path):

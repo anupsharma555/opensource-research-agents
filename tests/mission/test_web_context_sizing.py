@@ -120,7 +120,23 @@ def test_web_operation_and_five_candidates_survive_capability_turns(tmp_path, mo
             digest = page["projection_sha256"]
         detail = json.loads("".join(chunks))
         assert len(detail["available_results"]) == 5
-        assert all(entry["result"]["hits"][0]["discovery_routes"] for entry in detail["available_results"])
+        visible_hits = {
+            hit["hit_id"] for entry in _result(packets[4], "read_search_results")[
+                "available_results"
+            ] for hit in entry["result"]["hits"]
+        }
+        assert {entry["result"]["hits"][0]["hit_id"] for entry in detail[
+            "available_results"
+        ]} == visible_hits
+        for entry in detail["available_results"]:
+            assert entry["provider"] == "exa"
+            assert entry["query"] == "synthetic public guidance"
+            assert entry["result"]["shared_projection"] is True
+            hit = entry["result"]["hits"][0]
+            assert hit["route"] == "exa.search"
+            saved_hit = host.store.get(**hit["hit_ref"])
+            assert saved_hit["id"] == hit["hit_id"]
+            assert host.store.get(**saved_hit["body"]["shared_origin_ref"]) is not None
         with pytest.raises(ContextError, match="another peer task"):
             host.context.read_tool_result(
                 **{**scope, "actor_id": "different-peer"}, result_id=saved["id"],

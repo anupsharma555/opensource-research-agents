@@ -1,0 +1,304 @@
+{
+  "title": "Understanding the Structure of OSRA Agents",
+  "saved_at": "2026-10-21T13:22:53-04:00",
+  "timezone": "America/New_York",
+  "analysis_commit": "e6af569070d5d107c47582799d17cc3dc322f4ef",
+  "image": "osra-structure-linkedin_2026-10-21_13-22-53_EDT.png",
+  "image_sha256": "5a1ec93a58a37ddd7fc34a526c8fda4e8ae8cb472998c0ecfc954118dd854df9",
+  "source_graph_sha256": "51f3437001d8ccf5093728267cce56edab61d9421313f37ed988551d6cdc9d66",
+  "dimensions": [
+    2160,
+    2460
+  ],
+  "runtime_files": 137,
+  "runtime_source_lines": 59927,
+  "exported_communities": 17,
+  "all_file_links": 436,
+  "displayed_pair_count": 54,
+  "cross_displayed_group_links": 219,
+  "within_displayed_group_links": 217,
+  "edge_width_base_pixels": "0.6 + 0.5 * dependency_count",
+  "edge_opacity": 0.5882352941176471,
+  "changes": [
+    "Increased line-weight range and contrast",
+    "Removed concentration panel",
+    "Added a compact dependency-count legend"
+  ],
+  "scope": "Static Python runtime imports; tests, scripts, UI and non-ORA imports excluded",
+  "notes": [
+    "Same saved analysis as the baseline; Emerge was not rerun.",
+    "Connection counts combine both import directions between displayed groups."
+  ],
+  "pair_counts": [
+    {
+      "a": -1,
+      "b": 0,
+      "count": 1
+    },
+    {
+      "a": -1,
+      "b": 1,
+      "count": 2
+    },
+    {
+      "a": -1,
+      "b": 2,
+      "count": 2
+    },
+    {
+      "a": -1,
+      "b": 4,
+      "count": 4
+    },
+    {
+      "a": -1,
+      "b": 5,
+      "count": 1
+    },
+    {
+      "a": -1,
+      "b": 8,
+      "count": 1
+    },
+    {
+      "a": 0,
+      "b": 2,
+      "count": 4
+    },
+    {
+      "a": 0,
+      "b": 3,
+      "count": 1
+    },
+    {
+      "a": 0,
+      "b": 4,
+      "count": 4
+    },
+    {
+      "a": 0,
+      "b": 5,
+      "count": 2
+    },
+    {
+      "a": 0,
+      "b": 6,
+      "count": 3
+    },
+    {
+      "a": 0,
+      "b": 7,
+      "count": 3
+    },
+    {
+      "a": 0,
+      "b": 8,
+      "count": 2
+    },
+    {
+      "a": 0,
+      "b": 9,
+      "count": 1
+    },
+    {
+      "a": 0,
+      "b": 10,
+      "count": 1
+    },
+    {
+      "a": 1,
+      "b": 2,
+      "count": 16
+    },
+    {
+      "a": 1,
+      "b": 3,
+      "count": 2
+    },
+    {
+      "a": 1,
+      "b": 4,
+      "count": 14
+    },
+    {
+      "a": 1,
+      "b": 5,
+      "count": 5
+    },
+    {
+      "a": 1,
+      "b": 6,
+      "count": 5
+    },
+    {
+      "a": 1,
+      "b": 7,
+      "count": 2
+    },
+    {
+      "a": 1,
+      "b": 8,
+      "count": 8
+    },
+    {
+      "a": 1,
+      "b": 10,
+      "count": 4
+    },
+    {
+      "a": 2,
+      "b": 3,
+      "count": 12
+    },
+    {
+      "a": 2,
+      "b": 4,
+      "count": 14
+    },
+    {
+      "a": 2,
+      "b": 5,
+      "count": 6
+    },
+    {
+      "a": 2,
+      "b": 6,
+      "count": 6
+    },
+    {
+      "a": 2,
+      "b": 7,
+      "count": 9
+    },
+    {
+      "a": 2,
+      "b": 8,
+      "count": 4
+    },
+    {
+      "a": 2,
+      "b": 9,
+      "count": 2
+    },
+    {
+      "a": 2,
+      "b": 10,
+      "count": 7
+    },
+    {
+      "a": 3,
+      "b": 4,
+      "count": 13
+    },
+    {
+      "a": 3,
+      "b": 5,
+      "count": 2
+    },
+    {
+      "a": 3,
+      "b": 6,
+      "count": 2
+    },
+    {
+      "a": 3,
+      "b": 7,
+      "count": 1
+    },
+    {
+      "a": 3,
+      "b": 8,
+      "count": 5
+    },
+    {
+      "a": 3,
+      "b": 10,
+      "count": 2
+    },
+    {
+      "a": 4,
+      "b": 5,
+      "count": 1
+    },
+    {
+      "a": 4,
+      "b": 6,
+      "count": 2
+    },
+    {
+      "a": 4,
+      "b": 7,
+      "count": 7
+    },
+    {
+      "a": 4,
+      "b": 8,
+      "count": 5
+    },
+    {
+      "a": 4,
+      "b": 9,
+      "count": 7
+    },
+    {
+      "a": 4,
+      "b": 10,
+      "count": 2
+    },
+    {
+      "a": 5,
+      "b": 6,
+      "count": 2
+    },
+    {
+      "a": 5,
+      "b": 7,
+      "count": 2
+    },
+    {
+      "a": 5,
+      "b": 8,
+      "count": 2
+    },
+    {
+      "a": 5,
+      "b": 9,
+      "count": 2
+    },
+    {
+      "a": 5,
+      "b": 10,
+      "count": 3
+    },
+    {
+      "a": 6,
+      "b": 7,
+      "count": 1
+    },
+    {
+      "a": 6,
+      "b": 8,
+      "count": 4
+    },
+    {
+      "a": 6,
+      "b": 9,
+      "count": 1
+    },
+    {
+      "a": 6,
+      "b": 10,
+      "count": 1
+    },
+    {
+      "a": 7,
+      "b": 8,
+      "count": 2
+    },
+    {
+      "a": 8,
+      "b": 10,
+      "count": 2
+    }
+  ]
+}

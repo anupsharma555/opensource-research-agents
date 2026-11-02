@@ -14,6 +14,7 @@ import pytest
 
 from ora.contracts.models import LiveStartRequest
 from ora.coordination.board import ref
+from tests.mission.availability_assertions import catalog_tool_names
 from tests.mission.test_capability_catalog import _index
 from tests.mission.test_service import answer, drain, revoke_source, service, tool
 
@@ -63,17 +64,18 @@ def _drive_until(host, run_id, predicate):
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         host._drive_run(host._run(run_id))
+        failures = getattr(host.session.adapter.transport, "failures", [])
+        if failures:
+            raise AssertionError(f"Scripted model failed: {failures[0]}")
         if predicate():
             return
         time.sleep(.01)
     raise AssertionError("Scripted planning boundary was not reached")
 
 
-@pytest.mark.parametrize("agent_id,catalog_count", [
-    ("agent-synthesis", 54), ("agent-critique", 54),
-])
+@pytest.mark.parametrize("agent_id", ["agent-synthesis", "agent-critique"])
 def test_simple_completion_keeps_full_catalog_and_needs_no_plan(
-    tmp_path, monkeypatch, agent_id, catalog_count,
+    tmp_path, monkeypatch, agent_id,
 ):
     packets = []
 
@@ -81,9 +83,15 @@ def test_simple_completion_keeps_full_catalog_and_needs_no_plan(
         packet = json.loads(request.data)
         packets.append(packet)
         catalog = _index(packet["messages"][0]["content"])
-        assert len(catalog["tools"]) == catalog_count
+        from ora.mission.tool_catalog import UNHANDLED_COMMON_TOOLS
+
+        control = host._control(run.run_id, agent_id)
+        call = host.store.get(**control["body"]["call_ref"])
+        assert catalog_tool_names(catalog) == (
+            set(call["body"]["permitted_tools"]) - UNHANDLED_COMMON_TOOLS
+        )
         assert {"save_plan", "read_plan", "browser_search", "calculate", "propose_work",
-                "search_web", "read_document_ocr", "inspect_figure"} <= set(catalog["tools"])
+                "search_web", "read_document_ocr", "inspect_figure"} <= catalog_tool_names(catalog)
         assert {"save_plan", "read_plan"}.isdisjoint(_attached(packet))
         assert catalog["skills"]["task-planning"]["state"] == "available_to_activate"
         return answer("A concise provisional response is sufficient for this synthetic task.", 1)
@@ -202,9 +210,12 @@ def test_plan_revision_peer_links_compaction_and_restart_preserve_execution_auth
         if name == "modify_plan":
             assert result["planning_status"] == "advisory_not_task_completion"
             context = json.loads(packet["messages"][-1]["content"])
-            disposition = next(item for item in context["request_dispositions"] if item["ref"]["id"] == peer_request["id"])
+            preview = next(item for item in context["peer_answer_previews"]
+                           if item["request_ref"]["id"] == peer_request["id"])
+            assert preview["request_status"] == "awaiting_review"
+            assert preview["report"]["body"] == "Compare the complete source before claiming absence."
             return tool("review_peer_answer", {
-                "request_id": peer_request["id"], "answer_id": disposition["answer_refs"][0]["id"],
+                "request_id": peer_request["id"], "answer_id": preview["answer_ref"]["id"],
                 "disposition": "answered", "reason": "The saved review answers the focused question",
             }, step)
         return tool("publish_result", {
@@ -515,7 +526,10 @@ def test_paused_plan_and_peer_wait_survive_restart_without_dispatch(tmp_path, mo
         agent_ids=["agent-synthesis", "agent-critique"],
     ))
     recipient = host._control(run.run_id, "agent-critique")
-    host._update_control(recipient, phase="waiting", waiting_reason="Synthetic peer work is held")
+    # A saved future wake is an actual hold; an empty waiting state correctly
+    # invites peer replanning and cannot serve as this fixture's pause.
+    host._update_control(recipient, phase="retry_at", retry_at=time.time() + 3600,
+                         waiting_reason="Synthetic peer work resumes at its saved timer")
     try:
         _drive_until(host, run.run_id, lambda: (
             len(packets) == 5 and host._control(run.run_id, "agent-synthesis")["body"].get("wait_for")

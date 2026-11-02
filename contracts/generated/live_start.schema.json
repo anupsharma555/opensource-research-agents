@@ -1,4 +1,88 @@
 {
+  "$defs": {
+    "LiveAgentModelChoice": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "model": {
+                "const": "openai/gpt-oss-120b"
+              }
+            },
+            "required": [
+              "model"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reasoningEffort": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "medium",
+                      "high"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "description": "Optional per-alias model choice for a new research run.",
+      "properties": {
+        "maxCompletionTokens": {
+          "anyOf": [
+            {
+              "maximum": 65536,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maxcompletiontokens"
+        },
+        "model": {
+          "enum": [
+            "openai/gpt-oss-120b",
+            "qwen/qwen3.8-27b"
+          ],
+          "title": "Model",
+          "type": "string"
+        },
+        "reasoningEffort": {
+          "anyOf": [
+            {
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoningeffort"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "title": "LiveAgentModelChoice",
+      "type": "object"
+    }
+  },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -11,6 +95,25 @@
       "minItems": 1,
       "title": "Agentids",
       "type": "array"
+    },
+    "agentModels": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/LiveAgentModelChoice"
+          },
+          "propertyNames": {
+            "maxLength": 160,
+            "minLength": 1
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Agentmodels"
     },
     "allowVision": {
       "default": false,

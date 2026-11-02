@@ -28,9 +28,11 @@ QUESTION = "Compare the supplied draft with any later audit evidence and state t
 SCOPE = "Use only saved synthetic evidence and keep conflicting counts separate."
 
 
-def _drive_until(host, run_id: str, predicate) -> None:
+def _drive_until(host, run_id: str, predicate, *, transport_errors=None) -> None:
     for _ in range(500):
         host._drive_run(host._run(run_id))
+        if transport_errors:
+            raise AssertionError(f"Injected transport assertion: {transport_errors[0]}")
         if predicate():
             return
         time.sleep(.005)
@@ -43,6 +45,21 @@ def _last_tool(request: dict, name: str) -> dict:
         if item.get("role") == "tool" and item.get("name") == name
     )
     return json.loads(message["content"])
+
+
+def _discovery_page(request: dict) -> dict:
+    """Verify the model can page the full saved capability result if needed."""
+    page = _last_tool(request, "discover_capabilities")
+    assert page["schema"] == "ora.saved_tool_result_window.v1"
+    assert page["offset"] == 0 < page["end_offset"] < page["total_chars"]
+    assert page["saved_tool_result_ref"]["kind"] == "context_tool_result"
+    assert page["next_request"]["tool"] == "read_tool_result"
+    assert page["next_request"]["result_id"] == page["saved_tool_result_ref"]["id"]
+    assert page["next_request"]["offset"] == page["end_offset"]
+    assert "read_tool_result" in {
+        item["function"]["name"] for item in request["tools"]
+    }
+    return page
 
 
 def _saved_tool_names(host) -> list[str]:
@@ -67,10 +84,11 @@ def test_permitted_late_evidence_enters_next_serialized_input_after_inspection(
     started = threading.Event()
     release = threading.Event()
     requests: list[dict] = []
+    transport_errors: list[str] = []
     saved: dict = {}
     active_host = None
 
-    def transport(request, *, timeout):
+    def scripted_transport(request, *, timeout):
         packet = json.loads(request.data)
         requests.append(packet)
         step = len(requests)
@@ -99,8 +117,8 @@ def test_permitted_late_evidence_enters_next_serialized_input_after_inspection(
             delivered = active_host.store.get("mail_message", saved["message_ref"]["id"])
             assert delivered["body"]["delivered_at"] is not None
             assert ref(delivered) in index["message_refs"]
-            discovered = _last_tool(packet, "discover_capabilities")
-            assert "granted" in discovered and "next_action" in discovered
+            discovered = _discovery_page(packet)
+            assert '"granted"' in discovered["text"]
             first_call = active_host.store.get(**saved["first_call_ref"])
             assert active_host.store.get(
                 "agent_attempt", first_call["body"]["attempt_id"]
@@ -176,6 +194,13 @@ def test_permitted_late_evidence_enters_next_serialized_input_after_inspection(
             "limitations": ["Synthetic fixtures do not validate a real study"],
         }, step)
 
+    def transport(request, *, timeout):
+        try:
+            return scripted_transport(request, timeout=timeout)
+        except Exception as exc:
+            transport_errors.append(f"{type(exc).__name__}: {exc}")
+            raise
+
     host = service(tmp_path, monkeypatch, transport)
     active_host = host
     run = host.start(LiveStartRequest(
@@ -186,7 +211,8 @@ def test_permitted_late_evidence_enters_next_serialized_input_after_inspection(
     saved["run_id"] = run.run_id
     initial_boundary_complete = False
     try:
-        _drive_until(host, run.run_id, started.is_set)
+        _drive_until(host, run.run_id, started.is_set,
+                     transport_errors=transport_errors)
         control = host._control(run.run_id, "agent-synthesis")
         mission_id = host._run(run.run_id)["body"]["mission_id"]
         actor_id = control["body"]["actor_id"]
@@ -271,7 +297,7 @@ def test_permitted_late_evidence_enters_next_serialized_input_after_inspection(
         _drive_until(host, run.run_id, lambda: (
             host._control(run.run_id, "agent-synthesis")["body"]["phase"] == "ready_model"
             and bool(host._control(run.run_id, "agent-synthesis")["body"].get("tool_turn_refs"))
-        ))
+        ), transport_errors=transport_errors)
         assert len(requests) == 1
         assert _saved_tool_names(host).count("discover_capabilities") == 1
         original_profile = host._run(run.run_id)["body"]["profile"]
@@ -298,7 +324,7 @@ def test_permitted_late_evidence_enters_next_serialized_input_after_inspection(
         assert host._configuration(current)["body"] == original_config
         _drive_until(host, run.run_id, lambda: (
             host._run(run.run_id)["body"]["status"] == "completed"
-        ))
+        ), transport_errors=transport_errors)
         assert len(requests) == 4
         assert len(host.store.records("mail_message")) == 1
         assert len(host.store.records("retrieval_hit")) == 1
@@ -351,6 +377,7 @@ def test_future_atlas_user_text_adapter_fixture_delivers_data_after_inflight_cal
     release = threading.Event()
     network_attempts = []
     packets = []
+    transport_errors: list[str] = []
     saved = {}
 
     def no_network(*_args, **_kwargs):
@@ -360,7 +387,7 @@ def test_future_atlas_user_text_adapter_fixture_delivers_data_after_inflight_cal
     monkeypatch.setattr(socket.socket, "connect", no_network)
     monkeypatch.setattr(socket.socket, "connect_ex", no_network)
 
-    def transport(request, *, timeout):
+    def scripted_transport(request, *, timeout):
         packet = json.loads(request.data)
         packets.append(packet)
         if len(packets) == 1:
@@ -369,7 +396,8 @@ def test_future_atlas_user_text_adapter_fixture_delivers_data_after_inflight_cal
             assert release.wait(5), "Offline first call was not released"
             return tool("discover_capabilities", {}, 1)
         assert len(packets) == 2
-        assert _last_tool(packet, "discover_capabilities")["granted"]
+        discovered = _discovery_page(packet)
+        assert '"granted"' in discovered["text"]
         index = json.loads(packet["messages"][-1]["content"])
         delivered = host.store.get("mail_message", saved["message_ref"]["id"])
         detail = next(
@@ -399,13 +427,21 @@ def test_future_atlas_user_text_adapter_fixture_delivers_data_after_inflight_cal
             "limitations": ["Later pasted text has no checked source copy"],
         }, 2)
 
+    def transport(request, *, timeout):
+        try:
+            return scripted_transport(request, timeout=timeout)
+        except Exception as exc:
+            transport_errors.append(f"{type(exc).__name__}: {exc}")
+            raise
+
     host = service(tmp_path, monkeypatch, transport)
     try:
         run = host.start(LiveStartRequest(
             request_id="future-atlas-user-text-fixture", question=QUESTION,
             scope=SCOPE, evidence_text=OLD_TEXT, agent_ids=["agent-synthesis"],
         ))
-        _drive_until(host, run.run_id, blocked.is_set)
+        _drive_until(host, run.run_id, blocked.is_set,
+                     transport_errors=transport_errors)
         control = host._control(run.run_id, "agent-synthesis")
         actor_id = control["body"]["actor_id"]
         saved["actor_id"] = actor_id
@@ -452,7 +488,7 @@ def test_future_atlas_user_text_adapter_fixture_delivers_data_after_inflight_cal
         release.set()
         _drive_until(host, run.run_id, lambda: (
             host._run(run.run_id)["body"]["status"] == "completed"
-        ))
+        ), transport_errors=transport_errors)
         assert len(packets) == 2
         assert len(host.store.records("mail_message")) == 1
         assert len(host.store.records("source_copy")) == 1

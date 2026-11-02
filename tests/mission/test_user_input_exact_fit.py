@@ -60,7 +60,11 @@ def test_moderate_direction_fits_exactly_before_optional_detail(tmp_path, monkey
         assert not any(item.get("fetch") == amendment.input_ref.model_dump()
                        for item in inclusion["body"].get("omitted", []))
         assert packet["max_completion_tokens"] == 8192
-        assert estimate_request_tokens(raw).tokens <= 5600
+        budget = host.store.get("mission_call_budget", call["id"])["body"]
+        estimate = estimate_request_tokens(raw).tokens
+        assert estimate <= budget["request_stage_token_estimate"]["admission_target_tokens"]
+        assert (estimate + budget["prior_completion_reservation"]
+                + budget["rate_input_headroom_tokens"] <= 8000)
         assert index["current_unverified_paste"] == {
             "ref": paste.input_ref.model_dump(),
             "origin": "authenticated_local_user",

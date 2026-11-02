@@ -18,7 +18,7 @@ from tests.models.test_groq import config
 
 
 def _save_read(store, context, saved, inclusion, pointer, window, *, label,
-               assistant_content=None):
+               assistant_content=None, intent_ref=None):
     tool_call_id = f"{label}-call"
     arguments = canonical({
         "inclusion_id": inclusion["id"], **pointer,
@@ -33,6 +33,9 @@ def _save_read(store, context, saved, inclusion, pointer, window, *, label,
         "model_response_receipt", f"{label}-response", {
             "mission_id": "m", "task_id": saved["task_ref"]["id"],
             "call_ref": saved["call_ref"], "status": "tool_requested", "blob": blob,
+            **({"intent_ref": intent_ref,
+                "request_sha256": store.get(**intent_ref)["body"]["request_sha256"],
+                "http_status": 200, "error_kind": None} if intent_ref else {}),
         },
     )), mission_id="m")
     context.save_tool_result(
@@ -143,14 +146,15 @@ def test_repeated_top_level_report_read_gets_optional_exact_feedback(tmp_path):
     assert _tool_ids(pack) == ["current-report-call"]
     assert json.loads(next(item["content"] for item in pack.messages
                            if item.get("tool_call_id") == "current-report-call"))["text"] == direct["text"]
-    assert json.loads(pack.messages[-1]["content"])["reader_feedback"] == {
+    feedback = json.loads(pack.messages[-1]["content"])["reader_feedback"]
+    assert feedback == {
         "status": "same_exact_report_page_returned_by_earlier_saved_call",
         "previous_response_ref": older,
         "offset": 0,
         "current_report_text_in_input": True,
     }
     tight = _assemble(store, context, saved, older, current,
-                      allowance=pack.estimated_tokens - 1)
+                      allowance=pack.estimated_tokens - len(canonical(feedback)) - 1)
     assert _tool_ids(tight) == ["current-report-call"]
     assert "reader_feedback" not in json.loads(tight.messages[-1]["content"])
     assert json.loads(next(item["content"] for item in tight.messages
@@ -171,8 +175,15 @@ def test_sidecar_does_not_hide_earlier_assistant_explanation(tmp_path):
         **scope, pointer=saved["report_ref"], offset=0,
         limit=answer["related_report_window"]["returned_chars"],
     )
+    intent = store.get("model_request_intent", "model-intent:requester-call:1")
+    producing_intent = store.transact("explained-report-lineage", {}, lambda tx: ref(tx.put(
+        "model_request_intent", intent["id"], {
+            **intent["body"], "instance_id": "requester", "task_id": "requester-task",
+        }, expected_version=intent["version"],
+    )), mission_id="m")
     older = _save_read(store, context, saved, inclusion, saved["report_ref"], report,
-                       label="older-report", assistant_content="I will compare this report with the answer.")
+                       label="older-report", assistant_content="I will compare this report with the answer.",
+                       intent_ref=producing_intent)
     current = _save_read(store, context, saved, inclusion, saved["answer_ref"], answer,
                          label="current-answer")
     pack = _assemble(store, context, saved, older, current)

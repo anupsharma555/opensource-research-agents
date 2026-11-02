@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from ora.contracts.models import LiveStartRequest
+from tests.mission.availability_assertions import catalog_tool_names
 from tests.mission.test_service import answer, drain, service, tool
 
 
@@ -13,6 +14,10 @@ def _catalog(packet: dict) -> dict:
     marker = "Role capability catalog: "
     assert instructions.count(marker) == 1
     return json.JSONDecoder().raw_decode(instructions.split(marker, 1)[1])[0]
+
+
+def _catalog_names(packet: dict) -> set[str]:
+    return catalog_tool_names(_catalog(packet))
 
 
 def _names(packet: dict) -> set[str]:
@@ -35,7 +40,7 @@ def test_calculation_is_selected_and_invalid_arithmetic_recovers(tmp_path, monke
         seen.append(packet)
         step = len(seen)
         if step == 1:
-            assert "calculate" in _catalog(packet)["tools"]
+            assert "calculate" in _catalog_names(packet)
             assert "calculate" not in _names(packet)
             return tool("request_capability", {"tool_id": "calculate"}, step)
         assert "calculate" in _names(packet)
@@ -85,7 +90,7 @@ def test_saved_passage_search_leads_to_exact_source_window(tmp_path, monkeypatch
         seen.append(packet)
         step = len(seen)
         if step == 1:
-            assert "search_saved_passages" in _catalog(packet)["tools"]
+            assert "search_saved_passages" in _catalog_names(packet)
             assert {"search_saved_passages", "read_source_window"} <= _names(packet)
             availability = next(json.loads(row["content"])
                                 for row in packet["messages"] if row.get("role") == "user"
@@ -141,7 +146,7 @@ def test_skill_resource_read_respects_optional_activation(tmp_path, monkeypatch)
         seen.append(packet)
         step = len(seen)
         if step == 1:
-            assert "read_skill_resource" in _catalog(packet)["tools"]
+            assert "read_skill_resource" in _catalog_names(packet)
             assert "read_skill_resource" not in _names(packet)
             return tool("request_capability", {"tool_id": "read_skill_resource"}, step)
         assert "read_skill_resource" in _names(packet)

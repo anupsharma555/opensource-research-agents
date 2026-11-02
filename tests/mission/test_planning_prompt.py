@@ -9,7 +9,9 @@ import pytest
 
 from ora.contracts.models import LiveStartRequest
 from ora.live.engine import ResearchHost
+from ora.mission.tool_catalog import UNHANDLED_COMMON_TOOLS
 from tests.live.test_engine import FakeProvider, wait_done
+from tests.mission.availability_assertions import catalog_tool_names
 from tests.mission.test_capability_catalog import _index
 from tests.mission.test_service import ROOT, answer, drain, service, tool
 
@@ -60,7 +62,9 @@ def test_serialized_developer_instructions_label_optional_planning_with_full_cat
         expected_calls = {"skip": 1, "activate": 3, "request_tool": 2}[selection]
         assert len(dispatch_bytes) == expected_calls
         packets = _saved_packets(host, dispatch_bytes)
-        for packet in packets:
+        intents_by_hash = {item["body"]["request_sha256"]: item
+                           for item in host.store.records("model_request_intent")}
+        for raw, packet in zip(dispatch_bytes, packets):
             assert packet["model"] == "openai/gpt-oss-120b"
             developer = packet["messages"][0]
             assert developer["role"] == "developer"
@@ -70,7 +74,7 @@ def test_serialized_developer_instructions_label_optional_planning_with_full_cat
             assert "Reading every page is optional" in instructions
             assert "unread text does not establish that information is absent" not in instructions
             assert "search_saved_passages locates retained text" not in instructions
-            assert "Wait only for pending retrieval" in instructions
+            assert "Wait for pending retrieval or an exact unresolved peer/proposal dependency" in instructions
             assert "source URLs from verified metadata" in instructions
             assert instructions.count(LABEL) == 1
             section = instructions.split(LABEL + "\n", 1)[1].split("\n\n", 1)[0]
@@ -82,11 +86,15 @@ def test_serialized_developer_instructions_label_optional_planning_with_full_cat
             assert "activate_skill with skill_id task-planning loads the template" in section
             catalog = _index(instructions)
             # Keep the default catalog intact, including web and document readers.
-            assert len(catalog["tools"]) == 54
+            intent = intents_by_hash[hashlib.sha256(raw).hexdigest()]
+            saved_call = host.store.get(**intent["body"]["call_ref"])
+            assert catalog_tool_names(catalog) == (
+                set(saved_call["body"]["permitted_tools"]) - UNHANDLED_COMMON_TOOLS
+            )
             assert {"browser_search", "search_scholarly", "propose_work", "revise_work",
                     "peer_request", "wait_for_dependencies", "save_plan", "read_plan",
                     "search_web", "read_search_results", "cancel_search", "render_source",
-                    "read_document_ocr", "inspect_figure"} <= set(catalog["tools"])
+                    "read_document_ocr", "inspect_figure"} <= catalog_tool_names(catalog)
         initial = packets[0]
         attached = {item["function"]["name"] for item in initial["tools"]}
         assert {"save_plan", "read_plan"}.isdisjoint(attached)
@@ -129,8 +137,11 @@ def test_saved_requests_do_not_advertise_planning_without_skill_and_tool_availab
             agent_ids=["agent-synthesis"],
         ))
         if availability == "missing_tools":
-            host.catalog.tools.pop("save_plan")
-            host.catalog.tools.pop("read_plan")
+            active_catalog, _ = host._tool_registry(
+                host._control(run.run_id, "agent-synthesis")
+            )
+            active_catalog.tools.pop("save_plan")
+            active_catalog.tools.pop("read_plan")
         else:
             saved = host._run(run.run_id)
             body = saved["body"]
@@ -150,7 +161,9 @@ def test_saved_requests_do_not_advertise_planning_without_skill_and_tool_availab
         assert packet["messages"][0]["role"] == "developer"
         assert LABEL not in packet["messages"][0]["content"]
         assert "# Task planning" not in packet["messages"][0]["content"]
-        assert {"save_plan", "read_plan"}.isdisjoint(_index(packet["messages"][0]["content"])["tools"])
+        assert {"save_plan", "read_plan"}.isdisjoint(catalog_tool_names(
+            _index(packet["messages"][0]["content"])
+        ))
     finally:
         host.close()
 

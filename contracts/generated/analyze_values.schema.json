@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Prespecified calculations on supplied values, not source or design validation.",
+  "properties": {
+    "alternative": {
+      "anyOf": [
+        {
+          "enum": [
+            "two-sided",
+            "less",
+            "greater"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Alternative"
+    },
+    "groupA": {
+      "items": {
+        "maximum": 1000000000000.0,
+        "minimum": -1000000000000.0,
+        "type": "number"
+      },
+      "maxItems": 200,
+      "minItems": 2,
+      "title": "Groupa",
+      "type": "array"
+    },
+    "groupB": {
+      "anyOf": [
+        {
+          "items": {
+            "maximum": 1000000000000.0,
+            "minimum": -1000000000000.0,
+            "type": "number"
+          },
+          "maxItems": 200,
+          "minItems": 2,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Groupb"
+    },
+    "operation": {
+      "enum": [
+        "describe",
+        "welch_ttest"
+      ],
+      "title": "Operation",
+      "type": "string"
+    },
+    "units": {
+      "anyOf": [
+        {
+          "maxLength": 40,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Units"
+    }
+  },
+  "required": [
+    "operation",
+    "groupA"
+  ],
+  "title": "AnalyzeValuesInput",
+  "type": "object"
+}

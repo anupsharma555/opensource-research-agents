@@ -2,7 +2,7 @@
 name: os-eval-testing
 description: Design and progressively execute realistic research-agent evaluations in OpenSource Research Agents, using natural-language tasks across selected context, evidence, tool, recovery and collaboration conditions. Use to create or compare eval cases, select the next useful test, or diagnose an evaluation; not for routine unit checks alone or claiming scientific validity from a harness pass.
 metadata:
-  version: 0.1.8
+  version: 0.1.10
 ---
 
 # Progressive research-agent evaluations
@@ -92,7 +92,10 @@ a green result. Revise an uninformative case without leaking its answer.
    is sufficient without a separate call cap; add call or run caps only when the
    user specifies them. Preserve any existing explicit limits unless the user
    changes them. If no budget is authorized, propose the smallest useful one
-   before calling a provider. Count every attempted call and respect provider
+   before calling a provider. If the user has delegated choosing reasonable token
+   caps for scoped live tests, choose and record a proportionate aggregate ceiling
+   without another approval question; respect existing explicit ceilings, the
+   selected provider/profile and the authorized scope. Count every attempted call and respect provider
    request limits, but distinguish an estimated call count from a stopping rule.
    Explain each planned call's purpose where predictable; autonomous paths have
    estimates, not guaranteed counts. Verify that the runner enforces the chosen
@@ -175,3 +178,9 @@ rate limits rather than presenting hypothetical paid prices as incurred costs.
 One successful task does not establish generalization, sustained reliability or
 token savings. Preserve failures and exact evidence so a later test can compare
 against them without repeating provider calls.
+
+After reporting each concluded run or observation, apply
+[the Linear closeout step](../os-qualify-run/SKILL.md#close-the-loop-in-linear):
+update authorized issue checkboxes only from fully met criteria, record meaningful
+progress or blockers succinctly, and verify the saved result before selecting
+the next test. Preserve incomplete items and explicit private-only restrictions.

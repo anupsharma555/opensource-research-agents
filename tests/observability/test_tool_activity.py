@@ -36,7 +36,7 @@ def _seed(store, *, run_id="run-a", mission_id="mission-a", status="active"):
 
 def _turn(store, suffix, name, *, messages=None, tool_id=None,
           response_status="tool_requested", run_id="run-a", mission_id="mission-a",
-          save_response=True):
+          save_response=True, tool_args=None):
     tool_id = tool_id or f"fc_{suffix}"
     call = _put(store, "agent_call", f"call-{suffix}", {
         "mission_id": mission_id, "instance_id": "actor-a", "task_id": "task-a",
@@ -54,7 +54,9 @@ def _turn(store, suffix, name, *, messages=None, tool_id=None,
         "request_sha256": request_blob["sha256"],
         "status": "attempted_external_effect",
     })
-    raw = {"tool_calls": [{"id": tool_id, "function": {"name": name, "arguments": "{}"}}]}
+    raw = {"tool_calls": [{"id": tool_id, "function": {
+        "name": name, "arguments": canonical(tool_args if tool_args is not None else {}),
+    }}]}
     response = (_put(store, "model_response_receipt", f"model-response:{intent['id']}", {
         "mission_id": mission_id, "task_id": "task-a", "attempt_id": f"attempt-{suffix}",
         "intent_ref": _ref(intent), "call_ref": _ref(call),
@@ -77,11 +79,12 @@ def _result(store, response, tool, content, *, mission_id="mission-a",
     }), message
 
 
-def _work(store, suffix, call, tool, *, report_ref=None, corrupt=False):
+def _work(store, suffix, call, tool, *, report_ref=None, corrupt=False, payload=None):
     work_id = f"tool-work-{suffix}"
-    payload = ({"report_ref": report_ref} if report_ref else
-               {"tool_call_id": "wrong" if corrupt else tool["id"],
-                "name": tool["function"]["name"]})
+    payload = payload if payload is not None else (
+        {"report_ref": report_ref} if report_ref else
+        {"tool_call_id": "wrong" if corrupt else tool["id"],
+         "name": tool["function"]["name"]})
     artifact = _put(store, "executor_artifact", f"artifact-{suffix}", {
         "mission_id": "mission-a", "actor_id": "actor-a", "work_id": work_id,
         "payload": payload,
@@ -420,3 +423,130 @@ def test_rejected_tool_result_has_no_inferred_duration_and_pinned_actor_survives
     assert step["execution_status"] == "uncertain"
     assert step["duration_seconds"] is None
     assert step["delivery_status"] == "not_observed_yet"
+
+
+def _reviewed_peer_request(store, *, suffix="peer"):
+    answer = _put(store, "mail_answer", f"answer-{suffix}", {
+        "mission_id": "mission-a", "request_id": f"request-{suffix}",
+        "responder_id": "actor-peer", "artifact_ref": {
+            "kind": "report", "id": "other-peer-report", "version": 1,
+        },
+    })
+    _put(store, "mail_request", f"request-{suffix}", {
+        "mission_id": "mission-a", "requester_id": "actor-a",
+        "recipient_id": "actor-peer", "status": "awaiting_review",
+        "answer_refs": [_ref(answer)],
+    })
+    reviewed = _put(store, "mail_request", f"request-{suffix}", {
+        "mission_id": "mission-a", "requester_id": "actor-a",
+        "recipient_id": "actor-peer", "status": "answered",
+        "answer_refs": [_ref(answer)], "accepted_answer_ref": _ref(answer),
+        "reviewer_id": "actor-a", "review": {"reason": "Synthetic review"},
+    }, version=1)
+    return answer, reviewed
+
+
+def test_peer_turn_mixed_result_keeps_one_step_and_verified_slot_statuses(tmp_path):
+    store = StateStore(tmp_path)
+    _seed(store)
+    answer, reviewed = _reviewed_peer_request(store)
+    args = {"review": {
+        "request_id": "request-peer", "request_version": 1,
+        "answer_id": answer["id"], "answer_version": 1,
+        "disposition": "answered", "reason": "Synthetic review",
+    }, "followup_request": ["malformed private argument"]}
+    call, response, tool = _turn(store, "peer", "peer_turn", tool_args=args)
+    store.transact("mission-peer-review:tool-work-peer:peer-turn:review", {},
+                   lambda tx: {"request_ref": _ref(reviewed)})
+    operations = {"review": {"status": "review_saved", "request_ref": _ref(reviewed)},
+                  "followup_request": {"status": "rejected",
+                                       "reason": "private malformed argument"}}
+    _work(store, "peer", call, tool, payload={
+        "tool_call_id": tool["id"], "name": "peer_turn",
+        "result": {"status": "peer_turn_recorded", "operations": operations},
+    })
+    _result(store, response, tool, {"status": "peer_turn_recorded",
+                                    "operations": operations})
+    report = build_tool_activity(store, "run-a")
+    assert report["counts"]["selected_tools"] == 1
+    assert report["counts"]["executed_tools"] == 1
+    step = report["steps"][0]
+    assert step["execution_status"] == "executed"
+    assert step["outcome"] == "unknown"
+    assert step["peer_operation_statuses"] == {
+        "review": "review_saved", "followup_request": "rejected",
+    }
+    assert "private" not in str(report)
+
+
+@pytest.mark.parametrize("accepted_board,mixed_followup", [
+    (True, False), (False, False), (True, True),
+])
+def test_peer_turn_revision_is_published_only_with_exact_board_and_review(
+    tmp_path, accepted_board, mixed_followup,
+):
+    store = StateStore(tmp_path)
+    _seed(store, status="completed" if accepted_board else "active")
+    answer, reviewed = _reviewed_peer_request(store)
+    args = {"review": {
+        "request_id": "request-peer", "request_version": 1,
+        "answer_id": answer["id"], "answer_version": 1,
+        "disposition": "answered", "reason": "Synthetic review",
+    }, "report": {"kind": "revision", "title": "Private title",
+                  "text": "Private report text", "citations": [], "limitations": []}}
+    if mixed_followup:
+        args["followup_request"] = ["private malformed follow-up"]
+    call, _response, tool = _turn(store, "peer", "peer_turn", tool_args=args)
+    store.transact("mission-peer-review:tool-work-peer:peer-turn:review", {},
+                   lambda tx: {"request_ref": _ref(reviewed)})
+    attempt = _put(store, "agent_attempt", "attempt-peer", {
+        "mission_id": "mission-a", "run_id": "run-a", "call_ref": _ref(call),
+        "status": "running",
+    })
+    report_id = "report-" + hashlib.sha256(canonical(
+        ("run-a", "actor-a", "tool-work-peer")).encode()).hexdigest()[:32]
+    report_ref = _ref(_put(store, "report", report_id, {
+        "mission_id": "mission-a", "run_id": "run-a",
+        "producer_attempt_ref": _ref(attempt),
+    }))
+    _put(store, "agent_attempt", attempt["id"], {
+        **attempt["body"], "status": "completed", "report_ref": report_ref,
+    }, version=attempt["version"])
+    outcome = _put(store, "board_outcome", "outcome-peer", {
+        "mission_id": "mission-a", "result_refs": [report_ref],
+        "proposal_ref": {"kind": "board_proposal", "id": "task-a", "version": 1},
+        "actor_ref": {"kind": "agent_instance", "id": "actor-a", "version": 1},
+        "completes_task": True,
+    })
+    _put(store, "board_proposal", "task-a", {
+        "mission_id": "mission-a", "status": "completed" if accepted_board else "open",
+        "outcome_ref": _ref(outcome),
+    })
+    operations = {
+        "review": {"status": "review_saved", "request_ref": _ref(reviewed)},
+        "report": {"status": "report_saved", "report_ref": report_ref},
+    }
+    if mixed_followup:
+        operations["followup_request"] = {"status": "rejected"}
+    _work(store, "peer", call, tool, payload={
+        "tool_call_id": tool["id"], "name": "peer_turn",
+        "result": {"status": "peer_turn_recorded", "operations": operations},
+    })
+    result = build_tool_activity(store, "run-a")
+    assert result["counts"]["selected_tools"] == 1
+    step = result["steps"][0]
+    assert step["execution_status"] == (
+        "accepted_report" if accepted_board else "executed"
+    )
+    assert step["outcome"] == (
+        "completed" if accepted_board and not mixed_followup else "unknown"
+    )
+    if accepted_board:
+        assert step["peer_operation_statuses"] == {
+            "review": "review_saved", "report": "accepted_report",
+            **({"followup_request": "rejected"} if mixed_followup else {}),
+        }
+    else:
+        assert "peer_operation_statuses" not in step
+    assert "Private title" not in str(result)
+    assert "Private report text" not in str(result)

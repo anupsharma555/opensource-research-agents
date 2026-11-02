@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Physical unit conversion using a fixed registry; no clinical equivalence.",
+  "properties": {
+    "fromUnit": {
+      "enum": [
+        "gram",
+        "milligram",
+        "kilogram",
+        "meter",
+        "centimeter",
+        "millimeter",
+        "second",
+        "millisecond",
+        "minute",
+        "hour",
+        "liter",
+        "milliliter"
+      ],
+      "title": "Fromunit",
+      "type": "string"
+    },
+    "toUnit": {
+      "enum": [
+        "gram",
+        "milligram",
+        "kilogram",
+        "meter",
+        "centimeter",
+        "millimeter",
+        "second",
+        "millisecond",
+        "minute",
+        "hour",
+        "liter",
+        "milliliter"
+      ],
+      "title": "Tounit",
+      "type": "string"
+    },
+    "value": {
+      "maximum": 1000000000000.0,
+      "minimum": -1000000000000.0,
+      "title": "Value",
+      "type": "number"
+    }
+  },
+  "required": [
+    "value",
+    "fromUnit",
+    "toUnit"
+  ],
+  "title": "ConvertUnitsInput",
+  "type": "object"
+}

@@ -54,6 +54,13 @@ request. Use saved inclusion and dispatch records to distinguish acceptance,
 preparation and actual sending; none of those establishes scientific uptake.
 The new event carries references and scope identifiers, not the raw text.
 
+If the preferred request size omits the latest scoped direction, preparation
+can retry the same source and tool plan within the already verified input
+limit. It adopts the larger request only when that direction gains exact text
+or a callable reading route while preserving peer input, delivered peer reads,
+host feedback and the selected tool descriptors. Prior completion reservations
+and rate headroom still apply; this does not raise a provider or campaign cap.
+
 ## Verification boundary
 
 Focused offline tests use the real authenticated handler without opening a

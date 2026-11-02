@@ -108,6 +108,38 @@ def test_projection_is_bounded_metadata_and_never_sends(tmp_path):
     assert export_pending(store, ExportConfig(), sender=lambda *_: pytest.fail("sent"))["status"] == "disabled"
 
 
+def test_signed_stage_adjustment_survives_projection_and_export(tmp_path):
+    store = StateStore(tmp_path)
+    _seed(store)
+
+    def adjust(tx):
+        budget = tx.get("mission_call_budget", "call-1")
+        stage = dict(budget["body"]["request_stage_token_estimate"])
+        stage["stages"] = [
+            {"kind": "pinned_instructions", "marginal_tokens": 60},
+            {"kind": "source_packet", "marginal_tokens": 45},
+            {"kind": "working_context", "marginal_tokens": -5},
+        ]
+        tx.put("mission_call_budget", "call-1", {
+            **budget["body"], "request_stage_token_estimate": stage,
+        }, expected_version=budget["version"])
+        return {"adjusted": True}
+
+    store.transact("signed-stage-adjustment", {}, adjust)
+    project_run(store, "mission-1", run_id="run-1")
+    sent = []
+    result = export_pending(store, _config(),
+                            sender=lambda _config, body: sent.append(body) or True)
+    assert result["sent"] == 3
+    model = next(body for body in sent if body["name"] == "osra.model.call")
+    attributes = model["attributes"]
+    assert attributes["osra.estimated.stage.working_context_tokens"] == -5
+    assert attributes["osra.estimated.input_tokens"] == 100
+    assert sum(value for key, value in attributes.items()
+               if key.startswith("osra.estimated.stage.")) == 100
+    assert attributes["gen_ai.usage.input_tokens"] == 110
+
+
 def test_missing_cache_is_unknown_not_zero_and_error_remains_observed(tmp_path):
     store = StateStore(tmp_path)
     _seed(store, cache_tokens=None, failed=True)
@@ -1298,3 +1330,91 @@ def test_tool_activity_cache_reuses_pages_and_invalidates_on_new_source_record(
         cache.get(store, "another-mission", "run-a")
     with pytest.raises(StateError, match="cache"):
         project_tool_activity(store, "mission-a", "run-a", activity_cache={})
+
+
+@pytest.mark.parametrize("delivery_form,tool_name,loop_index,timed", [
+    ("exact_saved_message", "fetch_source", 13, True),
+    ("host_projected_or_restricted", "fetch_source", 13, True),
+    ("host_projected_or_restricted", "request_capability", 999_999, False),
+])
+def test_long_tool_status_revision_stays_within_outbound_limit_and_drains(
+        tmp_path, monkeypatch, delivery_form, tool_name, loop_index, timed):
+    import ora.observability.export as exporter
+
+    store = StateStore(tmp_path)
+    _seed(store, with_budget=False)
+    step = {
+        "run_id": "run-1", "mission_id": "mission-1", "task_id": "task-1",
+        "call_ref": {"kind": "agent_call", "id": "call-1", "version": 1},
+        "response_ref": {"kind": "model_response_receipt", "id": "response-1", "version": 1},
+        "tool_call_id": "fc-synthetic", "step_id": "a" * 24,
+        "loop_index": loop_index, "tool_name": tool_name,
+        "selection_status": "verified", "execution_status": "executed",
+        "outcome": "completed" if tool_name == "request_capability" else "rejected",
+        "reuse_status": "unknown",
+        "delivery_status": "not_delivered_after_observation", "delivery_final": True,
+        "delivery_form": "none", "next_delivery_status": "no_next_captured_request",
+        "next_delivery_form": "none", "next_model_loop_index": None,
+        "result_in_next_prepared_request": False,
+        "result_in_next_captured_request": False,
+        "result_in_later_prepared_request": False,
+        "result_in_later_dispatched_request": False,
+        "result_in_later_captured_request": False,
+        "duration_seconds": 0.018 if timed else None,
+        "duration_basis": "executor_receipt_active_seconds_store_clock" if timed else None,
+        "interval_start_utc": "2026-01-01T00:00:00+00:00" if timed else None,
+        "interval_end_utc": "2026-01-01T00:00:00.018000+00:00" if timed else None,
+        "interval_basis": "single_capacity_attempt_wall_interval" if timed else None,
+        "selected_at_utc": "2026-01-01T00:00:00+00:00",
+    }
+    if tool_name == "request_capability":
+        step["selected_capability_name"] = "search_evidence_library"
+    monkeypatch.setattr(exporter, "build_tool_activity", lambda *_: {
+        "mission_id": "mission-1", "steps": [step],
+    })
+    assert project_tool_activity(store, "mission-1", "run-1")["created"] == 2
+    assert export_pending(store, _config(), mission_id="mission-1", run_id="run-1",
+                          sender=lambda *_: True)["sent"] == 2
+    old = next(row for row in store.records(EXPORT_KIND)
+               if row["body"]["name"].startswith("Loop "))
+    assert old["body"]["status"] == "sent"
+
+    step.update(
+        delivery_status="captured_later", delivery_form=delivery_form,
+        next_delivery_status="captured_request_not_confirmed_model_input",
+        next_delivery_form="none", next_model_loop_index=loop_index + 1,
+        result_in_next_prepared_request=True,
+        result_in_later_prepared_request=True,
+        result_in_later_dispatched_request=True,
+        result_in_later_captured_request=True,
+    )
+    assert project_tool_activity(store, "mission-1", "run-1")["created"] == 1
+    assert store.get(EXPORT_KIND, old["id"]) == old
+    revised = next(row for row in store.records(EXPORT_KIND)
+                   if row["body"]["name"].startswith("Loop ")
+                   and row["id"] != old["id"])
+    output = revised["body"]["attributes"]["output.value"]
+    assert revised["body"]["attributes"]["osra.tool.projection_revision"] == 2
+    assert revised["body"]["attributes"]["osra.tool.delivery_status"] == "captured_later"
+    assert len(output) <= 600
+    assert "Next model attempt:" in output
+    assert "no receipt confirms model input" in output
+    assert "Later delivery: captured later." in output
+    if delivery_form == "host_projected_or_restricted":
+        assert "full source text unproven" in output
+    else:
+        assert "exact saved tool message" in output
+    if timed:
+        assert "excludes model time" in output
+        assert "not model-call latency" in output
+    else:
+        assert "execution interval unavailable" in output
+        assert "Requested capability: search_evidence_library." in output
+        assert "Status update" not in output  # Optional prose must fit the same bound.
+    sent = []
+    assert export_pending(store, _config(), mission_id="mission-1", run_id="run-1",
+                          sender=lambda _config, body: sent.append(body["span_id"]) or True)[
+                              "sent"] == 1
+    assert sent == [revised["body"]["span_id"]]
+    assert store.get(EXPORT_KIND, old["id"]) == old
+    assert all(row["body"]["status"] == "sent" for row in store.records(EXPORT_KIND))

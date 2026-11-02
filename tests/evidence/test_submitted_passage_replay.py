@@ -1,5 +1,7 @@
 """Original pasted-input citations remain exact when checked windows are appended."""
 
+import hashlib
+
 import pytest
 
 from ora.coordination.board import ref
@@ -20,6 +22,21 @@ def test_original_submission_and_appended_window_replay_without_rewriting(tmp_pa
     assert packet['passages'][0]['locator'] == original['body']['locator']
     assert packet['passages'][1]['text'] == text[1600:2100]
     assert library.store.get(**saved['passage_refs'][0]) == original
+
+
+def test_exact_whole_submission_and_window_share_text_with_both_citations(tmp_path):
+    library, saved, text = supplied_without_quality_mapping(tmp_path)
+    window = read_source_window(library, 'whole-window', saved['copy_ref'],
+                                block_offset=0, char_offset=0, char_limit=5000)
+    selected = [*saved['passage_refs'], *window['passage_refs']]
+    packet = checked_model_text(library, saved['copy_ref'], selected)
+
+    assert packet['passage_refs'] == selected
+    assert len(packet['passages']) == 2
+    assert packet['text'].count(text) == 1
+    assert all(packet['text'].count(pointer['id']) == 1 for pointer in selected)
+    assert all(entry['locator'] in packet['text'] for entry in packet['passages'])
+    assert packet['text_sha256'] == hashlib.sha256(packet['text'].encode()).hexdigest()
 
 
 @pytest.mark.parametrize('change', ['text', 'locator', 'start', 'end', 'copy_ref', 'inspection_state'])

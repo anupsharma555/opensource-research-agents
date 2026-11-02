@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import urllib.error
 from pathlib import Path
@@ -247,6 +248,7 @@ def test_rate_limit_is_saved_without_retrying_same_vision_intent(tmp_path, monke
     assert store.get(**outcome.response_ref)["body"]["cache_observation"] == {
         "status": "unavailable",
     }
+    assert "output_rate_limit_observation" not in store.get(**outcome.response_ref)["body"]
     assert visible["status"] == "rate_limited"
     assert visible["retry_after_seconds"] == 3
     assert visible["interpretation"] is None
@@ -255,6 +257,37 @@ def test_rate_limit_is_saved_without_retrying_same_vision_intent(tmp_path, monke
         tx, outcome.response_ref, scope=SCOPE,
     ))
     assert replay == visible
+    assert reader.invoke_capture(intent, allow_live_calls=False) == outcome
+    assert calls == [1]
+
+
+def test_figure_output_minute_observation_is_numeric_only(tmp_path, monkeypatch):
+    store = StateStore(tmp_path)
+    document, page, ocr = _granted_page(store)
+    calls = []
+    private_error = {"error": {"type": "tokens", "code": "rate_limit_exceeded",
+                 "message": ("Rate limit reached for model `qwen/qwen3.8-27b` "
+                             "in organization PRIVATE_ORG on output tokens per minute "
+                             "(OTPM): Limit 1000, Used 120, Requested 1024.")}}
+    raw = json.dumps(private_error).encode()
+
+    def limited(_request, *, timeout):
+        calls.append(1)
+        raise urllib.error.HTTPError(
+            "https://api.groq.com/openai/v1/chat/completions", 429,
+            "synthetic limit", {"Retry-After": "3"}, io.BytesIO(raw),
+        )
+
+    reader = _reader(store, limited, monkeypatch)
+    intent = _prepare(reader, document, page, ocr)
+    outcome = reader.invoke_capture(intent, allow_live_calls=False)
+    receipt = store.get(**outcome.response_ref)["body"]
+    assert receipt["output_rate_limit_observation"] == {
+        "scope": "output_tokens_per_minute", "limit_tokens": 1000,
+        "used_tokens": 120, "requested_tokens": 1024,
+    }
+    assert "PRIVATE_ORG" not in json.dumps(receipt)
+    assert receipt["status"] == "rate_limited" and receipt["usage"] is None
     assert reader.invoke_capture(intent, allow_live_calls=False) == outcome
     assert calls == [1]
 

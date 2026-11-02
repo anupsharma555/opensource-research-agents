@@ -17,11 +17,11 @@ from tests.mission.test_report_dispatch_dependency import _prepared_report
 from tests.models.test_session import MODEL, ROOT, URL
 
 
-def _spec(store, intent_ref: dict, work_id: str) -> WorkSpec:
+def _spec(store, intent_ref: dict, work_id: str, *, run_id: str = "report-child") -> WorkSpec:
     body = store.get(**intent_ref)["body"]
     call_ref = body["call_ref"]
     return WorkSpec(
-        work_id=work_id, mission_id="mission", run_id="report-child",
+        work_id=work_id, mission_id="mission", run_id=run_id,
         proposal_ref=ref(store.get("board_proposal", body["task_id"])),
         actor_id=body["instance_id"], configuration_ref=body["configuration_ref"],
         input_refs=(), handler_id="mission-model", handler_version="1", kind="model",
@@ -72,7 +72,7 @@ def _revoke(store) -> None:
 def _sibling_spec(host: MissionService, bridge) -> WorkSpec:
     store = host.store
     sibling = host.registry.register(
-        "report-sibling-actor", mission_id="mission", run_id="report-child",
+        "report-sibling-actor", mission_id="mission", run_id="report-sibling-run",
         role_id="literature_acquisition", display_name="Synthetic sibling",
     )
     report_intent = store.get("model_request_intent", "model-intent:report-context-call:1")
@@ -87,12 +87,24 @@ def _sibling_spec(host: MissionService, bridge) -> WorkSpec:
     )
 
     def task(tx):
-        return ref(tx.put("board_proposal", "report-sibling-task", {
+        tx.put("mission_run", "report-sibling-run", {
+            "mission_id": "mission", "question": "Separate synthetic task",
+            "scope": "Independent sibling", "source_refs": [],
+        })
+        proposal = tx.put("board_proposal", "report-sibling-task", {
             "mission_id": "mission", "status": "open",
             "objective": "Separate task", "next_action": "Continue independently",
-        }))
+        })
+        control = tx.put("mission_task_control", "report-sibling-control", {
+            "mission_id": "mission", "run_id": "report-sibling-run",
+            "actor_id": sibling["id"], "task_id": proposal["id"], "source_refs": [],
+        })
+        return {"task_ref": ref(proposal), "control_ref": ref(control)}
 
-    store.transact("report-sibling-task", {}, task, mission_id="mission")
+    saved = store.transact(
+        "report-sibling-task", {}, task, mission_id="mission",
+    )
+    task_ref, control_ref = saved["task_ref"], saved["control_ref"]
     call = host.configurations.start_call(
         "report-sibling-call", call_id="report-sibling-call",
         configuration_id=config["id"], mission_id="mission",
@@ -100,11 +112,15 @@ def _sibling_spec(host: MissionService, bridge) -> WorkSpec:
         loaded_skill_ids=[], exposed_tool_ids=["evidence_lookup"],
         require_common_tools=False,
     )
+    pack = WorkingContext(store).assemble(ref(call), task_ref, control_ref=control_ref)
+    assert not WorkingContext(store).context_source_dependency_refs(pack)
     prepared = bridge.prepare(
         call_id=call["id"], call_version=call["version"], phase="collect",
-        messages=[{"role": "user", "content": "Separate synthetic task"}], sources=(),
+        messages=pack.messages, sources=(),
     )
-    return _spec(store, prepared.intent_ref, "report-sibling-model-work")
+    WorkingContext(store).save_inclusion("report-sibling-inclusion", pack, prepared.intent_ref)
+    return _spec(store, prepared.intent_ref, "report-sibling-model-work",
+                 run_id="report-sibling-run")
 
 
 def test_report_only_revocation_requeues_with_truthful_context_and_sibling_progress(
@@ -175,9 +191,9 @@ def test_report_revocation_during_session_preflight_is_local_no_effect(
     try:
         original = bridge.invoke_capture
 
-        def revoke_then_invoke(pointer):
+        def revoke_then_invoke(pointer, *, pre_dispatch_check=None):
             _revoke(host.store)
-            return original(pointer)
+            return original(pointer, pre_dispatch_check=pre_dispatch_check)
 
         monkeypatch.setattr(bridge, "invoke_capture", revoke_then_invoke)
         result = host._model_work(spec)
@@ -245,7 +261,7 @@ def test_dispatch_marker_does_not_become_no_effect_recovery(
         tmp_path, monkeypatch,
     )
     try:
-        def marker_then_fail(_pointer):
+        def marker_then_fail(_pointer, *, pre_dispatch_check=None):
             def save(tx):
                 return ref(tx.put("model_dispatch_attempt", f"model-dispatch:{intent_ref['id']}", {
                     "mission_id": "mission", "intent_ref": intent_ref,

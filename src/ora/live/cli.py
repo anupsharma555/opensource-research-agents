@@ -40,6 +40,8 @@ def configure(parser):
             command.add_argument("--port", type=int, default=0)
             command.add_argument("--runtime", choices=("mission", "legacy"), default="mission",
                                  help="Shared Stage 4 service, or the prior supplied-evidence host")
+            command.add_argument("--discovery-http", choices=("urllib", "httpx"), default="urllib",
+                                 help="HTTPX pools provider connections and uses environment proxies; urllib also supports system proxies")
             command.add_argument("--run-budget-usd", type=float, default=0.10)
         elif action == "open":
             command.add_argument("--browser", action="store_true")
@@ -318,6 +320,8 @@ def main(args, root):
 def _create_host(root, state_dir, args):
     """Select one state owner explicitly; preserve historical host databases."""
     if getattr(args, "runtime", "mission") == "legacy":
+        if getattr(args, "discovery_http", "urllib") != "urllib":
+            raise ValueError("Pooled discovery HTTP is available only for the mission runtime")
         from .engine import ResearchHost
         from .provider import GroqProvider
 
@@ -331,4 +335,5 @@ def _create_host(root, state_dir, args):
     from ora.mission import MissionService
     from ora.observability.config import runtime_export_config
 
-    return MissionService(root, state_dir, trace_config=runtime_export_config(root))
+    return MissionService(root, state_dir, trace_config=runtime_export_config(root),
+                          discovery_http=getattr(args, "discovery_http", "urllib"))

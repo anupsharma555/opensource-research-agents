@@ -18,8 +18,10 @@ import pytest
 from ora.contracts.models import LiveStartRequest
 from ora.coordination.board import ref
 from ora.mission import service as service_module
+from ora.mission.tool_catalog import UNHANDLED_COMMON_TOOLS
 from ora.models import ModelSession
 from ora.models.token_estimate import LEGACY_BASIS, TOKENIZER_BASIS, estimate_request_tokens
+from tests.mission.availability_assertions import catalog_tool_names
 from tests.mission.test_capability_catalog import _index
 from tests.mission.test_service import ROOT, service, tool
 
@@ -91,8 +93,15 @@ def test_small_output_plan_requests_keep_full_catalog_and_exact_admission_across
             assert packet["reasoning_effort"] == "medium"
             catalog = _index(packet["messages"][0]["content"])
             # Full current catalog includes web navigation and both document readers.
-            assert len(catalog["tools"]) == 54
-            assert {"save_plan", "read_plan", "browser_search", "search_scholarly"} <= set(catalog["tools"])
+            saved_intent = next(
+                item for item in host.store.records("model_request_intent")
+                if item["body"]["request_sha256"] == hashlib.sha256(raw).hexdigest()
+            )
+            saved_call = host.store.get(**saved_intent["body"]["call_ref"])
+            assert catalog_tool_names(catalog) == (
+                set(saved_call["body"]["permitted_tools"]) - UNHANDLED_COMMON_TOOLS
+            )
+            assert {"save_plan", "read_plan", "browser_search", "search_scholarly"} <= catalog_tool_names(catalog)
             assert catalog["skills"]["task-planning"]["state"] == "available_to_activate"
             attached = {item["function"]["name"] for item in packet["tools"]}
             if step == 1:
@@ -220,7 +229,10 @@ def test_small_output_plan_requests_keep_full_catalog_and_exact_admission_across
         assert any(row["legacy_byte_estimate"] > OBSERVED_LIMIT for row in sizing)
         (tmp_path / "admission-sizing.json").write_text(json.dumps({
             "proof_kind": "offline_scripted_admission", "output_cap": output_cap,
-            "observed_limit_tokens": observed_limit, "catalog_count": 54,
+            "observed_limit_tokens": observed_limit,
+            "catalog_count": len(catalog_tool_names(_index(
+                json.loads(dispatch_bytes[0])["messages"][0]["content"]
+            ))),
             "prompts": list(PROMPTS), "requests": sorted(sizing, key=lambda row: row["dispatch_index"]),
         }, indent=2) + "\n")
     finally:
@@ -284,7 +296,10 @@ def test_v13_waiting_preparation_recovers_at_same_packer_with_small_output_cap(
         assert estimate.basis == TOKENIZER_BASIS and estimate.fallback_reason is None
         packet = json.loads(raw)
         assert packet["max_completion_tokens"] == 1536
-        assert len(_index(packet["messages"][0]["content"])["tools"]) == 54
+        call = resumed.store.get(**intent["body"]["call_ref"])
+        assert catalog_tool_names(_index(packet["messages"][0]["content"])) == (
+            set(call["body"]["permitted_tools"]) - UNHANDLED_COMMON_TOOLS
+        )
         names = {item["function"]["name"] for item in packet["tools"]}
         assert "save_plan" in names and "read_plan" not in names
         assert current_budget["body"]["estimated_tokens_with_completion_reservation"] <= OBSERVED_LIMIT

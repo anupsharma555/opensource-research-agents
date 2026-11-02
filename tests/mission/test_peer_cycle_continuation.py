@@ -10,10 +10,12 @@ from ora.contracts.models import LiveStartRequest
 from tests.mission.test_service import serialized_peer_name, service, tool
 
 
-def _drive_until(host, run_id: str, predicate) -> None:
+def _drive_until(host, run_id: str, predicate, transport_failures=None) -> None:
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         host._drive_run(host._run(run_id))
+        if transport_failures:
+            raise transport_failures[0]
         if predicate():
             return
         time.sleep(.005)
@@ -45,6 +47,7 @@ def test_reciprocal_peer_waits_replan_then_read_review_and_finish(tmp_path, monk
     read_parts = {"Sage": [], "Mxra": []}
     host = None
     run = None
+    transport_failures = []
 
     def transport(request, *, timeout):
         body = json.loads(request.data)
@@ -157,12 +160,16 @@ def test_reciprocal_peer_waits_replan_then_read_review_and_finish(tmp_path, monk
             assert outgoing["body"]["accepted_answer_ref"] is None
             answer_ref = outgoing["body"]["answer_refs"][0]
             peer_report_ref = host.store.get(**answer_ref)["body"]["artifact_ref"]
-            assert answer_ref in context["request_answer_refs"]
+            cue = next(item for item in context["peer_answer_review_cues"]
+                       if item["answer_ref"] == answer_ref)
+            assert cue["request_ref"]["id"] == outgoing["id"]
+            assert cue["read_request"]["id"] == peer_report_ref["id"]
             assert "peer_answer_previews" not in context
             assert report_text[other] not in json.dumps(body["messages"])
             material = next(item for item in context["shared_materials"]["entries"]
                             if item["ref"] == peer_report_ref)
             read = material["read_request"]
+            assert read == cue["read_request"]
             assert read["tool"] == "read_context_record"
             assert "read_context_record" in {
                 item["function"]["name"] for item in body["tools"]
@@ -172,7 +179,14 @@ def test_reciprocal_peer_waits_replan_then_read_review_and_finish(tmp_path, monk
             }, response_index)
         raise AssertionError(f"Unexpected {role} continuation after {name}")
 
-    host = service(tmp_path, monkeypatch, transport)
+    def recording_transport(request, *, timeout):
+        try:
+            return transport(request, timeout=timeout)
+        except Exception as exc:
+            transport_failures.append(exc)
+            raise
+
+    host = service(tmp_path, monkeypatch, recording_transport)
     try:
         run = host.start(LiveStartRequest(
             request_id="synthetic-reciprocal-peer-wait",
@@ -180,7 +194,8 @@ def test_reciprocal_peer_waits_replan_then_read_review_and_finish(tmp_path, monk
             agent_ids=["agent-synthesis", "agent-critique"],
             required_agent_ids=["agent-synthesis", "agent-critique"],
         ))
-        _drive_until(host, run.run_id, lambda: host._run(run.run_id)["body"]["status"] == "completed")
+        _drive_until(host, run.run_id, lambda: host._run(run.run_id)["body"]["status"] == "completed",
+                     transport_failures)
         assert observed == {"cycle_feedback": True, "read": {"Sage", "Mxra"},
                             "reviewed": {"Sage", "Mxra"}}
         assert len({item["body"]["actor_id"] for item in host.store.records(

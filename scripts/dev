@@ -25,6 +25,7 @@ UV_VERSION = "0.9.21"
 NODE_VERSION = (ROOT / ".node-version").read_text().strip()
 PYTHON_VERSION = (ROOT / ".python-version").read_text().strip()
 NPM_VERSION = "11.19.0"
+CARGO_AUDIT_VERSION = "0.22.2"
 PYTHON = ROOT / ".venv/bin/python"
 LOCKS = ["uv.lock", "package-lock.json", "desktop/src-tauri/Cargo.lock"]
 
@@ -213,7 +214,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=["bootstrap", "setup", "doctor", "check", "generate", "ui", "desktop", "inspect", "live", "mission", "reasoning-export", "corpus"],
+        choices=["bootstrap", "setup", "doctor", "check", "generate", "ui", "desktop", "inspect", "live", "mission", "reasoning-export", "corpus", "frontend", "browser", "browser-install", "atlas-fixture", "desktop-test", "audit", "audit-install", "evaluate-fts", "analysis-eval-setup", "analysis-eval", "analysis-eval-test"],
     )
     parser.add_argument(
         "--offline", action="store_true", help="Use cached dependencies only during setup"
@@ -222,12 +223,21 @@ def main():
         "--observability", action="store_true",
         help="Install optional OpenTelemetry export dependencies during setup",
     )
+    parser.add_argument("--audit", action="store_true", help="Install the pinned Python advisory checker during setup")
     parser.add_argument("--view", choices=["findings", "sources", "diagnostics"], default="sources")
+    parser.add_argument("--test-app", action="store_true", help="Build a separate native test app with isolated settings")
+    parser.add_argument("--with-deps", action="store_true", help="Install browser OS dependencies during browser-install (Linux CI)")
     args, remaining = parser.parse_known_args()
-    if args.command not in {"live", "mission", "reasoning-export", "corpus"} and remaining:
+    if args.command not in {"live", "mission", "reasoning-export", "corpus", "frontend", "browser", "atlas-fixture", "audit", "evaluate-fts", "analysis-eval"} and remaining:
         parser.error("unrecognized arguments: " + " ".join(remaining))
     if args.observability and args.command != "setup":
         parser.error("--observability is available only with setup")
+    if args.audit and args.command != "setup":
+        parser.error("--audit is available only with setup")
+    if args.test_app and args.command != "desktop":
+        parser.error("--test-app is available only with desktop")
+    if args.with_deps and args.command != "browser-install":
+        parser.error("--with-deps is available only with browser-install")
     try:
         if args.command == "bootstrap":
             bootstrap()
@@ -237,6 +247,8 @@ def main():
             command = [uv_executable(), "sync", "--locked", "--python", PYTHON_VERSION]
             if args.observability:
                 command.extend(["--extra", "observability"])
+            if args.audit:
+                command.extend(["--group", "audit"])
             if args.offline:
                 command.append("--offline")
             run(command)
@@ -246,6 +258,32 @@ def main():
             run(command, node_environment())
             verify_locks(before)
             doctor()
+            return
+        if args.command == "analysis-eval-setup":
+            project = ROOT / "experiments/analysis_comparison"
+            experiment_lock = project / "uv.lock"
+            before, experiment_hash = locks(), hashlib.sha256(experiment_lock.read_bytes()).hexdigest()
+            command = [uv_executable(), "sync", "--project", project, "--locked", "--python", PYTHON_VERSION]
+            if args.offline:
+                command.append("--offline")
+            run(command)
+            verify_locks(before)
+            if hashlib.sha256(experiment_lock.read_bytes()).hexdigest() != experiment_hash:
+                raise SetupError("The isolated experiment lock changed during locked setup")
+            return
+        if args.command in {"evaluate-fts", "analysis-eval", "analysis-eval-test"}:
+            project = ROOT / "experiments/analysis_comparison"
+            python = PYTHON if args.command == "evaluate-fts" else project / ".venv/bin/python"
+            if not python.exists():
+                setup = "setup" if args.command == "evaluate-fts" else "analysis-eval-setup"
+                raise SetupError(f"Evaluation Python unavailable. Run scripts/dev {setup} first.")
+            if capture([python, "--version"]) != f"Python {PYTHON_VERSION}":
+                raise SetupError("Evaluation requires the repository-pinned Python version")
+            if args.command == "analysis-eval-test":
+                run([python, "-m", "unittest", "discover", "-s", project, "-p", "test_*.py"])
+            else:
+                script = ROOT / "scripts/evaluate_evidence_fts.py" if args.command == "evaluate-fts" else project / "run.py"
+                run([python, script, *remaining])
             return
         if args.command == "corpus":
             if not PYTHON.exists():
@@ -259,8 +297,32 @@ def main():
             return
         doctor()
         env = node_environment()
+        env["PLAYWRIGHT_BROWSERS_PATH"] = str(ROOT / ".local/cache/playwright")
         if args.command in {"live", "mission"}:
             run([PYTHON, "-m", "ora.cli", args.command, *sys.argv[2:]], env)
+        elif args.command == "frontend":
+            if not remaining or remaining[0] not in {"test", "build", "lint:ui"}:
+                raise SetupError("Use frontend test, build or lint:ui, followed by optional test arguments.")
+            run(["npm", "run", remaining[0], "--", *remaining[1:]], env)
+        elif args.command == "browser-install":
+            run(["npm", "run", "browser:install", *(["--", "--with-deps"] if args.with_deps else [])], env)
+        elif args.command == "browser":
+            run(["npm", "run", "build"], env)
+            run(["npm", "run", "test:browser", "--", *remaining], env)
+        elif args.command == "atlas-fixture":
+            run([PYTHON, ROOT / "scripts/atlas_fixture.py", *remaining], env)
+        elif args.command == "desktop-test":
+            run(["cargo", "test", "--locked", "--manifest-path", ROOT / "desktop/src-tauri/Cargo.toml"], env)
+        elif args.command == "audit-install":
+            audit_env = {**env, "CARGO_HOME": str(ROOT / ".local/cache/cargo-audit")}
+            run(["cargo", "install", "cargo-audit", "--version", CARGO_AUDIT_VERSION,
+                 "--locked", "--no-default-features", "--root", ROOT / ".local/tools/cargo-audit"], audit_env)
+        elif args.command == "audit":
+            # Unlike check, this explicitly contacts public advisory services.
+            raise SystemExit(subprocess.run(
+                [str(PYTHON), str(ROOT / "scripts/dependency_audit.py"), *remaining],
+                cwd=ROOT, env=env,
+            ).returncode)
         elif args.command == "check":
             before = locks()
             for command in [
@@ -270,6 +332,7 @@ def main():
                 [PYTHON, "-m", "ruff", "check", "src", "tests", "scripts"],
                 [PYTHON, "-m", "pytest", "-q"],
                 ["npm", "run", "contracts:check"],
+                ["npm", "run", "lint:ui"],
                 ["npm", "test"],
                 ["npm", "run", "build"],
             ]:
@@ -285,7 +348,10 @@ def main():
                 raise SetupError(
                     "The native Mac prototype is checked on macOS. Use scripts/dev ui for the portable React view."
                 )
-            run(["npm", "run", "desktop:build", "--", "--debug", "--bundles", "app"], env)
+            command = ["npm", "run", "desktop:build", "--", "--debug", "--bundles", "app"]
+            if args.test_app:
+                command.extend(["--config", str(ROOT / "desktop/src-tauri/tauri.test.conf.json")])
+            run(command, env)
         elif args.command == "inspect":
             run([PYTHON, "-m", "ora.cli", "inspect-sample", "--view", args.view])
     except (SetupError, OSError, urllib.error.URLError, subprocess.CalledProcessError) as error:
