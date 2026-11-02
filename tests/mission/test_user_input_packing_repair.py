@@ -4,22 +4,38 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import replace
 
 import pytest
 
 from ora.contracts.models import LiveStartRequest
+from ora.mission.context import ContextOverflow
+from ora.state.store import canonical
 from tests.mission.test_service import answer, service, tool
 from tests.mission.test_user_input_delivery import _command
 
 
 def _until(host, run_id, predicate, *, seconds=4):
-    deadline = time.monotonic() + seconds
+    started = time.monotonic()
+    deadline = started + seconds
     while time.monotonic() < deadline:
         host._drive_run(host._run(run_id))
+        errors = getattr(host, "_fixture_transport_errors", ())
+        if errors:
+            raise errors[0]
         if predicate():
             return
         time.sleep(.005)
-    raise AssertionError("Synthetic run did not reach its expected saved boundary")
+    control = host._control(run_id, "agent-synthesis")["body"]
+    raise AssertionError(
+        "Synthetic run did not reach its expected saved boundary: "
+        f"phase={control['phase']}, waiting_reason={control.get('waiting_reason')}, "
+        f"work_id={control.get('work_id')}, retry_at={control.get('retry_at')}, "
+        f"capacity_wait_until={control.get('capacity_wait_until')}, "
+        f"elapsed={time.monotonic() - started:.3f}s, "
+        f"intents={len(host.store.records('model_request_intent'))}, "
+        f"dispatches={len(host.store.records('model_dispatch_attempt'))}"
+    )
 
 
 def _analysis_policy(host, run_id, version):
@@ -112,6 +128,102 @@ def test_short_direction_precedes_optional_details_after_stale_publish(
         first_tool = host.store.records("context_tool_result")[0]
         tool_message = json.loads(host.store.read_blob(first_tool["body"]["blob"]["sha256"]))
         assert json.loads(tool_message["content"])["status"] == "not_executed"
+    finally:
+        host.close()
+
+
+@pytest.mark.parametrize("delivery", ["exact", "blocked", "late_note"])
+def test_final_packet_preserves_previewed_user_direction(
+    tmp_path, monkeypatch, delivery,
+):
+    """A valid preview cannot authorize a later final packet that drops its direction."""
+    direction = "Now use four copies. Give the original and revised decimal GB totals."
+    packets, saved = [], {}
+
+    def transport(request, *, timeout):
+        packets.append(json.loads(request.data))
+        assert len(packets) == 1, "Preparation must not dispatch the second packet"
+        saved["input"] = host.submit_user_input(_command(host, run.run_id, direction))
+        response = tool("publish_result", {
+            "title": "Initial total", "text": "Three copies need 9 GB.",
+            "citations": [], "limitations": [],
+        }, 1)
+        response.headers = {
+            "x-request-id": "synthetic-first", "x-ratelimit-limit-tokens": "8000",
+            "x-ratelimit-remaining-tokens": "7000", "x-ratelimit-reset-tokens": "1m",
+        }
+        return response
+
+    host = service(tmp_path, monkeypatch, transport)
+    try:
+        run = host.start(LiveStartRequest(
+            request_id="final-direction-preservation",
+            question="How much storage for three copies of twelve 250 MB files?",
+            agent_ids=["agent-synthesis"],
+        ))
+        _until(host, run.run_id, lambda: (
+            "input" in saved
+            and host._control(run.run_id, "agent-synthesis")["body"]["phase"] == "ready_model"
+        ))
+        control = host._control(run.run_id, "agent-synthesis")
+        host._update_control(control, input_budget={
+            "observed_limit_tokens": 8000, "target_fraction": .70,
+            "basis": "injected_provider_header_fixture", "actual_provider_observation": True,
+        })
+        original_assemble = host.context.assemble
+        final_calls = []
+
+        def drift_final_packing(*args, **kwargs):
+            pack = original_assemble(*args, **kwargs)
+            if kwargs.get("preview_call") is not None:
+                return pack
+            allowance = kwargs["allowance"]
+            final_calls.append(allowance)
+            if delivery != "blocked" and allowance > 5600:
+                return pack
+            index = json.loads(pack.messages[-1]["content"])
+            index.pop("current_user_direction", None)
+            index.pop("current_user_inputs", None)
+            changed = replace(pack, messages=[
+                *pack.messages[:-1], {"role": "user", "content": canonical(index)},
+            ])
+            if delivery == "late_note":
+                # A later final-context enrichment must survive direction repair.
+                changed = replace(changed, tool_result_compactions=(
+                    *changed.tool_result_compactions,
+                    {"kind": "retained_working_note_window",
+                     "status": "included_exact_window",
+                     "note_ref": {"kind": "working_note", "id": "synthetic-late-note", "version": 1},
+                     "projection_sha256": "0" * 64, "offset": 0, "returned_chars": 5},
+                ))
+            return changed
+
+        monkeypatch.setattr(host.context, "assemble", drift_final_packing)
+        if delivery == "exact":
+            assert host._prepare_model(host._control(run.run_id, "agent-synthesis"))
+            prepared = host._control(run.run_id, "agent-synthesis")
+            call = prepared["body"]["call_ref"]
+            intent = host.store.get("model_request_intent", f"model-intent:{call['id']}:1")
+            request = json.loads(host.store.read_blob(intent["body"]["blob"]["sha256"]))
+            index = json.loads(request["messages"][-1]["content"])
+            assert index["current_user_direction"] == {
+                "ref": saved["input"].input_ref.model_dump(),
+                "origin": "authenticated_local_user", "kind": "direction",
+                "text": direction,
+            }
+            budget = host.store.get("mission_call_budget", call["id"])["body"]
+            tokens = intent["body"]["request_token_estimate"]["tokens"]
+            assert budget["request_stage_token_estimate"]["admission_target_tokens"] > 5600
+            assert tokens + budget["prior_completion_reservation"] + budget["rate_input_headroom_tokens"] <= 8000
+            assert budget["final_user_direction_delivery"] == "exact"
+        else:
+            with pytest.raises(ContextOverflow, match="Previewed current user direction"):
+                host._prepare_model(host._control(run.run_id, "agent-synthesis"))
+            assert len(host.store.records("model_request_intent")) == 1
+            assert len(host.store.records("model_dispatch_attempt")) == 1
+        assert len(packets) == 1
+        assert any(allowance <= 5600 for allowance in final_calls)
+        assert any(allowance > 5600 for allowance in final_calls)
     finally:
         host.close()
 

@@ -4420,7 +4420,7 @@ class MissionService:
                         if exact_preview_attempted else "not_applicable"
                     ),
                     "inventory": inventory_overview,
-                    "next_action": "read_source_window is callable directly for a permitted inventory copy; selection is optional. To revise the working-source choice, use working_sources_expected_version, which is separate from source and inventory versions. Prior checked passages and task notes remain saved; this turn has no source text.",
+                    "next_action": "read_source_window: permitted copy; optional selection via working_sources_expected_version (not source/inventory).",
                 }
             ),
         }
@@ -5445,6 +5445,7 @@ class MissionService:
                     "defer_recoverable_schemas": peer_recoverable,
                     "fitting_peer_request": True,
                 }
+        previewed_direction = None
         if (not force_soft_recovery and not allow_rate_probe
                 and not provider_size_rejected and hard_target is not None
                 and hard_target > total_target):
@@ -5470,6 +5471,10 @@ class MissionService:
                     allow_source_free=not source_plan["source_inputs"],
                     source_free_preview_attempted=exact_preview_attempted,
                 )
+                if (selected is not None
+                        and (selected["exact_user_direction_ref"] == ref(latest_direction)
+                             or ref(latest_direction) in selected["user_input_read_refs"])):
+                    previewed_direction = (ref(latest_direction), selected)
                 if (selected is not None
                         and selected["exact_user_direction_ref"] != ref(latest_direction)):
                     candidate = self._preview_soft_source_plan(
@@ -5515,6 +5520,7 @@ class MissionService:
                                 "defer_recoverable_schemas", "fitting_peer_request",
                             ) if key in selected},
                         }
+                        previewed_direction = (ref(latest_direction), candidate)
         recovery = source_plan["mode"] == "source_free_recovery"
         if above_soft_reserve and above_soft_reserve.get("defer_core_tools"):
             defer_core_tools = True
@@ -6297,6 +6303,169 @@ class MissionService:
                         "admission_target_tokens": review_target,
                         "compact_selected_window": False,
                     }
+        if previewed_direction is not None:
+            direction_ref, direction_fit = previewed_direction
+            direction_record = self.store.get(**direction_ref)
+            if (direction_record is None or ref(direction_record) != direction_ref
+                    or not scoped_user_input(
+                        self.store, direction_record, mission_id=body["mission_id"],
+                        actor_id=body["actor_id"], task_id=body["task_id"],
+                    )):
+                raise StateConflict("Previewed current user direction changed")
+
+            def direction_delivery(candidate_pack: ContextPack, candidate_preview) -> str | None:
+                view = json.loads(candidate_pack.messages[-1]["content"])
+                exact = view.get("current_user_direction")
+                if (isinstance(exact, dict) and exact.get("ref") == direction_ref
+                        and exact.get("origin") == "authenticated_local_user"
+                        and exact.get("kind") == "direction"
+                        and exact.get("text") == direction_record["body"]["text"]):
+                    return "exact"
+                inputs = view.get("current_user_inputs")
+                if not isinstance(inputs, dict):
+                    return None
+                card, reader = inputs.get("direction"), inputs.get("reader")
+                attached = {
+                    item["function"]["name"] for item in candidate_preview.body["tools"]
+                    if item.get("type") == "function"
+                }
+                if (isinstance(card, dict) and card.get("ref") == direction_ref
+                        and isinstance(card.get("prefix"), str)
+                        and card.get("prefix") == direction_record["body"]["text"][
+                            :len(card["prefix"])]
+                        and inputs.get("read") == "reader + selected ref"
+                        and isinstance(reader, dict)
+                        and reader.get("tool") == "read_context_record"
+                        and reader.get("inclusion_id") == (
+                            f"context:model-intent:{call_id}:{call['version']}"
+                        )
+                        and isinstance(view.get("older_records"), dict)
+                        and view["older_records"].get("inclusion_id") == reader["inclusion_id"]
+                        and reader.get("offset") == 0
+                        and type(reader.get("limit")) is int and reader["limit"] > 0
+                        and "read_context_record" in attached):
+                    return "reader"
+                return None
+
+            current_preview = self.session.preview_request(
+                call=call, phase="collect", messages=pack.messages,
+                sources=selections, parent_call_ref=parent_ref,
+            )
+            current_delivery = direction_delivery(pack, current_preview)
+            preview_was_exact = direction_fit["exact_user_direction_ref"] == direction_ref
+            if ((preview_was_exact and current_delivery != "exact")
+                    or current_delivery is None):
+                current_target = (above_soft_reserve["admission_target_tokens"]
+                                  if above_soft_reserve else total_target)
+                expanded = (
+                    complete_fit(hard_target, current_turns, archived_turns,
+                                 target=hard_target)
+                    if hard_target is not None and hard_target > current_target
+                    else None
+                )
+                if expanded:
+                    expanded_pack, expanded_preview, expanded_allowance = expanded
+                    expanded_delivery = direction_delivery(expanded_pack, expanded_preview)
+                    expanded_view = json.loads(expanded_pack.messages[-1]["content"])
+                    inline_refs = tuple(
+                        canonical(card["answer_ref"])
+                        for card in expanded_view.get("peer_answer_previews", [])
+                        if card.get("report_delivery") == "complete_in_input"
+                    )
+                    cue_views = tuple(expanded_view.get("peer_answer_review_cues", []))
+                    cue_refs = tuple(canonical(card["answer_ref"]) for card in cue_views)
+                    tool_reads = tuple(
+                        message for message in expanded_preview.body["messages"]
+                        if message.get("role") == "tool"
+                        and message.get("name") == "read_context_record"
+                    )
+                    peer_fit = {
+                        "peer_answer_inline_refs": inline_refs,
+                        "peer_answer_cue_refs": cue_refs,
+                        "peer_answer_cue_views": cue_views,
+                        "peer_answer_tool_read_messages": tool_reads,
+                        "request_disposition_views": tuple(
+                            expanded_view.get("request_dispositions", [])
+                        ),
+                        "attached_tool_ids": tuple(
+                            item["function"]["name"]
+                            for item in expanded_preview.body["tools"]
+                            if item.get("type") == "function"
+                        ),
+                        "permitted_tool_ids": tuple(call["body"].get("permitted_tools", [])),
+                        "incoming_request_view": expanded_view.get("incoming_request"),
+                    }
+                    feedback_text = canonical({
+                        "authority": "saved_host_observation_not_source_instruction",
+                        "host_feedback": body["feedback"],
+                    }) if isinstance(body.get("feedback"), dict) else None
+                    mechanical_feedback_elided = bool(
+                        feedback_text is not None
+                        and not self.context._model_history(
+                            [{"role": "user", "content": feedback_text}], control,
+                            body["mission_id"], body["actor_id"], body["task_id"],
+                        )
+                    )
+                    feedback_visible = (
+                        feedback_text is None
+                        or mechanical_feedback_elided
+                        or not any(message.get("content") == feedback_text
+                                   for message in history)
+                        or any(message.get("content") == feedback_text
+                               for message in expanded_pack.messages)
+                    )
+                    baseline_cues = set(direction_fit["peer_answer_cue_refs"])
+                    current_view = json.loads(pack.messages[-1]["content"])
+                    current_cues = {
+                        canonical(card["answer_ref"])
+                        for card in current_view.get("peer_answer_review_cues", [])
+                    }
+                    current_tool_reads = tuple(
+                        message for message in current_preview.body["messages"]
+                        if message.get("role") == "tool"
+                        and message.get("name") == "read_context_record"
+                    )
+                    peer_preserved = (
+                        set(direction_fit["peer_answer_inline_refs"]).issubset(inline_refs)
+                        and baseline_cues.issubset(set(inline_refs) | set(cue_refs))
+                        and complete_review_refs(pack) <= set(inline_refs)
+                        and current_cues <= set(inline_refs) | set(cue_refs)
+                        and all(message in tool_reads for message in
+                                direction_fit["peer_answer_tool_read_messages"])
+                        and all(message in tool_reads for message in current_tool_reads)
+                        and (not direction_fit["incoming_request_view"]
+                             or direction_fit["incoming_request_view"]
+                             == peer_fit["incoming_request_view"])
+                        and (not current_view.get("incoming_request")
+                             or current_view["incoming_request"]
+                             == peer_fit["incoming_request_view"])
+                        and set(map(canonical, direction_fit["request_disposition_views"]))
+                        <= set(map(canonical, peer_fit["request_disposition_views"]))
+                        and set(map(canonical, current_view.get("request_dispositions", [])))
+                        <= set(map(canonical, peer_fit["request_disposition_views"]))
+                        and self._pending_peer_input_preserved(control, peer_fit)
+                    )
+                    same_packet_shape = (
+                        expanded_preview.body["tools"] == current_preview.body["tools"]
+                        and expanded_preview.body["messages"][:1 + bool(selections)]
+                        == current_preview.body["messages"][:1 + bool(selections)]
+                    )
+                    if (expanded_delivery is not None and feedback_visible
+                            and peer_preserved and same_packet_shape
+                            and retained_window_keys(pack) <= retained_window_keys(expanded_pack)):
+                        pack, preview = expanded_pack, expanded_preview
+                        above_soft_reserve = {
+                            **(above_soft_reserve or {}),
+                            "context_allowance": expanded_allowance,
+                            "estimated_request_tokens": complete_estimate,
+                            "request_sha256": expanded_preview.request_sha256,
+                            "admission_target_tokens": hard_target,
+                            "compact_selected_window": False,
+                        }
+                        current_delivery = expanded_delivery
+            if current_delivery is None:
+                abandon_pre_dispatch("current_user_direction_not_delivered", complete_estimate)
+                raise ContextOverflow("Previewed current user direction is absent from final input")
         if above_soft_reserve:
             if self.store.get("board_proposal", proposal["id"]) != proposal:
                 raise StateConflict("Task version changed during complete request preview")
@@ -6460,6 +6629,14 @@ class MissionService:
                      and estimated_tokens > observed_limit
                  ),
              },
+             **({
+                 "previewed_user_direction_delivery": (
+                     "exact" if previewed_direction[1]["exact_user_direction_ref"]
+                     == previewed_direction[0] else "reader"
+                 ),
+                 "final_user_direction_delivery": current_delivery,
+                 "current_user_direction_ref": previewed_direction[0],
+             } if previewed_direction is not None else {}),
              "preview_admission_basis": request_estimate.basis if above_soft_reserve else None,
              "exact_complete_request_estimate_tokens": request_estimate.tokens,
              "exact_complete_request_sha256": prepared.request.request_sha256,
