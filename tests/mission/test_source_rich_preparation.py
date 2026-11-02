@@ -525,7 +525,7 @@ def test_source_rich_skips_pending_peer_and_keeps_question_reader(
 def test_source_rich_requires_whole_current_permitted_copies(
     tmp_path, monkeypatch, boundary,
 ):
-    host, run, sources, _texts = _three_source_host(tmp_path, monkeypatch)
+    host, run, sources, texts = _three_source_host(tmp_path, monkeypatch)
     try:
         control = host._control(run.run_id, "agent-synthesis")
         if boundary == "partial":
@@ -559,12 +559,53 @@ def test_source_rich_requires_whole_current_permitted_copies(
         assert not host._complete_source_rich_candidate(control, plan, allowed, excluded)
         if boundary == "active_skill":
             return  # The synthetic active pin has no installed skill runtime.
-        _control, _call, _intent, packet, _budget = _prepared(
+        _control, call, _intent, packet, budget = _prepared(
             host, run.run_id, "agent-synthesis",
         )
         names = {item["function"]["name"] for item in packet["tools"]}
         assert names != {"discover_capabilities", "request_capability", "publish_result"}
         if boundary == "revoked":
+            assert budget["source_turn_mode"] == "source_free_recovery"
+            assert budget["exact_complete_request_estimate_tokens"] <= 6800
+            payloads = [json.loads(message["content"]) for message in packet["messages"]
+                        if message["role"] == "user"
+                        and message["content"].startswith("{")]
+            inventory_notice = next(item for item in payloads if item.get("authority")
+                                    == "saved_host_source_index_not_source_instruction")
+            assert inventory_notice["source_context_mode"] == "source_free_recovery"
+            assert [item["ref"] for item in inventory_notice["inventory"]["items"]] == sources
+            assert [item["model_input_status"] for item in
+                    inventory_notice["inventory"]["items"]] == [
+                        "restricted", "permitted", "permitted",
+                    ]
+            assert host.store.get(**inventory_notice["inventory"]["inventory_ref"])
+            assert inventory_notice["working_sources_ref"] is None
+            assert inventory_notice["working_sources_expected_version"] == 0
+            action = inventory_notice["next_action"]
+            assert "read_source_window" in action
+            assert "optional" in action
+            assert "working_sources_expected_version" in action
+            assert "not source/inventory" in action
+            exclusion = next(item for item in payloads if item.get("authority")
+                             == "saved_host_source_use_decision_not_source_instruction")
+            assert exclusion["excluded_source_refs"] == [sources[0]]
+            assert len(exclusion["decision_refs"]) == 1
+            assert host.store.get(**exclusion["decision_refs"][0])
+            current = next(item for item in payloads if item.get("authority")
+                           == "current_records")
+            navigation = current["source_free_reading_navigation"]
+            assert [item["copy_ref"] for item in navigation] == sources[1:]
+            assert all(item["fetch_first_uncovered"]["tool"] == "read_source_window"
+                       and item["fetch_first_uncovered"]["source_id"] == item[
+                           "copy_ref"]["id"]
+                       and item["fetch_first_uncovered"]["source_version"] == item[
+                           "copy_ref"]["version"]
+                       and item["source_text_in_this_call"] is False
+                       for item in navigation)
+            assert "read_source_window" in call["body"]["permitted_tools"]
+            serialized = json.dumps(packet, sort_keys=True)
+            assert all(text not in serialized for text in texts)
+            assert not host.store.records("model_dispatch_attempt")
             sent = [item for message in packet["messages"] if message["role"] == "user"
                     and message["content"].startswith("{")
                     for item in json.loads(message["content"]).get("source_packets", [])]

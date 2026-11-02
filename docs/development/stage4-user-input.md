@@ -61,6 +61,12 @@ or a callable reading route while preserving peer input, delivered peer reads,
 host feedback and the selected tool descriptors. Prior completion reservations
 and rate headroom still apply; this does not raise a provider or campaign cap.
 
+The final packet is checked again after note and peer-context refits. A preview
+alone does not establish delivery. The saved call budget distinguishes exact
+direction text from a callable reading route; if neither can be preserved within
+the existing bound, that call stops before dispatch rather than sending an input
+that silently omits the direction.
+
 ## Verification boundary
 
 Focused offline tests use the real authenticated handler without opening a

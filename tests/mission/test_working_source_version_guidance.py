@@ -82,7 +82,16 @@ def test_inventory_version_is_not_working_source_expected_version(tmp_path, monk
         assert "working_sources_expected_version" in description
         assert "Source and inventory versions are separate" in description
         assert "complete request fits" in description
-        assert "read_source_window is callable directly" in canonical(requests[0])
+        first_notice = _source_notice(requests[0])
+        assert first_notice["source_context_mode"] == "source_free_recovery"
+        assert "read_source_window" in first_notice["next_action"]
+        assert "optional" in first_notice["next_action"]
+        assert "working_sources_expected_version" in first_notice["next_action"]
+        assert "not source/inventory" in first_notice["next_action"]
+        assert "read_source_window" in {
+            item["function"]["name"] for item in requests[0]["tools"]
+            if item.get("type") == "function"
+        }
 
         results = sorted(host.store.records("context_tool_result"),
                          key=lambda item: item["created_at"])
