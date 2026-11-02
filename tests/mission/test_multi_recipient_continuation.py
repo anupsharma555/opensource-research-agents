@@ -261,7 +261,8 @@ def test_two_scripted_recipients_are_read_and_reviewed_after_reopen(tmp_path, mo
             assert outgoing["body"]["accepted_answer_ref"] is None
             report_ref = active_host.store.get(**answer_ref)["body"]["artifact_ref"]
             index = json.loads(body["messages"][-1]["content"])
-            assert answer_ref in index["request_answer_refs"]
+            # The complete preview carries the exact answer identity; compact
+            # inputs may omit the redundant top-level reference index.
             preview = next(card for card in index["peer_answer_previews"]
                            if card["answer_ref"] == answer_ref)
             assert preview["request_ref"] == ref(outgoing)

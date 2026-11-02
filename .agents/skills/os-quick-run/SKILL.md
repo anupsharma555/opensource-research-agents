@@ -2,7 +2,7 @@
 name: os-quick-run
 description: Start one immediate research run that may make multiple API calls, then explain its saved result with os-run-details. Use for a quick live behavior check, not a staged evaluation or read-only run review.
 metadata:
-  version: 0.1.1
+  version: 0.1.2
 ---
 
 # Quick live research run
@@ -67,3 +67,9 @@ output, source support, provider-reported usage, timing, and current state. Say
 clearly when the run is still waiting or working, when usage is unknown, or when
 the behavior was not exercised. A quick result establishes only what this case
 actually demonstrated; it is not a broad evaluation or scientific validation.
+
+After reporting each concluded run or observation, apply
+[the Linear closeout step](../os-qualify-run/SKILL.md#close-the-loop-in-linear):
+update authorized issue checkboxes only from fully met criteria, record meaningful
+progress or blockers succinctly, and verify the saved result before selecting
+the next test. Preserve incomplete items and explicit private-only restrictions.

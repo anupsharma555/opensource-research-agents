@@ -6,9 +6,12 @@ dispatch and usage records; neither result creates checked citation passages.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime
 
 from ora.coordination.executor import WorkResult
+from ora.credentials import LEGACY_QUOTA_DOMAIN
 from ora.evidence.document_ocr import (
     current_document_page_use,
     ocr_public_document_page,
@@ -18,9 +21,15 @@ from ora.evidence.document_ocr import (
 )
 from ora.evidence.library import EvidenceError
 from ora.evidence.source_assets import current_asset_use
+from ora.models.profiles import model_quota_scope
 from ora.state import StateError
 
-from .figure_reading import VISION_MODEL, FigureDispatchUncertain, read_figure_result
+from .figure_reading import (
+    DEFAULT_OUTPUT_TOKENS,
+    VISION_MODEL,
+    FigureDispatchUncertain,
+    read_figure_result,
+)
 
 DOCUMENT_TOOLS = frozenset({"read_document_ocr", "inspect_figure"})
 
@@ -164,10 +173,23 @@ def validate_document_result_tx(tx, spec, result: WorkResult, requested: dict) -
         run = tx.get("mission_run", spec.run_id)
         settings = run["body"]["profile"].get("modelSettings", {})
         usage = receipt["body"].get("usage") or {}
+        version = run["body"].get("agent_model_binding_version")
+        if version not in (None, 1):
+            raise StateError("Figure work has an unsupported model quota version")
+        output_cap = None
+        if version == 1:
+            raw = tx.store.read_blob(intent["body"]["request_blob"]["sha256"])
+            if hashlib.sha256(raw).hexdigest() != intent["body"]["request_sha256"]:
+                raise StateError("Figure request changed before usage acceptance")
+            output_cap = json.loads(raw)["max_completion_tokens"]
+        expected_domain = settings.get("quota_domain", LEGACY_QUOTA_DOMAIN)
+        expected_scope = model_quota_scope(expected_domain, VISION_MODEL, legacy=version is None)
         if (intent["body"].get("operation_id") != spec.work_id
                 or intent["body"].get("model") != VISION_MODEL
                 or intent["body"].get("credential_profile") != settings.get("credential_profile", "primary")
-                or spec.quota_scopes != (intent["body"].get("quota_domain"),)
+                or intent["body"].get("quota_domain") != expected_domain
+                or spec.quota_scopes != (expected_scope,)
+                or version == 1 and output_cap != spec.output_reservation_tokens
                 or result.used_tokens != usage.get("total_tokens")):
             raise StateError("Figure usage or identity differs from its reserved work")
 
@@ -234,9 +256,14 @@ def run_figure_tool(host, spec, requested: dict) -> WorkResult:
             "tool_call_id": requested["id"], "name": "inspect_figure",
             "result": {"status": "vision_not_enabled", "external_action": "none",
                        "next_action": "Use local text/OCR or request vision authorization for a new run."},
-        }, used_tokens=0)
+        }, used_tokens=0,
+            used_output_tokens=0 if spec.output_reservation_tokens is not None else None)
     selected = host._selected_credential(run)
-    if spec.kind != "model" or spec.quota_scopes != (selected["quota_domain"],):
+    quota_scope = host._model_quota_scope(run, VISION_MODEL)
+    expected_output_cap = (DEFAULT_OUTPUT_TOKENS
+                           if run["body"].get("agent_model_binding_version") == 1 else None)
+    if (spec.kind != "model" or spec.quota_scopes != (quota_scope,)
+            or spec.output_reservation_tokens != expected_output_cap):
         raise StateError("Figure work lacks selected-profile model capacity")
     ocr = read_document_page(host.store, args["document_ref"], **scope,
         page_number=args["page_number"], operation_id=spec.work_id,
@@ -246,7 +273,8 @@ def run_figure_tool(host, spec, requested: dict) -> WorkResult:
         return WorkResult(disposition="continue_task", payload={
             "tool_call_id": requested["id"], "name": "inspect_figure",
             "result": {"status": "source_use_unavailable", "external_action": "none"},
-        }, used_tokens=0)
+        }, used_tokens=0,
+            used_output_tokens=0 if spec.output_reservation_tokens is not None else None)
     intent = host.figure_reader.prepare(operation_id=spec.work_id, scope=scope,
         document_ref=args["document_ref"], page_image_ref=ocr["page_image_ref"],
         ocr_ref=ocr["ocr_ref"], question=args["question"], **selected)
@@ -259,18 +287,32 @@ def run_figure_tool(host, spec, requested: dict) -> WorkResult:
         })
     receipt = host.store.get(**outcome.response_ref)
     observed_at = datetime.fromisoformat(receipt["created_at"].replace("Z", "+00:00")).timestamp()
+    output_limit = receipt["body"].get("output_rate_limit_observation")
+    if output_limit is not None and spec.output_reservation_tokens is not None:
+        host.capacity.observe_output_rate_limit(
+            quota_scope, output_limit,
+            source_operation_id=host.executor._capacity_id(spec),
+            observation_id=f"{receipt['id']}:{receipt['version']}",
+            observed_at=observed_at, retry_after=outcome.retry_after_seconds,
+        )
     if outcome.rate_headers:
-        host.capacity.observe_rate_headers(selected["quota_domain"], outcome.rate_headers,
+        host.capacity.observe_rate_headers(quota_scope, outcome.rate_headers,
             source_operation_id=host.executor._capacity_id(spec),
             observation_id=f"{receipt['id']}:{receipt['version']}",
             observed_at=observed_at)
-    if outcome.status == "rate_limited":
-        host.capacity.observe_retry_after(selected["quota_domain"],
+    hard_output_mismatch = (
+        output_limit is not None
+        and output_limit["requested_tokens"] > output_limit["limit_tokens"]
+    )
+    if outcome.status == "rate_limited" and not hard_output_mismatch:
+        host.capacity.observe_retry_after(quota_scope,
             retry_after=(outcome.retry_after_seconds if outcome.retry_after_seconds is not None
-                         else host.capacity.policy.quotas[selected["quota_domain"]].window_seconds),
+                         else host.capacity.policy.quotas[quota_scope].window_seconds),
             observed_at=observed_at, source_operation_id=host.executor._capacity_id(spec),
             observation_id=f"{receipt['id']}:{receipt['version']}")
     result = host.figure_reader.read_result(outcome.response_ref, scope=scope)
     return WorkResult(disposition="continue_task",
         payload={"tool_call_id": requested["id"], "name": "inspect_figure", "result": result},
-        output_refs=(outcome.response_ref,), used_tokens=outcome.used_tokens)
+        output_refs=(outcome.response_ref,), used_tokens=outcome.used_tokens,
+        used_output_tokens=((receipt["body"].get("usage") or {}).get("completion_tokens")
+                            if spec.output_reservation_tokens is not None else None))

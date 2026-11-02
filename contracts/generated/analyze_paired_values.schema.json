@@ -1,0 +1,76 @@
+{
+  "$defs": {
+    "PairedObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "pairId": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Pairid",
+          "type": "string"
+        },
+        "valueA": {
+          "maximum": 1000000000000.0,
+          "minimum": -1000000000000.0,
+          "title": "Valuea",
+          "type": "number"
+        },
+        "valueB": {
+          "maximum": 1000000000000.0,
+          "minimum": -1000000000000.0,
+          "title": "Valueb",
+          "type": "number"
+        }
+      },
+      "required": [
+        "pairId",
+        "valueA",
+        "valueB"
+      ],
+      "title": "PairedObservation",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "alternative": {
+      "enum": [
+        "two-sided",
+        "less",
+        "greater"
+      ],
+      "title": "Alternative",
+      "type": "string"
+    },
+    "pairs": {
+      "items": {
+        "$ref": "#/$defs/PairedObservation"
+      },
+      "maxItems": 200,
+      "minItems": 2,
+      "title": "Pairs",
+      "type": "array"
+    },
+    "units": {
+      "anyOf": [
+        {
+          "maxLength": 40,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Units"
+    }
+  },
+  "required": [
+    "pairs",
+    "alternative"
+  ],
+  "title": "AnalyzePairedValuesInput",
+  "type": "object"
+}

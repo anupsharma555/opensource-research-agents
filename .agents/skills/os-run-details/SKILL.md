@@ -2,7 +2,7 @@
 name: os-run-details
 description: Explain an exact OpenSource Research Agents run or parent/follow-up sequence from saved evidence, in chat or a requested private report. Use for readable summaries, numbered steps, actual output, diagnostics and usage; this does not start a new evaluation.
 metadata:
-  version: 0.1.20
+  version: 0.1.22
 ---
 
 # Explain a saved research run
@@ -243,6 +243,16 @@ source windows, candidate inventories, hashes and receipt IDs there; retain the
 ordinary agent-to-agent message text in the main numbered steps. Keep the
 main report self-contained with numbered steps, substantive findings, actual
 answer and usage. Do not replace a requested answer with a link or raw JSON.
+
+When a run targets tracker checklist items, include a compact **Checklist outcomes**
+table in the main report and name newly completed items in the chat handoff. Use
+the exact issue/check label, observed outcome, supporting evidence and verified
+tracker state; distinguish completed, partial, failed and unexercised requirements.
+Say **None newly completed** when appropriate. A result eligible for closure is
+not a saved tracker update: change checkboxes only when authorized and supported,
+then read them back. Preserve broader or conditional requirements that this run
+did not exercise. See [checklist reporting](references/report-format.md#checklist-outcomes)
+for the compact field layout.
 
 Before delivery, verify both directions of local links, sequential steps and
 attempt counts, totals against receipts, exact accepted output, and the distinction

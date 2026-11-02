@@ -23,6 +23,7 @@ from ora.mission.tool_catalog import (
     tool_contract_matches,
 )
 from ora.models.session import ModelSession
+from tests.mission.availability_assertions import request_first_names, saved_discovery_result
 from tests.mission.test_service import answer, drain, serialized_peer_name, service, tool
 
 
@@ -114,14 +115,22 @@ def test_every_available_tool_has_a_label_and_serialized_description(tmp_path, m
         "Catalog inspection does not call a provider"))
     try:
         complete = (COMMON_TOOL_IDS | TOOL_SCHEMAS.keys()) - UNHANDLED_COMMON_TOOLS
-        for catalog in (host.parallel_catalog, host.catalog,
+        for catalog in (host.parallel_peer_turn_catalog, host.parallel_catalog, host.catalog,
                         host.planning_v1_catalog, host.legacy_catalog):
-            expected = (complete if catalog is host.parallel_catalog
-                        else complete - PARALLEL_TOOLS if catalog is host.catalog
-                        else complete - PARALLEL_TOOLS - {"modify_plan", "decline_peer_request"})
+            expected = (complete if catalog is host.parallel_peer_turn_catalog
+                        else complete - {"peer_turn"} if catalog is host.parallel_catalog
+                        else complete - PARALLEL_TOOLS - {"peer_turn"}
+                        if catalog is host.catalog
+                        else complete - PARALLEL_TOOLS - {
+                            "peer_turn", "modify_plan", "decline_peer_request",
+                        })
             assert expected <= catalog.tools.keys()
-            assert ("modify_plan" in catalog.tools) is (catalog in (host.parallel_catalog, host.catalog))
-            assert ("decline_peer_request" in catalog.tools) is (catalog in (host.parallel_catalog, host.catalog))
+            assert ("modify_plan" in catalog.tools) is (catalog in (
+                host.parallel_peer_turn_catalog, host.parallel_catalog, host.catalog,
+            ))
+            assert ("decline_peer_request" in catalog.tools) is (catalog in (
+                host.parallel_peer_turn_catalog, host.parallel_catalog, host.catalog,
+            ))
             descriptors = {name: catalog.tools[name].descriptor() for name in expected}
             assert all(TOOL_PURPOSES[name].strip() for name in expected)
             assert all(descriptors[name].get("description", "").strip() for name in expected)
@@ -198,7 +207,7 @@ def test_source_reader_schema_follows_selected_evidence_or_explicit_request(tmp_
                       if item.get("role") == "user"
                       and "trusted_host_attached_tool_availability" in item["content"])
         assert ("read_source_window" in attached) is (mode != "memo")
-        assert ("read_source_window" in notice["request_first_local_functions"]) is (mode == "memo")
+        assert ("read_source_window" in request_first_names(packet, notice)) is (mode == "memo")
         assert set(notice["call_now_local_functions"]) == attached
         if mode == "memo":
             config = host.store.get("agent_configuration", call["body"]["configuration_id"], 1)
@@ -280,13 +289,15 @@ def test_critic_can_request_granted_note_tool_without_discovery(tmp_path, monkey
         assert "native provider turn, never a local function" in paragraphs[0]
         assert "Separately requested tools persist until release_capability" in instructions
         index = _index(instructions)
-        tools = index["tools"]
+        assert index["schema"] == "ora.role_capability_catalog.purposes.v2"
+        tools = set(index["tools"])
+        assert all(index["tools"][name].strip() for name in tools)
         skills = index["skills"]
         exposed = {item["function"]["name"] for item in packet["tools"]}
         availability = next(json.loads(item["content"]) for item in packet["messages"]
                             if item.get("role") == "user"
                             and "trusted_host_attached_tool_availability" in item["content"])
-        assert tools["write_note"] == TOOL_PURPOSES["write_note"]
+        assert "write_note" in tools
         assert all(name not in tools for name in UNHANDLED_COMMON_TOOLS)
         assert skills["study-appraisal"]["state"] == "available_to_activate"
         assert skills["study-appraisal"]["purpose"]
@@ -300,10 +311,10 @@ def test_critic_can_request_granted_note_tool_without_discovery(tmp_path, monkey
         assert "properties" not in json.dumps(index)
         if step == 1:
             assert "write_note" not in exposed
-            assert "write_note" in availability["request_first_local_functions"]
+            assert "write_note" in request_first_names(packet, availability)
             return tool("request_capability", {"tool_id": "write_note"}, step)
         assert step == 2 and "write_note" in exposed
-        assert "write_note" not in availability["request_first_local_functions"]
+        assert "write_note" not in request_first_names(packet, availability)
         assert "write_note" in availability["call_now_local_functions"]
         selection = next(json.loads(item["content"]) for item in packet["messages"]
                          if item.get("role") == "tool"
@@ -448,21 +459,17 @@ def test_role_catalog_lists_active_mandatory_skill_and_supported_tools(tmp_path,
         assert index["skills"]["evidence-linking"]["state"] == "active"
         assert index["skills"]["evidence-linking"]["purpose"]
         assert "# Evidence linking" in instructions
+        assert index["schema"] == "ora.role_capability_catalog.purposes.v2"
         names = list(index["tools"])
         assert names == sorted(names)
         assert "fetch_source" in names and "claim_work" not in names
-        # Search choices must reach the first real request before attachment;
-        # registering schemas alone cannot help a peer select a suitable lane.
-        purposes = index["tools"]
-        assert "retained permitted sources" in purposes["search_saved_passages"]
-        assert "Scholarly" in purposes["search_scholarly"]
-        assert "one targeted lookup" in purposes["search_web"]
-        assert "multiple complementary queries" in purposes["search_web"]
-        assert "Groq browsing" in purposes["browser_search"]
-        assert "not a local function" in purposes["browser_search"]
+        # The short purpose for each granted ID is present without loading
+        # optional skill bodies or tool argument schemas.
+        assert {"search_saved_passages", "search_scholarly", "search_web",
+                "browser_search"} <= set(names)
         assert "Quick web lookup" in instructions and "Research web search" in instructions
         assert "Choose the lane by information need" in instructions
-        assert {"read_search_results", "cancel_search", "render_source"} <= purposes.keys()
+        assert {"read_search_results", "cancel_search", "render_source"} <= set(names)
         attached = {item["function"]["name"] for item in seen[0]["tools"]}
         assert not {"search_web", "read_search_results", "cancel_search", "render_source"} & attached
     finally:
@@ -477,12 +484,21 @@ def test_discovery_distinguishes_callable_tools_from_requestable_tools(tmp_path,
         packets.append(packet)
         if len(packets) == 1:
             return tool("discover_capabilities", {}, 1)
-        result = next(json.loads(item["content"])
-                      for item in packet["messages"]
-                      if item.get("role") == "tool"
-                      and item.get("name") == "discover_capabilities")
+        first = next(json.loads(item["content"])
+                     for item in packet["messages"]
+                     if item.get("role") == "tool"
+                     and item.get("name") == "discover_capabilities")
+        assert first["next_request"] is not None
+        result = saved_discovery_result(
+            host, host._control(run.run_id, "agent-critique"), first,
+        )
         assert "request_capability" in result["exposed"]
         assert "search_saved_passages" in result["granted"]
+        assert result["granted"]["search_saved_passages"] == TOOL_PURPOSES[
+            "search_saved_passages"
+        ]
+        assert result["granted"]["search_scholarly"] == TOOL_PURPOSES["search_scholarly"]
+        assert result["granted"]["browser_search"] == TOOL_PURPOSES["browser_search"]
         assert "search_saved_passages" not in result["exposed"]
         assert "search_saved_passages" in result["requestable"]
         assert not set(result["requestable"]) & set(result["not_handled_here"])

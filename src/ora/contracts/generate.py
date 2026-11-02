@@ -12,8 +12,17 @@ from pathlib import Path
 
 from .examples import generate_examples
 from .models import (
+    AdjustPValuesInput,
+    AnalyzeContingencyInput,
+    AnalyzePairedValuesInput,
+    AnalyzeValuesInput,
     CancelSearchInput,
     Command,
+    CompareSummaryStatisticsInput,
+    ConvertUnitsInput,
+    ConvertValuesUnitsInput,
+    CorrelateValuesInput,
+    DescribeValuesInput,
     Event,
     EvidencePacket,
     FetchSourceAssetInput,
@@ -51,6 +60,15 @@ from .models import (
 )
 
 MODELS = {
+    "adjust_pvalues": AdjustPValuesInput,
+    "analyze_contingency": AnalyzeContingencyInput,
+    "analyze_paired_values": AnalyzePairedValuesInput,
+    "compare_summary_statistics": CompareSummaryStatisticsInput,
+    "convert_values_units": ConvertValuesUnitsInput,
+    "correlate_values": CorrelateValuesInput,
+    "describe_values": DescribeValuesInput,
+    "analyze_values": AnalyzeValuesInput,
+    "convert_units": ConvertUnitsInput,
     "read_research_activity": ReadResearchActivityInput,
     "retain_evidence": RetainEvidenceInput,
     "search_evidence_library": SearchEvidenceLibraryInput,

@@ -59,6 +59,13 @@ review; a quoted outgoing request does not prove the recipient received its text
 Omit these exchange fields for steps without an agent exchange. Do not include
 private instructions or Codex's internal reasoning.
 
+For a combined tool such as `peer_turn`, keep one inference step and one selected
+tool count, then list its reply/report, review and follow-up outcomes separately.
+Use the saved operation results and acceptance records: a valid reply may persist
+when an independent review fails, while a saved revision may remain provisional
+because a follow-up was rejected. Do not turn a mixed result into whole-step
+success, or count its local operations as additional model HTTP calls.
+
 ## Agent contributions in the output section
 
 State **Final combined answer: Produced / Not produced / Unknown** before showing
@@ -136,6 +143,19 @@ Keep **Reason stated by the agent** for public `purpose`/`reason` arguments and
 **Post-run interpretation** for reviewer analysis as separate fields. This
 reporting rule never authorizes capture of Codex's own private reasoning, new
 model calls, changing provider settings, or uploading raw reasoning to LangSmith.
+
+## Checklist outcomes
+
+For a run linked to acceptance checks, include **Issue / exact checkbox label /
+result / evidence / tracker state** in the main report. Evaluate the full stated
+threshold, including required variants, rather than inferring closure from a
+successful HTTP response or accepted answer. Keep already-completed items separate
+from items newly completed by this run. Use Completed, Partial, Failed or
+Unexercised for verification; record tracker state as checked, still open or not
+verified. If evidence supports closure but no authorized update was saved, say
+**Eligible; tracker still open**. Read back every checkbox update before reporting
+it checked. The chat handoff names newly completed issue/check labels, or explicitly
+states **None newly completed**, followed by the most consequential remaining gap.
 
 ## Labeled fields
 

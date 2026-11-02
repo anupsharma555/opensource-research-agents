@@ -140,7 +140,7 @@ def test_legacy_run_without_version_keeps_old_catalog_and_no_activity_notice(tmp
         def downgrade(tx):
             old = tx.get("mission_run", run.run_id)
             body = {key: value for key, value in old["body"].items()
-                    if key != "parallel_research_version"}
+                    if key not in {"parallel_research_version", "reader_action_purpose_tool_version"}}
             saved = tx.put("mission_run", old["id"], body,
                            expected_version=old["version"])
             return {"version": saved["version"]}

@@ -19,6 +19,7 @@ from ora.mission.tool_catalog import (
 )
 from ora.observability.tool_activity import build_tool_activity
 from ora.state import StateStore
+from tests.mission.availability_assertions import request_first_names
 from tests.mission.test_service import answer, drain, service, tool
 
 
@@ -92,7 +93,7 @@ def test_activation_purpose_is_saved_and_skill_loads_in_same_two_turns(tmp_path,
             )
             assert "activate_skill" in functions
             assert "activate_skill" in availability["call_now_local_functions"]
-            assert "activate_skill" not in availability["request_first_local_functions"]
+            assert "activate_skill" not in request_first_names(packet, availability)
             assert "# Study appraisal" not in packet["messages"][0]["content"]
             return tool("activate_skill", {
                 "skill_id": "study-appraisal", "purpose": purpose,
@@ -175,6 +176,15 @@ def test_old_prepared_activation_call_resumes_after_new_catalog_load(tmp_path, m
             request_id="old-pinned-activation", question="Appraise a synthetic study.",
             agent_ids=["agent-critique"],
         ))
+        def before_parallel_catalog(tx):
+            saved = tx.get("mission_run", run.run_id)
+            body = saved["body"]
+            # The legacy activation catalog predates the parallel catalog pin.
+            body.pop("parallel_research_version", None)
+            body.pop("reader_action_purpose_tool_version", None)
+            return tx.put("mission_run", run.run_id, body, expected_version=saved["version"])
+
+        old.store.transact("old-activation-catalog", {}, before_parallel_catalog)
         control = old._control(run.run_id, "agent-critique")
         assert old._schedule_model(control)
         call_ref = old._control(run.run_id, "agent-critique")["body"]["call_ref"]

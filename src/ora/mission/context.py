@@ -32,6 +32,7 @@ from ora.mission.shared_materials import (
 from ora.mission.tool_results import (
     ASSET_PAGEABLE_TOOLS,
     MAX_RESULT_PAGE_CHARS,
+    NUMERIC_PAGEABLE_TOOLS,
     PAGEABLE_TOOLS,
     PARALLEL_PAGEABLE_TOOLS,
     RESULT_PAGE_SCHEMA,
@@ -50,17 +51,23 @@ from ora.mission.web_context import (
     require_search_operation,
 )
 from ora.models.groq import ModelPreflightError, _messages
+from ora.models.profiles import QWEN_MODEL
 from ora.models.session import _explicit_prohibition
 from ora.state import StateError, StateStore, Transaction
 from ora.state.source_lineage import inherited_public_source, scoped_note_source_input
 from ora.state.store import canonical, identifier
 
+from .analysis_extended import EXTENDED_ANALYSIS_TOOL_SCHEMAS
+from .analysis_tools import ANALYSIS_TOOL_SCHEMAS
 from .document_context import ocr_model_view, source_copy_url
 from .document_tools import document_tool_result, image_reader_handoff
 from .user_input_context import scoped_user_input
 
-PACKER_VERSION = "ora.working_context.packer.v73"
+PACKER_VERSION = "ora.working_context.packer.v95"
 MAX_INCOMING_QUESTION_WINDOW_CHARS = 600
+SOURCE_DEPENDENT_NUMERIC_TOOLS = frozenset({
+    "calculate", *ANALYSIS_TOOL_SCHEMAS, *EXTENDED_ANALYSIS_TOOL_SCHEMAS,
+})
 
 
 def _shared_material_overview(entry: dict, inclusion_id: str | None = None) -> dict:
@@ -216,6 +223,7 @@ class ContextPack:
     followup_target_ref: dict | None = None
     note_text_refs: tuple[dict, ...] = ()
     conversation_source_dependency_refs: tuple[dict, ...] = ()
+    selected_source_inputs: tuple[dict, ...] | None = None
 
 
 def _sha(value: object) -> str:
@@ -327,6 +335,84 @@ def _routine_own_executor_outcome(store: StateStore, outcome: dict, actor_id: st
         and trace["body"].get("proof") == "recorded_local_callback"
         and pointers[0] in trace["body"].get("output_refs", [])
     )
+
+
+def _context_page_turn_status(store: StateStore, pointer: dict, actor_id: str) -> dict | None:
+    """Classify an exact saved page result, without treating peer work as bookkeeping."""
+    response = store.get(**pointer)
+    result = store.get("context_tool_result", f"tool-result:{pointer['id']}")
+    if response is None or result is None or result["body"].get("response_ref") != pointer:
+        return None
+    try:
+        returned = json.loads(store.read_blob(response["body"]["blob"]["sha256"]))
+        calls = returned.get("tool_calls", [])
+        saved = json.loads(store.read_blob(result["body"]["blob"]["sha256"]))
+        page = json.loads(saved["content"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if (len(calls) != 1 or calls[0].get("function", {}).get("name") != "read_context_page"
+            or saved.get("name") != "read_context_page"
+            or saved.get("tool_call_id") != calls[0].get("id")
+            or not isinstance(page, dict)):
+        return None
+    if page.get("status") == "rejected" and isinstance(page.get("reason"), str):
+        return {"status": "rejected", "reason": page["reason"],
+                "result_ref": ref(result), "tool_call_id": calls[0]["id"]}
+    try:
+        arguments = json.loads(calls[0]["function"]["arguments"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    items = page.get("items")
+    if (page.get("schema") != "ora.context_omission_page.v2"
+            or not isinstance(arguments, dict)
+            or not isinstance(page.get("inclusion_ref"), dict)
+            or page["inclusion_ref"].get("kind") != "context_inclusion"
+            or page["inclusion_ref"].get("id") != arguments.get("inclusion_id")
+            or page.get("cursor") != arguments.get("cursor")
+            or not isinstance(items, list)
+            or type(page.get("returned_count")) is not int
+            or page["returned_count"] != len(items)):
+        return None
+    for item in items:
+        if (not isinstance(item, dict) or item.get("type") != "shared_update"
+                or not isinstance(item.get("ref"), dict)):
+            return None
+        outcome = store.get(**item["ref"])
+        if outcome is None or not _routine_own_executor_outcome(store, outcome, actor_id):
+            return None
+    return {"status": "bookkeeping", "tool_call_id": calls[0]["id"]}
+
+
+def _page_executor_wrapper(store: StateStore, outcome: dict, page_responses: set[str],
+                           page_calls: set[str], page_tool_call_ids: set[str]) -> bool:
+    """Link a routine executor wrapper to a checked context-page call."""
+    artifact_ref = outcome["body"]["result_refs"][0]
+    artifact = store.get(**artifact_ref)
+    outputs = artifact["body"].get("output_refs", []) if artifact else None
+    if not isinstance(outputs, list):
+        return False
+    if not outputs:
+        payload = artifact["body"].get("payload")
+        return bool(
+            artifact["body"].get("handler_id") == "mission-tool"
+            and isinstance(payload, dict)
+            and payload.get("name") == "read_context_page"
+            and payload.get("tool_call_id") in page_tool_call_ids
+            and isinstance(payload.get("result"), dict)
+            and payload["result"].get("status") == "rejected"
+        )
+    if len(outputs) != 1 or not isinstance(outputs[0], dict):
+        return False
+    pointer = outputs[0]
+    if set(pointer) != {"kind", "id", "version"}:
+        return False
+    if pointer.get("kind") == "model_response_receipt":
+        return canonical(pointer) in page_responses
+    if pointer.get("kind") == "context_inclusion":
+        inclusion = store.get(**pointer)
+        return (inclusion is not None
+                and canonical(inclusion["body"].get("call_ref")) in page_calls)
+    return False
 
 
 def _own_published_report(store: StateStore, outcome: dict, *, actor_id: str,
@@ -513,6 +599,32 @@ class WorkingContext:
             "title": title[:160] if isinstance(title, str) else None,
             "reader_tool": "read_context_record",
         }
+
+    def _included_peer_answer_report(self, inclusion: dict, pointer: dict, *,
+                                     mission_id: str, actor_id: str,
+                                     task_id: str) -> dict | None:
+        """Recognize only this requester's exact answer/report link in saved input."""
+        included_refs = inclusion["body"].get("included_refs")
+        if not isinstance(included_refs, list):
+            return None
+        for answer_ref in included_refs:
+            if (type(answer_ref) is not dict
+                    or set(answer_ref) != {"kind", "id", "version"}
+                    or answer_ref.get("kind") != "mail_answer"
+                    or type(answer_ref.get("id")) is not str or not answer_ref["id"]
+                    or type(answer_ref.get("version")) is not int
+                    or answer_ref["version"] < 1):
+                continue
+            answer = self.store.get(**answer_ref)
+            request = self.store.get("mail_request", answer["body"].get("request_id")) if answer else None
+            if answer is not None and ref(answer) == answer_ref and request is not None:
+                entry = self._provisional_peer_answer_entry(
+                    request, answer, mission_id=mission_id,
+                    actor_id=actor_id, task_id=task_id, pointer=pointer,
+                )
+                if entry is not None:
+                    return entry
+        return None
 
     def _peer_answer_material(self, request: dict, answer: dict, *,
                               mission_id: str, actor_id: str, task_id: str
@@ -1157,14 +1269,42 @@ class WorkingContext:
                 visible = json.loads(message.get("content", ""))
             except (ValueError, TypeError):
                 continue
-            if (not isinstance(visible, dict) or visible.get("authority")
-                    != "saved_peer_research_activity_not_source_instruction"):
+            if not isinstance(visible, dict):
                 continue
-            for pointer in visible.get("research_activity_digest", {}).get("source_dependency_refs", []):
-                copy = self.store.get(**pointer)
-                if copy is None or self._source_status(copy)["model_input_status"] != "permitted":
-                    raise ContextError("Peer activity source use changed")
-                dependencies[(pointer["kind"], pointer["id"], pointer["version"])] = pointer
+            if visible.get("authority") == "saved_peer_research_activity_not_source_instruction":
+                for pointer in visible.get("research_activity_digest", {}).get("source_dependency_refs", []):
+                    copy = self.store.get(**pointer)
+                    if copy is None or self._source_status(copy)["model_input_status"] != "permitted":
+                        raise ContextError("Peer activity source use changed")
+                    dependencies[(pointer["kind"], pointer["id"], pointer["version"])] = pointer
+            elif visible.get("authority") == "saved_host_capability_result_not_source_instruction":
+                public_texts = visible.get("public_assistant_texts")
+                if not isinstance(public_texts, list):
+                    raise ContextError("Saved capability public-text notice is invalid")
+                config = self.store.get(**pack.configuration_ref)
+                if config is None or config["kind"] != "agent_configuration":
+                    raise ContextError("Saved capability public text lost its configuration")
+                for entry in public_texts:
+                    if not isinstance(entry, dict):
+                        raise ContextError("Saved capability public-text entry is invalid")
+                    if entry.get("status") != "inline":
+                        if "text" in entry:
+                            raise ContextError("Saved capability public text lacks an inline status")
+                        continue
+                    if (entry.get("origin") != "prior_model_public_assistant_content"
+                            or not isinstance(entry.get("text"), str)
+                            or not isinstance(entry.get("response_ref"), dict)):
+                        raise ContextError("Saved capability public-text lineage is invalid")
+                    access = self.archived_public_assistant_text_access(
+                        entry["response_ref"],
+                        mission_id=config["body"]["mission_id"],
+                        actor_id=config["body"]["instance_id"],
+                        task_id=pack.task_ref["id"],
+                    )
+                    if access.get("status") != "available" or access.get("text") != entry["text"]:
+                        raise ContextError("Saved capability public text or source use changed")
+                    for pointer in access["source_dependency_refs"]:
+                        dependencies[(pointer["kind"], pointer["id"], pointer["version"])] = pointer
 
         def add_report(access: dict) -> None:
             if access["status"] != "available":
@@ -1260,6 +1400,45 @@ class WorkingContext:
             report = self.store.get(**report_ref)
             add_report(report_text_access(self.store, report))
         for disposition in index.get("request_dispositions", []):
+            if "question" in disposition or "action" in disposition:
+                request_ref = disposition.get("ref")
+                request = self.store.get(**request_ref) if (
+                    type(request_ref) is dict
+                    and set(request_ref) == {"kind", "id", "version"}
+                    and request_ref.get("kind") == "mail_request"
+                ) else None
+                if (request is None or ref(request) != request_ref
+                        or request["body"].get("status") != "awaiting_review"
+                        or disposition.get("owner") != "you"
+                        or disposition.get("action") != "review_peer_answer"):
+                    raise ContextError("Visible peer report question lost its exact request")
+                delivered = False
+                for answer_ref in disposition.get("answer_refs", []):
+                    answer = self.store.get(**answer_ref) if (
+                        type(answer_ref) is dict
+                        and set(answer_ref) == {"kind", "id", "version"}
+                        and answer_ref.get("kind") == "mail_answer"
+                    ) else None
+                    if (answer is None or ref(answer) != answer_ref
+                            or answer["body"].get("partial") is True):
+                        continue
+                    material = self._peer_answer_material(
+                        request, answer,
+                        mission_id=config["body"]["mission_id"],
+                        actor_id=config["body"]["instance_id"],
+                        task_id=pack.task_ref["id"],
+                    )
+                    if (material is not None
+                            and disposition.get("question") == material[0]
+                            and _peer_report_delivery(
+                                pack.messages[:-1], material[1],
+                            )[0] == "complete_in_input"):
+                        report = self.store.get(**material[1])
+                        add_report(report_text_access(self.store, report))
+                        delivered = True
+                        break
+                if not delivered:
+                    raise ContextError("Visible peer report question lost its complete read")
             decline = disposition.get("peer_decline") if isinstance(disposition, dict) else None
             if not isinstance(decline, dict) or "reason" not in decline:
                 continue
@@ -1326,10 +1505,26 @@ class WorkingContext:
                         and item["body"].get("actor_id") == config["body"]["instance_id"]
                         and item["body"].get("task_id") == pack.task_ref["id"]
                         and item["body"].get("run_id") == pack.run_ref["id"]]
-            if (len(controls) != 1 or self._saved_passage_navigation(
+            current_navigation = (
+                self._saved_passage_navigation(
                     controls[0], mission_id=config["body"]["mission_id"],
                     actor_id=config["body"]["instance_id"], task_id=pack.task_ref["id"],
-            ) != saved_passage_navigation):
+                ) if len(controls) == 1 else None
+            )
+            # Prepared packets from before the new explanatory label remain
+            # valid. All existing references, coordinates and use checks match.
+            legacy_navigation = (
+                {key: value for key, value in current_navigation.items()
+                 if key != "read_choices_status"}
+                if current_navigation is not None else None
+            )
+            projected_navigation = (
+                self._page_covered_saved_passage_choices(
+                    controls[0], current_navigation, pack.selected_source_inputs,
+                ) if current_navigation is not None and len(controls) == 1 else None
+            )
+            if (current_navigation is None or saved_passage_navigation not in (
+                    current_navigation, legacy_navigation, projected_navigation)):
                 raise ContextError("Saved-passage navigation changed before preparation")
             result = self.store.get(**saved_passage_navigation["saved_result_ref"])
             payload = json.loads(self.store.read_blob(result["body"]["blob"]["sha256"]))
@@ -1456,7 +1651,7 @@ class WorkingContext:
             raise ContextError("Prepared report context lost its configuration")
         for position, message in enumerate(pack.messages):
             if message.get("role") == "tool" and message.get("name") in {
-                "calculate", "search_saved_passages", "read_browser_search_result",
+                *SOURCE_DEPENDENT_NUMERIC_TOOLS, "search_saved_passages", "read_browser_search_result",
                 "read_document_ocr", "inspect_figure",
             }:
                 try:
@@ -1853,7 +2048,25 @@ class WorkingContext:
                 output.append(entry)
             return output
 
-        if name in PARALLEL_PAGEABLE_TOOLS:
+        if name in NUMERIC_PAGEABLE_TOOLS:
+            dependencies = self.response_source_dependencies(
+                result["body"]["response_ref"], require_permitted=False,
+            )
+            saved_dependencies = content.get("source_dependency_refs", [])
+            if not isinstance(saved_dependencies, list):
+                raise ContextError("Saved numerical result has invalid source lineage")
+            dependencies = [*dependencies, *saved_dependencies]
+            if any(
+                not isinstance(pointer, dict)
+                or (copy := self.store.get(**pointer)) is None
+                or self._source_status(copy)["model_input_status"] != "permitted"
+                for pointer in dependencies
+            ):
+                projection = {"status": "data_unavailable_due_source_use",
+                              "saved_tool_result_ref": ref(result)}
+            else:
+                projection = content
+        elif name in PARALLEL_PAGEABLE_TOOLS:
             dependencies = [
                 *self.response_source_dependencies(result["body"]["response_ref"], require_permitted=False),
                 *content.get("source_dependency_refs", []),
@@ -1934,6 +2147,38 @@ class WorkingContext:
                 projection["result_status"] = (
                     "uninspected_discovery_leads_not_source_evidence"
                 )
+        elif name == "discover_capabilities":
+            # This is the exact saved, actor-scoped catalog result. Page its
+            # original purpose text; do not regenerate a possibly changed
+            # catalog or turn historical access into a current permission.
+            fields = {
+                "granted", "exposed", "not_handled_here", "requestable",
+                "not_ready", "requestable_native_tools", "next_action",
+            }
+            granted = content.get("granted")
+            not_ready = content.get("not_ready")
+            if (set(content) != fields or not isinstance(granted, dict)
+                    or not granted or not isinstance(not_ready, dict)
+                    or not isinstance(content.get("next_action"), str)
+                    or not content["next_action"].strip()
+                    or any(not isinstance(tool_id, str) or not tool_id
+                           or not isinstance(purpose, str) or not purpose.strip()
+                           for tool_id, purpose in granted.items())
+                    or any(not isinstance(tool_id, str) or not tool_id
+                           or not isinstance(reason, str) or not reason.strip()
+                           for tool_id, reason in not_ready.items())
+                    or not set(not_ready) <= set(granted)):
+                raise ContextError("Saved capability catalog result is malformed")
+            for field in ("exposed", "not_handled_here", "requestable",
+                          "requestable_native_tools"):
+                values = content[field]
+                if (not isinstance(values, list)
+                        or any(not isinstance(value, str) or not value
+                               for value in values)
+                        or len(values) != len(set(values))
+                        or not set(values) <= set(granted)):
+                    raise ContextError("Saved capability catalog result is malformed")
+            projection = content
         elif name == "read_plan":
             # Plan annotations contain only host status and exact references;
             # all agent-authored text lives in the permission-checked note.
@@ -2163,6 +2408,10 @@ class WorkingContext:
                     "previewed_saved_page_matches": len(reads),
                     "coverage": content.get("coverage"),
                     "read_choices_from_saved_result": reads,
+                    "read_choices_status": (
+                        "Suggested next reads, not executed-read records or evidence "
+                        "of completed coverage."
+                    ),
                     "additional_saved_page_matches": len(content["results"]) - len(reads),
                     "additional_query_matches_outside_saved_page": max(
                         0, content["result_count"] - content["cursor"] - len(content["results"])),
@@ -2176,6 +2425,112 @@ class WorkingContext:
             except (StateError, ValueError, KeyError, TypeError, AttributeError):
                 return None
         return None
+
+    def _page_covered_saved_passage_choices(
+        self, control: dict, navigation: dict,
+        selected_source_inputs: tuple[dict, ...] | None,
+    ) -> dict:
+        """Page only lexical read choices with the exact checked read in this input.
+
+        A matching source ID alone is insufficient: a selected excerpt may not
+        contain the saved search hit. The original result and full-list reader
+        remain, and source-use validation runs again at inclusion/dispatch.
+        """
+        if not selected_source_inputs or not navigation.get("read_choices_from_saved_result"):
+            return navigation
+        selected = {
+            canonical(item["copy_ref"]): {canonical(pointer) for pointer in item["passage_refs"]}
+            for item in selected_source_inputs
+            if isinstance(item, dict) and isinstance(item.get("copy_ref"), dict)
+            and isinstance(item.get("passage_refs"), list)
+        }
+        if len(selected) != len(selected_source_inputs):
+            return navigation
+        def read_location(action: dict) -> str | None:
+            # Purpose and selection_mode guide the action, but do not change
+            # the returned source characters. Match exact read coordinates
+            # and checked passage refs; unknown arguments fail closed.
+            fields = {"source_id", "source_version", "block_offset",
+                      "char_offset", "char_limit"}
+            if (not fields <= set(action)
+                    or set(action) - fields - {"tool", "selection_mode", "purpose"}
+                    or action.get("tool", "read_source_window") != "read_source_window"
+                    or not isinstance(action["source_id"], str)
+                    or type(action["source_version"]) is not int
+                    or any(type(action[key]) is not int for key in (
+                        "block_offset", "char_offset", "char_limit"
+                    ))):
+                return None
+            return canonical({key: action[key] for key in sorted(fields)})
+
+        covered = set()
+        body = control["body"]
+        for response_ref in body.get("tool_turn_refs", []):
+            try:
+                response = self.store.get(**response_ref)
+                call = self.store.get(**response["body"]["call_ref"]) if response else None
+                if (response is None or call is None
+                        or response["body"].get("status") != "tool_requested"
+                        or response["body"].get("mission_id") != body["mission_id"]
+                        or response["body"].get("task_id") != body["task_id"]
+                        or call["body"].get("mission_id") != body["mission_id"]
+                        or call["body"].get("task_id") != body["task_id"]
+                        or call["body"].get("instance_id") != body["actor_id"]):
+                    continue
+                observed = self._archived_tool_observation(response_ref)
+                window = observed.get("window") or {}
+                copy_ref = window.get("copy_ref")
+                if (observed.get("tool_name") != "read_source_window"
+                        or not isinstance(copy_ref, dict)
+                        or copy_ref not in body.get("source_refs", [])
+                        or window.get("window_ref") not in body.get("read_window_refs", [])
+                        or not window.get("passage_refs")
+                        or not all(canonical(pointer) in selected.get(canonical(copy_ref), set())
+                                   for pointer in window["passage_refs"])):
+                    continue
+                copy = self.store.get(**copy_ref)
+                source_status = self._source_status(copy) if copy is not None else None
+                if (copy is None or ref(copy) != copy_ref
+                        or source_status["model_input_status"] != "permitted"
+                        or source_status["current_ref"] != copy_ref):
+                    continue
+                raw = json.loads(self.store.read_blob(response["body"]["blob"]["sha256"]))
+                calls = raw.get("tool_calls", [])
+                if len(calls) != 1 or calls[0].get("function", {}).get("name") != "read_source_window":
+                    continue
+                arguments = json.loads(calls[0]["function"]["arguments"])
+                if not isinstance(arguments, dict):
+                    continue
+                location = read_location(arguments)
+                if location is not None:
+                    covered.add((canonical(copy_ref), location))
+            except (ContextError, StateError, KeyError, TypeError, ValueError,
+                    AttributeError, UnicodeDecodeError):
+                continue
+        retained, paged = [], 0
+        for choice in navigation["read_choices_from_saved_result"]:
+            if (not isinstance(choice, dict)
+                    or not isinstance(choice.get("source_ref"), dict)
+                    or not isinstance(choice.get("read"), dict)):
+                return navigation
+            location = read_location(choice["read"])
+            if location is not None and (canonical(choice["source_ref"]), location) in covered:
+                paged += 1
+            else:
+                retained.append(choice)
+        if not paged:
+            return navigation
+        return {
+            **navigation,
+            "read_choice_projection": "ora.saved_passage_choices.paged.v1",
+            "read_choices_from_saved_result": retained,
+            "previewed_saved_page_matches": len(retained),
+            "paged_read_choice_count": paged,
+            "read_choices_status": (
+                "Paged choices have exact checked text in source packets; "
+                "full saved listing remains readable."
+            ),
+        }
 
     def _wrong_image_reader_navigation(self, control: dict, *, mission_id: str,
                                        actor_id: str, task_id: str) -> dict | None:
@@ -2320,7 +2675,25 @@ class WorkingContext:
         payload = json.loads(self.store.read_blob(result["body"]["blob"]["sha256"]))
         if payload.get("tool_call_id") != calls[0]["id"]:
             raise ContextError("Saved tool result no longer matches its call")
-        if payload.get("name") == "read_plan" and assistant["content"] is not None:
+        if assistant["content"] not in (None, ""):
+            if origin_call is None or not isinstance(assistant["content"], str):
+                assistant["content"] = None
+            else:
+                read_scope = scope or {
+                    "mission_id": response["body"]["mission_id"],
+                    "actor_id": origin_call["body"]["instance_id"],
+                    "task_id": origin_call["body"]["task_id"],
+                }
+                try:
+                    public_access = self.archived_public_assistant_text_access(
+                        response_ref, **read_scope,
+                    )
+                except ContextError:
+                    public_access = {"status": "unavailable_lineage"}
+                if (public_access.get("status") != "available"
+                        or public_access.get("text") != assistant["content"]):
+                    assistant["content"] = None
+        if payload.get("name") in {"read_plan", "read_tool_result"} and assistant["content"] is not None:
             # A read's numeric arguments are safe to replay, but accompanying
             # model prose may derive from sources visible in its original turn.
             # Note projection alone cannot remove that separate assistant text.
@@ -2332,7 +2705,8 @@ class WorkingContext:
             ):
                 assistant["content"] = None
         if (payload.get("name") in {
-                "calculate", "search_saved_passages", "read_browser_search_result",
+                *SOURCE_DEPENDENT_NUMERIC_TOOLS, "publish_result",
+                "search_saved_passages", "read_browser_search_result",
                 "search_scholarly", "save_plan", "modify_plan",
                 "search_web", "read_search_results", "render_source",
                 "read_document_ocr", "inspect_figure",
@@ -2343,7 +2717,17 @@ class WorkingContext:
             dependencies = list(self.response_source_dependencies(response_ref, require_permitted=False))
             saved_content = json.loads(payload["content"])
             dependencies.extend(saved_content.get("source_dependency_refs", []))
-            if any(
+            effect_ref = result["body"].get("effect_ref") if payload.get("name") == "publish_result" else None
+            report_blocked = False
+            if effect_ref is not None:
+                try:
+                    report = self.store.get(**effect_ref)
+                except (KeyError, TypeError, ValueError, StateError):
+                    report = None
+                report_blocked = (
+                    report is None or report_text_access(self.store, report)["status"] != "available"
+                )
+            if report_blocked or any(
                 not isinstance(pointer, dict)
                 or (copy := self.store.get(**pointer)) is None
                 or self._source_status(copy)["model_input_status"] != "permitted"
@@ -2570,6 +2954,7 @@ class WorkingContext:
                             "next_request": {"tool": "read_tool_result", **arguments,
                                              "offset": 0, "projection_sha256": ""},
                         }
+                        assistant["content"] = None
                     payload = {**payload, "content": canonical(checked)}
                     paging_rechecked = True
         report_rechecked = False
@@ -2727,6 +3112,44 @@ class WorkingContext:
                 else "working_note_current_use_rechecked"
             ),
         } if isinstance(original_content, str) and payload.get("content") != original_content else None)
+        if payload.get("name") in NUMERIC_PAGEABLE_TOOLS:
+            original_arguments = calls[0]["function"]["arguments"]
+            if len(original_arguments) > MAX_RESULT_PAGE_CHARS:
+                argument_hash = hashlib.sha256(original_arguments.encode()).hexdigest()
+                assistant = {**assistant, "content": None, "tool_calls": [{**calls[0], "function": {
+                    **calls[0]["function"], "arguments": "{}",
+                }}]}
+                projected_content = json.loads(payload["content"])
+                if isinstance(projected_content, dict):
+                    annotation = {
+                        "arguments_status": "saved_numeric_arguments_archived_for_model_input",
+                        "original_arguments_sha256": argument_hash,
+                    }
+                    projected_content = {**projected_content, **annotation}
+                    if len(canonical(projected_content)) > MAX_RESULT_PAGE_CHARS:
+                        result_scope = scope or {
+                            "mission_id": response["body"]["mission_id"],
+                            "actor_id": origin_call["body"]["instance_id"],
+                            "task_id": origin_call["body"]["task_id"],
+                        }
+                        for limit in (500, 250, 100, 1):
+                            first = self.read_tool_result(
+                                **result_scope, result_id=result["id"], offset=0,
+                                limit=limit, projection_sha256="",
+                            )
+                            projected_content = {**first, **annotation}
+                            if len(canonical(projected_content)) <= MAX_RESULT_PAGE_CHARS:
+                                break
+                        else:
+                            raise ContextError("Numerical result page exceeds model reply allowance")
+                    payload = {**payload, "content": canonical(projected_content)}
+                compaction = {
+                    **(compaction or {}),
+                    "status": (compaction or {}).get("status", "numeric_arguments_archived_for_model_input"),
+                    "argument_status": "saved_numeric_arguments_archived_for_model_input",
+                    "original_arguments_sha256": argument_hash,
+                    "saved_tool_result_ref": ref(result),
+                }
         if (
             payload.get("name") == "read_context_page"
             and len(payload.get("content", "")) > MAX_CONTEXT_PAGE_CHARS
@@ -2857,6 +3280,7 @@ class WorkingContext:
     def _compact_selected_window_preview(
         self, response_ref: dict, payload: dict, *, call: dict, control: dict,
         selected_source_refs: tuple[dict, ...],
+        selected_source_inputs: tuple[dict, ...] | None = None,
     ) -> tuple[dict, dict] | None:
         """Avoid repeating a checked window already selected as source input.
 
@@ -2875,6 +3299,10 @@ class WorkingContext:
             passages = window_result["passages"]
             window_passages = window_result["passage_refs"]
             selected_passages = window_result["model_selection"]["passage_refs"]
+            current_passages = next(
+                (item["passage_refs"] for item in selected_source_inputs
+                 if item["copy_ref"] == copy_ref), None,
+            ) if selected_source_inputs is not None else selected_passages
             saved_copy = self.store.get(**copy_ref)
             saved_window = self.store.get(**window_ref)
             saved_quality = (
@@ -2910,6 +3338,8 @@ class WorkingContext:
                 or control["body"].get("selected_passage_refs", {}).get(copy_ref["id"])
                 != selected_passages
                 or any(pointer not in selected_passages for pointer in window_passages)
+                or not isinstance(current_passages, list)
+                or any(pointer not in current_passages for pointer in window_passages)
                 or self._source_status(saved_copy)["model_input_status"] != "permitted"
             ):
                 return None
@@ -2965,7 +3395,7 @@ class WorkingContext:
                     for item in passages
                 ],
                 "model_selection_mode": window_result["model_selection"].get("mode"),
-                "selected_passage_count": len(selected_passages),
+                "selected_passage_count": len(current_passages),
                 "returned_chars": window_result.get("returned_chars", omitted_chars),
                 "next_cursor": window_result["next_cursor"],
                 "next_request": window_result["next_request"],
@@ -3179,6 +3609,7 @@ class WorkingContext:
     def checked_window_is_selected_input(
         self, response_ref: dict, *, call: dict, control: dict,
         selected_source_refs: tuple[dict, ...],
+        selected_source_inputs: tuple[dict, ...] | None = None,
     ) -> bool:
         """Check whether an exact saved window is already in this call's packets."""
         try:
@@ -3186,9 +3617,75 @@ class WorkingContext:
             return self._compact_selected_window_preview(
                 response_ref, exchange[1], call=call, control=control,
                 selected_source_refs=selected_source_refs,
+                selected_source_inputs=selected_source_inputs,
             ) is not None
         except (ContextError, KeyError, TypeError, ValueError):
             return False
+
+    def archived_public_assistant_text_access(
+        self, response_ref: dict, *, mission_id: str, actor_id: str, task_id: str,
+    ) -> dict:
+        """Authorize ordinary saved assistant prose from one completed tool turn.
+
+        The text is never included in archived metadata. This check deliberately
+        binds it to the producing request's current source versions and use.
+        """
+        response = self.store.get(**response_ref)
+        if response is None or response["kind"] != "model_response_receipt":
+            raise ContextError("Saved assistant turn is unavailable")
+        self._saved_result_scope(
+            f"tool-result:{response['id']}", mission_id=mission_id,
+            actor_id=actor_id, task_id=task_id,
+        )
+        body = response["body"]
+        intent_ref = body.get("intent_ref")
+        intent = self.store.get(**intent_ref) if (
+            isinstance(intent_ref, dict)
+            and set(intent_ref) == {"kind", "id", "version"}
+            and intent_ref.get("kind") == "model_request_intent"
+            and isinstance(intent_ref.get("id"), str)
+            and type(intent_ref.get("version")) is int
+        ) else None
+        if (intent is None or intent["kind"] != "model_request_intent"
+                or any(intent["body"].get(key) != expected for key, expected in (
+                    ("mission_id", mission_id), ("instance_id", actor_id),
+                    ("task_id", task_id), ("call_ref", body.get("call_ref")),
+                    ("request_sha256", body.get("request_sha256")),
+                )) or body.get("error_kind") is not None
+                or body.get("http_status") not in (None, 200)):
+            return {"status": "unavailable_lineage"}
+        try:
+            saved = json.loads(self.store.read_blob(body["blob"]["sha256"]))
+            dependencies = self.response_source_dependencies(
+                response_ref, require_permitted=False,
+            )
+        except (ContextError, StateError, KeyError, TypeError, ValueError,
+                UnicodeDecodeError):
+            return {"status": "unavailable_lineage"}
+        if not isinstance(saved, dict):
+            return {"status": "unavailable_lineage"}
+        text = saved.get("content")
+        if text is None or text == "":
+            return {"status": "empty"}
+        if not isinstance(text, str):
+            return {"status": "unavailable_lineage"}
+        unavailable = []
+        for pointer in dependencies:
+            copy = self.store.get(**pointer)
+            current = self.store.get("source_copy", pointer["id"])
+            if (copy is None or current != copy
+                    or self._source_status(copy)["model_input_status"] != "permitted"):
+                unavailable.append(pointer)
+        if unavailable:
+            return {
+                "status": "withheld_due_source_use",
+                "source_dependency_refs": list(dependencies),
+                "unavailable_source_refs": unavailable,
+            }
+        return {
+            "status": "available", "text": text, "total_chars": len(text),
+            "source_dependency_refs": list(dependencies),
+        }
 
     def _archived_tool_observation(self, response_ref: dict) -> dict:
         """Project an exact completed turn without its result text or reasoning."""
@@ -3219,6 +3716,7 @@ class WorkingContext:
                     or saved_window is None
                     or saved_window["body"].get("copy_ref") != copy_ref
                     or saved_window["body"].get("passage_refs") != window["passage_refs"]
+                    or saved_window["body"].get("next_cursor") != window["next_cursor"]
                 ):
                     raise ValueError("window result mismatch")
                 returned_chars = 0
@@ -3236,6 +3734,49 @@ class WorkingContext:
                     "next_cursor": window["next_cursor"],
                     "status": "saved_result_metadata_not_source_text",
                 }
+                # Archiving the full tool turn must not erase its actionable
+                # location cues. Carry only same-copy reader arguments, never
+                # heading text or a claim that the next section was inspected.
+                arguments = json.loads(function["arguments"])
+                if (isinstance(arguments, dict)
+                        and arguments.get("source_id") == copy_ref["id"]
+                        and arguments.get("source_version") == copy_ref["version"]
+                        and type(arguments.get("char_limit")) is int
+                        and arguments["char_limit"] > 0):
+                    reader = {key: arguments[key] for key in (
+                        "source_id", "source_version", "char_limit",
+                    )}
+                    if arguments.get("selection_mode") in {"append", "replace"}:
+                        reader["selection_mode"] = arguments["selection_mode"]
+                    if window["next_cursor"]:
+                        observation["window"]["next_request"] = {
+                            **reader, **window["next_cursor"],
+                        }
+                    navigation = window.get("navigation") or {}
+                    if not isinstance(navigation, dict):
+                        navigation = {}
+                    section = navigation.get("next_section_request")
+                    if (isinstance(section, dict)
+                            and section.get("source_id") == copy_ref["id"]
+                            and section.get("source_version") == copy_ref["version"]
+                            and section.get("char_offset") == 0
+                            and type(section.get("block_offset")) is int
+                            and saved_window["body"]["block_offset"]
+                            < section["block_offset"] < saved_window["body"]["total_blocks"]
+                            and any(item.get("block_offset") == section["block_offset"]
+                                    for item in navigation.get("sections", [])
+                                    if isinstance(item, dict))):
+                        observation["window"]["next_section_request"] = {
+                            **reader, "block_offset": section["block_offset"],
+                            "char_offset": 0,
+                        }
+                progress = window.get("progress_feedback")
+                if (isinstance(progress, dict)
+                        and progress.get("exact_window_repeated") is True
+                        and progress.get("new_checked_location_chars") == 0):
+                    observation["window"]["progress_feedback"] = {
+                        "exact_window_repeated": True, "new_checked_location_chars": 0,
+                    }
             except (KeyError, TypeError, ValueError):
                 observation["window_status"] = "saved_result_has_no_safe_window_projection"
             return observation
@@ -3848,6 +4389,7 @@ class WorkingContext:
     def _source_progress(
         self, control: dict, sources: list[dict], mission_id: str, *,
         default_supplied: bool = False,
+        selected_source_inputs: tuple[dict, ...] | None = None,
     ) -> list[dict]:
         """Describe selected spans and saved windows, without claiming full coverage."""
         body = control["body"]
@@ -3857,9 +4399,9 @@ class WorkingContext:
         progress = []
         for copy in sources:
             pointer = ref(copy)
-            selected = body.get("selected_passage_refs", {}).get(copy["id"])
-            if selected is None:
-                selected = []
+            durable_selected = body.get("selected_passage_refs", {}).get(copy["id"])
+            if durable_selected is None:
+                durable_selected = []
                 encounter_ref = copy["body"].get("encounter")
                 encounter = (
                     self.store.get(**encounter_ref) if isinstance(encounter_ref, dict) else None
@@ -3873,7 +4415,7 @@ class WorkingContext:
                             EvidenceLibrary(self.store), pointer
                         )
                         if default:
-                            selected.append(default)
+                            durable_selected.append(default)
                     passage_ids = []
                 else:
                     passage_ids = copy["body"].get("passage_ids", [])
@@ -3881,7 +4423,12 @@ class WorkingContext:
                     passage = self.store.get("source_passage", passage_id)
                     if passage is None:
                         raise ContextError("Source copy lost a saved selected passage")
-                    selected.append(ref(passage))
+                    durable_selected.append(ref(passage))
+            selected = (
+                next(item["passage_refs"] for item in selected_source_inputs
+                     if item["copy_ref"] == pointer)
+                if selected_source_inputs is not None else durable_selected
+            )
             spans = []
             for passage_ref in selected:
                 passage = _exact(self.store, passage_ref, mission_id)
@@ -3897,7 +4444,7 @@ class WorkingContext:
                     latest = window
                     break
             coverage = extracted_text_coverage(
-                self.store, pointer, selected, body.get("read_window_refs", [])
+                self.store, pointer, durable_selected, body.get("read_window_refs", [])
             )
             # Saved windows can cover the retained copy even when the current
             # model input contains only a later, explicitly selected excerpt.
@@ -3975,6 +4522,10 @@ class WorkingContext:
                 coverage_basis = "verified_saved_windows_only"
         entry = {
             "copy_ref": copy_ref,
+            "selected_passage_count": item["selected_passage_count"],
+            "source_surface": coverage["source_surface"],
+            "total_blocks": coverage["total_blocks"],
+            "uncovered_chars": coverage["uncovered_chars"],
             "saved_coverage": {
                 key: coverage[key]
                 for key in (
@@ -4060,6 +4611,24 @@ class WorkingContext:
                 continue
             saved = window["body"]
             permitted = self._source_status(copy)["model_input_status"] == "permitted"
+            omitted_for_fit = reason in {
+                "exact_source_text_exceeds_allowance",
+                "required_context_or_complete_request_exceeded_allowance",
+            }
+            next_action = (
+                "Current source policy prevents delivery; resolve source use or use "
+                "another permitted source. This is not a size-related denial."
+                if not permitted else
+                "Omitted. requested_window is prior; repeat adds no coverage. "
+                + (
+                    "A smaller char_limit with selection_mode=replace may fit "
+                    "(unverified). "
+                    if omitted_for_fit and type(window_view.get("returned_chars")) is int
+                    and window_view["returned_chars"] > 1 else ""
+                )
+                + "Other copies: read_source_window by exact ref or read_source_inventory "
+                "if attached; read_context_page is archive-only."
+            )
             return {
                 "result_ref": observation["result_ref"],
                 "window_ref": window_ref,
@@ -4068,10 +4637,8 @@ class WorkingContext:
                 "source_text_in_this_call": False,
                 "past_model_delivery": "not_established_by_saved_read",
                 "status": (
-                    ("saved_text_omitted_for_input_fit" if reason in {
-                        "exact_source_text_exceeds_allowance",
-                        "required_context_or_complete_request_exceeded_allowance",
-                    } else "saved_text_not_selected_for_current_input") if permitted
+                    ("saved_text_omitted_for_input_fit" if omitted_for_fit
+                     else "saved_text_not_selected_for_current_input") if permitted
                     else "saved_text_unavailable_under_current_source_policy"
                 ),
                 "requested_window": {
@@ -4079,16 +4646,7 @@ class WorkingContext:
                 },
                 "returned_chars": window_view["returned_chars"],
                 "latest_window_next_cursor": window_view["next_cursor"],
-                "next_action": (
-                    "Saved source text is absent from this input. "
-                    "Choose a smaller read_source_window at the required offset with "
-                    "selection_mode=replace; append keeps earlier selected text. "
-                    "Use discover_capabilities/request_capability for source-linked notes "
-                    "when needed."
-                    if permitted else
-                    "Current source policy prevents delivery; resolve source use or use "
-                    "another permitted source. This is not a size-related denial."
-                ),
+                "next_action": next_action,
             }
         return None
 
@@ -4228,6 +4786,7 @@ class WorkingContext:
         estimate_tokens: Callable[[str], int] | None = None,
         preview_call: dict | None = None,
         compact_selected_window: bool = False,
+        selected_source_inputs: Iterable[dict] | None = None,
     ) -> ContextPack:
         """Assemble current state; size allowance applies to these messages only.
 
@@ -4278,6 +4837,20 @@ class WorkingContext:
         ]
         if any(item["kind"] != "source_copy" for item in sources):
             raise ContextError("Source inputs need exact source-copy references")
+        selected_source_inputs = (
+            tuple(selected_source_inputs) if selected_source_inputs is not None else None
+        )
+        if selected_source_inputs is not None and (
+            len(selected_source_inputs) != len(sources)
+            or any(
+                not isinstance(item, dict)
+                or set(item) != {"copy_ref", "passage_refs"}
+                or item["copy_ref"] != ref(source)
+                or not isinstance(item["passage_refs"], list)
+                for item, source in zip(selected_source_inputs, sources, strict=True)
+            )
+        ):
+            raise ContextError("Current passage selection differs from exact source inputs")
         evidence = [_exact(self.store, p, mission_id) for p in evidence_refs]
         contributions = [_exact(self.store, p, mission_id) for p in contribution_refs]
         notes = [_exact(self.store, p, mission_id) for p in note_refs]
@@ -4399,6 +4972,11 @@ class WorkingContext:
             question = current_incoming["body"]["question"]
             exposed = set(call["body"].get("exposed_tools", []))
             permitted = set(call["body"].get("permitted_tools", []))
+            reply = (
+                {"tool": "publish_result", "answer_request_id": current_incoming["id"]}
+                if len(question) <= window_chars and "publish_result" in exposed
+                else None
+            )
             reader = "read_context_record using older_records.inclusion_id and ref"
             if "exposed_tools" in call["body"] and "read_context_record" not in exposed:
                 reader = (
@@ -4411,10 +4989,15 @@ class WorkingContext:
                 "owner": "peer", "requester_id": current_incoming["body"]["requester_id"],
                 "recipient_id": actor_id,
                 "status": current_incoming["body"]["status"],
-                **({"question": question} if len(question) <= window_chars else {
+                **({"reply": reply} if reply else {}),
+                **({"question": question,
+                    "question_delivery": "full_saved_text",
+                    "saved_question_has_no_hidden_suffix": True}
+                   if len(question) <= window_chars else {
                     "question_window": question[:window_chars],
                     "question_chars": len(question),
                     "question_status": "prefix_window_only",
+                    "question_delivery": "prefix_only",
                     "read_full_question": reader,
                 }),
             }
@@ -4445,6 +5028,44 @@ class WorkingContext:
         ]
         routine_keys = {(item["id"], item["version"]) for item in routine_own_outcomes}
         shared = [item for item in shared if (item["id"], item["version"]) not in routine_keys]
+        page_turns = {
+            canonical(pointer): _context_page_turn_status(self.store, pointer, actor_id)
+            for pointer in archived_turns
+        }
+        page_only_history = bool(archived_turns) and all(
+            isinstance(status, dict) and status["status"] in {"bookkeeping", "rejected"}
+            for status in page_turns.values()
+        )
+        page_feedback = (page_turns[canonical(archived_turns[-1])]
+                         if archived_turns and not current_turns else None)
+        if page_feedback is not None and page_feedback["status"] != "rejected":
+            page_feedback = None
+        page_suppressed_turns = {
+            key for key, status in page_turns.items()
+            if status is not None and (
+                status["status"] == "bookkeeping"
+                or status["status"] == "rejected" and page_only_history
+                or status is page_feedback
+            )
+        }
+        page_responses = {key for key, status in page_turns.items() if status is not None}
+        page_tool_call_ids = {status["tool_call_id"] for status in page_turns.values()
+                              if status is not None}
+        page_calls = {
+            canonical(response["body"]["call_ref"])
+            for pointer in archived_turns
+            if canonical(pointer) in page_responses
+            for response in [self.store.get(**pointer)]
+        }
+        routine_page_outcomes = [
+            item for item in routine_own_outcomes
+            if _page_executor_wrapper(
+                self.store, item, page_responses, page_calls, page_tool_call_ids,
+            )
+        ]
+        routine_page_keys = {(item["id"], item["version"]) for item in routine_page_outcomes}
+        routine_visible = [item for item in routine_own_outcomes
+                           if (item["id"], item["version"]) not in routine_page_keys]
         active = {"unanswered", "awaiting_review", "partial_awaiting_review", "partly_answered"}
         request_preview = sorted(
             requests,
@@ -4493,12 +5114,12 @@ class WorkingContext:
                 "messages": len(messages),
                 "requests": len(requests),
                 "answers": len(answers),
-                "shared_updates": len(shared) + len(routine_own_outcomes),
-                "routine_own_outcomes_compacted": len(routine_own_outcomes),
+                "shared_updates": len(shared) + len(routine_visible),
+                "routine_own_outcomes_compacted": len(routine_visible),
                 "evidence": len(evidence),
                 "contributions": len(contributions),
                 "notes": len(notes),
-                "completed_tool_turns": len(archived_turns),
+                "completed_tool_turns": len(archived_turns) - len(page_suppressed_turns),
                 "shared_materials": 0,
             },
             "older_records": page_fetch,
@@ -4572,7 +5193,8 @@ class WorkingContext:
                 index["browser_search_response_refs"] = browser_refs[-4:]
             if sources:
                 source_progress = self._source_progress(
-                    control, sources, mission_id, default_supplied=True
+                    control, sources, mission_id, default_supplied=True,
+                    selected_source_inputs=selected_source_inputs,
                 )
                 index["source_progress"] = source_progress
             elif control["body"].get("source_refs"):
@@ -4588,22 +5210,8 @@ class WorkingContext:
                     retained_progress = self._source_progress(
                         control, permitted[:2], mission_id
                     )
-                    index["retained_reading_progress"] = [
-                        {
-                            "copy_ref": item["copy_ref"],
-                            "selected_passage_count": item["selected_passage_count"],
-                            "latest_read_window_ref": item["latest_read_window_ref"],
-                            "latest_window_next_cursor": item["latest_window_next_cursor"],
-                            "extracted_text_coverage": item["extracted_text_coverage"],
-                            "source_text_in_this_call": False,
-                            "past_model_delivery": "unverified",
-                        }
-                        for item in retained_progress
-                    ]
-                    # Keep the exact saved reading cursor when the larger
-                    # progress view is dropped under input pressure. This is
-                    # navigation over retained checked text, never a claim
-                    # that those bytes entered this model request.
+                    # One card carries saved coverage and its exact next read.
+                    # It does not claim any source text entered this call.
                     index["source_free_reading_navigation"] = [
                         self._source_free_navigation_item(control, item)
                         for item in retained_progress
@@ -4634,6 +5242,7 @@ class WorkingContext:
             if self.checked_window_is_selected_input(
                 latest, call=call, control=control,
                 selected_source_refs=tuple(ref(item) for item in sources),
+                selected_source_inputs=selected_source_inputs,
             ):
                 observation = self._archived_tool_observation(latest)
                 if observation.get("window"):
@@ -4738,10 +5347,16 @@ class WorkingContext:
             ]
             if urgent_preview:
                 index["shared_update_refs"] = [ref(item) for item in urgent_preview]
-        if routine_own_outcomes:
+        if page_feedback is not None:
+            index["current_tool_feedback"] = {
+                "tool": "read_context_page", "status": "rejected",
+                "reason": page_feedback["reason"][:180],
+                "result_ref": page_feedback["result_ref"],
+            }
+        if routine_visible:
             index["routine_own_outcomes"] = {
-                "count": len(routine_own_outcomes),
-                "recent_refs": [ref(item) for item in routine_own_outcomes[:2]],
+                "count": len(routine_visible),
+                "recent_refs": [ref(item) for item in routine_visible[:2]],
                 "fetch": page_fetch,
             }
         if sources:
@@ -4794,7 +5409,11 @@ class WorkingContext:
                 control, mission_id=mission_id, actor_id=actor_id, task_id=task["id"],
             )
             if saved_navigation:
-                index["latest_saved_passage_navigation"] = saved_navigation
+                index["latest_saved_passage_navigation"] = (
+                    self._page_covered_saved_passage_choices(
+                        control, saved_navigation, selected_source_inputs,
+                    )
+                )
             wrong_reader_navigation = self._wrong_image_reader_navigation(
                 control, mission_id=mission_id, actor_id=actor_id, task_id=task["id"],
             )
@@ -4868,6 +5487,15 @@ class WorkingContext:
             }, active_skill_ids=set(config["body"].get("skills", {})))
             tool_positions.append((pointer, len(past)))
             past.extend(exchange)
+            if isinstance(exchange[0].get("content"), str) and exchange[0]["content"]:
+                public_access = self.archived_public_assistant_text_access(
+                    pointer, mission_id=mission_id, actor_id=actor_id,
+                    task_id=task["id"],
+                )
+                if (public_access.get("status") != "available"
+                        or public_access.get("text") != exchange[0]["content"]):
+                    raise ContextError("Visible public assistant text lost source lineage")
+                conversation_dependencies.extend(public_access["source_dependency_refs"])
             function = exchange[0].get("tool_calls", [{}])[0].get("function", {})
             origin_response = self.store.get(**pointer)
             origin_call = self.store.get(**origin_response["body"]["call_ref"])
@@ -4914,7 +5542,9 @@ class WorkingContext:
                         )
                         if listing.get("status") != "data_unavailable_due_source_use":
                             conversation_dependencies.append(listing["parent_copy_ref"])
-                    if saved_payload.get("name") in SAVED_PASSAGE_PAGEABLE_TOOLS | PARALLEL_PAGEABLE_TOOLS:
+                    if saved_payload.get("name") in (SAVED_PASSAGE_PAGEABLE_TOOLS
+                                                      | PARALLEL_PAGEABLE_TOOLS
+                                                      | NUMERIC_PAGEABLE_TOOLS):
                         content = json.loads(saved_payload["content"])
                         conversation_dependencies.extend(content.get("source_dependency_refs", []))
                         conversation_dependencies.extend(self.response_source_dependencies(
@@ -4926,13 +5556,16 @@ class WorkingContext:
                 saved_payload = json.loads(self.store.read_blob(saved_result["body"]["blob"]["sha256"]))
                 conversation_dependencies.extend(json.loads(saved_payload["content"]).get("source_dependency_refs", []))
             if ((function.get("name") in {
-                    "compact_conversation", "calculate", "search_saved_passages",
+                    "compact_conversation", *SOURCE_DEPENDENT_NUMERIC_TOOLS,
+                    "publish_result",
+                    "search_saved_passages",
                     "read_browser_search_result", "search_scholarly", "save_plan", "modify_plan",
                     "search_web", "read_search_results", "cancel_search", "render_source",
                     "list_source_assets", "fetch_source_asset",
                     "read_research_activity", "retain_evidence", "search_evidence_library",
                 }
-                 or function.get("name") == "read_plan" and exchange[0].get("content") is not None
+                 or function.get("name") in {"read_plan", "read_tool_result"}
+                 and exchange[0].get("content") is not None
                  or "browser_search" in origin_call["body"].get("exposed_tools", []))
                     and (compaction or {}).get("status") not in {
                         "compaction_argument_withheld_due_source_use", "tool_argument_withheld_due_source_use",
@@ -4969,11 +5602,51 @@ class WorkingContext:
                         "status": delivery_feedback["status"],
                         "details_in_current_tool_result": True,
                     }
+        current_peer_report_answer_ids = set()
+        if current_turns and tool_positions:
+            current_result = past[tool_positions[-1][1] + 1]
+            try:
+                current_window = json.loads(current_result.get("content", ""))
+            except (TypeError, ValueError):
+                current_window = None
+            if (current_result.get("role") == "tool"
+                    and current_result.get("name") == "read_context_record"
+                    and isinstance(current_window, dict)
+                    and current_window.get("schema") == "ora.context_record_window.v1"
+                    and isinstance(current_window.get("ref"), dict)
+                    and current_window["ref"].get("kind") == "report"):
+                for disposition in index.get("request_dispositions", []):
+                    request = next((item for item in request_preview
+                                    if ref(item) == disposition.get("ref")), None)
+                    if (request is None
+                            or request["body"].get("status") != "awaiting_review"):
+                        continue
+                    for answer in answers:
+                        if (ref(answer) not in disposition.get("answer_refs", [])
+                                or answer["body"].get("partial") is True):
+                            continue
+                        material = self._peer_answer_material(
+                            request, answer, mission_id=mission_id,
+                            actor_id=actor_id, task_id=task["id"],
+                        )
+                        if (material is None
+                                or current_window["ref"] != material[1]
+                                or _peer_report_delivery(
+                                    (current_result,), material[1],
+                                )[0] != "complete_in_input"):
+                            continue
+                        disposition.update(
+                            owner="you", action="review_peer_answer",
+                            question=material[0],
+                        )
+                        current_peer_report_answer_ids.add(answer["id"])
+                        break
         if current_turns and control:
             pointer, position = tool_positions[-1]
             compacted = self._compact_selected_window_preview(
                 pointer, past[position + 1], call=call, control=control,
                 selected_source_refs=tuple(ref(item) for item in sources),
+                selected_source_inputs=selected_source_inputs,
             )
             if compacted is None:
                 compacted = self._compact_selected_inspection_preview(
@@ -4985,6 +5658,44 @@ class WorkingContext:
             if compacted is not None:
                 past[position + 1], compaction = compacted
                 tool_compactions.append(compaction)
+        if current_turns and not sources and tool_positions:
+            latest = past[tool_positions[-1][1] + 1]
+            target = index.get("followup_target")
+            if latest.get("name") == "read_context_record" and isinstance(target, dict):
+                try:
+                    window = json.loads(latest.get("content", ""))
+                except (TypeError, ValueError):
+                    window = None
+                if (isinstance(window, dict)
+                        and window.get("schema") == "ora.context_record_window.v1"
+                        and window.get("ref") == target.get("target_ref")
+                        and window.get("report_text_status") == "available"
+                        and window.get("source_dependencies_omitted_from_input") == []
+                        and type(window.get("offset")) is int
+                        and window["offset"] == 0
+                        and type(window.get("returned_chars")) is int
+                        and type(window.get("total_chars")) is int
+                        and window["returned_chars"] == window["total_chars"]
+                        and window.get("next_offset") is None
+                        and isinstance(window.get("text"), str)
+                        and window["returned_chars"] == len(window["text"])
+                        and target.get("target_text_status") == "available"
+                        and target.get("dependency_lineage_complete") is True
+                        and target.get("source_dependency_refs") == []
+                        and target.get("additional_source_dependencies", 0) == 0
+                        and not target.get("unavailable_source_refs")):
+                    # The report text is already in this exact tool message.
+                    # Distinguish prior analysis from a source copy before the
+                    # peer chooses its next action, without repeating its preview.
+                    target.pop("target_body_preview", None)
+                    target.pop("fetch_exact_parent_target", None)
+                    target["target_window_in_current_tool_result"] = True
+                    target["report_use_boundary"] = (
+                        "This is prior agent output, not a source_copy. If it suffices, "
+                        "summarize it with citations: [] and state its limits. "
+                        "Original-source citations need a separately inspected source_copy; "
+                        "never use this report ID with read_source_window."
+                    )
         try:
             _messages([*past, {"role": "user", "content": canonical(index)}])
         except ModelPreflightError as exc:
@@ -5047,8 +5758,37 @@ class WorkingContext:
         packing_details = False
         preincluded: set[int] = set()
         remaining_positions = set(range(len(candidates)))
+        if (not remaining_positions and not scope_omissions and not tool_compactions
+                and not routine_visible and not archived_turns):
+            index.pop("older_records", None)
+        elif (not remaining_positions and not scope_omissions and not tool_compactions
+              and not routine_visible and page_only_history and page_feedback is None):
+            index.pop("older_records", None)
 
         request_by_id = {item["id"]: item for item in requests}
+
+        def compact_peer_projection(view: dict) -> None:
+            # Keep the complete saved question/scope and exact run ref. Their
+            # derived lengths, repeated run pointer and complete-scope digest
+            # can be paged once the peer's question or answer is also in view.
+            scope = view.get("run_scope")
+            if isinstance(scope, dict):
+                if scope.get("question_ref") == scope.get("run_ref"):
+                    scope.pop("question_ref", None)
+                if (scope.get("question_in_task_objective") is True
+                        and scope.get("question_truncated") is False
+                        and isinstance(view.get("task", {}).get("objective"), str)
+                        and scope.get("question_chars") == len(view["task"]["objective"])):
+                    scope.pop("question_chars", None)
+                if (scope.get("scope_truncated") is False
+                        and isinstance(scope.get("scope_preview"), str)
+                        and scope.get("scope_chars") == len(scope["scope_preview"])):
+                    scope.pop("scope_chars", None)
+                    scope.pop("scope_sha256", None)
+            if view.get("source_refs") == [
+                item["ref"] for item in view.get("source_retrieval", [])
+            ]:
+                view.pop("source_refs", None)
 
         def repeated_peer_message_request(label: str, item: dict) -> dict | None:
             """Prove one delivered message contains only its request's exact question."""
@@ -5098,6 +5838,103 @@ class WorkingContext:
                 for detail in index["details"]
             )
 
+        def current_incoming_question_in_tool_result() -> bool:
+            """Require the complete, currently authorized read before paging its duplicate card."""
+            if current_incoming is None or not current_turns or not tool_positions:
+                return False
+            pointer, position = tool_positions[-1]
+            if pointer != current_turns[-1] or position + 1 >= len(past):
+                return False
+            assistant, result = past[position : position + 2]
+            calls = assistant.get("tool_calls")
+            if (not isinstance(calls, list) or len(calls) != 1
+                    or calls[0].get("function", {}).get("name") != "read_context_record"
+                    or result.get("role") != "tool"
+                    or result.get("name") != "read_context_record"):
+                return False
+            try:
+                arguments = json.loads(calls[0]["function"]["arguments"])
+                window = json.loads(result["content"])
+                question_record = json.loads(window["text"])
+                if (not isinstance(arguments, dict)
+                        or set(arguments) != {
+                            "inclusion_id", "kind", "id", "version", "offset", "limit"
+                        }
+                        or type(arguments["inclusion_id"]) is not str
+                        or type(arguments["limit"]) is not int
+                        or arguments["limit"] <= 0
+                        or type(arguments["offset"]) is not int
+                        or arguments["offset"] != 0
+                        or {key: arguments[key] for key in ("kind", "id", "version")}
+                        != ref(current_incoming)
+                        or window.get("schema") != "ora.context_record_window.v1"
+                        or window.get("ref") != ref(current_incoming)
+                        or window.get("offset") != 0
+                        or type(window.get("returned_chars")) is not int
+                        or type(window.get("total_chars")) is not int
+                        or window["returned_chars"] != window["total_chars"]
+                        or window["returned_chars"] != len(window["text"])
+                        or window.get("next_offset") is not None
+                        or not isinstance(question_record, dict)
+                        or question_record.get("question")
+                        != current_incoming["body"]["question"]
+                        or question_record.get("status")
+                        != current_incoming["body"]["status"]
+                        or question_record.get("message_ref")
+                        != current_incoming["body"].get("message_ref")):
+                    return False
+                checked = self.read_omitted_record(
+                    mission_id=mission_id, actor_id=actor_id, task_id=task["id"],
+                    inclusion_ref={"kind": "context_inclusion",
+                                   "id": arguments["inclusion_id"], "version": 1},
+                    pointer=ref(current_incoming), offset=0, limit=arguments["limit"],
+                )
+            except (ContextError, KeyError, TypeError, ValueError):
+                return False
+            return canonical(checked) == result["content"]
+
+        # A distinct saved peer payload needs its exact read cue. Do not make
+        # the cue disappear by fitting a no-cue index to the soft allowance
+        # before the cue's permission-aware projection is attempted below.
+        priority_payload_distinct = False
+        priority_cue_candidate = False
+        priority_message = None
+        if current_incoming is not None:
+            origin = current_incoming["body"].get("message_ref") or {}
+            priority_message = next((item for item in messages
+                                     if item["id"] == origin.get("id")
+                                     and item["body"].get("request_id") == current_incoming["id"]
+                                     and item["body"].get("delivered_at") is not None
+                                     and item["body"].get("sender_ref", {}).get("id")
+                                     == current_incoming["body"].get("requester_id")
+                                     and item["body"].get("recipient_ref", {}).get("id")
+                                     == actor_id), None)
+            if priority_message is not None:
+                payload = priority_message["body"].get("payload")
+                question = current_incoming["body"]["question"]
+                priority_payload_distinct = bool(
+                    priority_message["body"].get("evidence_refs")
+                    or payload not in (None, "", [], {}) and (
+                        not isinstance(payload, dict)
+                        or payload.get("question") != question
+                        or any(value not in (None, "", [], {}) for key, value in payload.items()
+                               if key != "question")
+                    )
+                )
+                if priority_payload_distinct:
+                    exposed = set(call["body"].get("exposed_tools", []))
+                    permitted = set(call["body"].get("permitted_tools", []))
+                    reader_available = (
+                        "exposed_tools" not in call["body"]
+                        or "read_context_record" in exposed
+                        or "read_context_record" in permitted
+                        and "request_capability" in exposed
+                    )
+                    priority_cue_candidate = (
+                        reader_available
+                        and self._peer_message_text_access(priority_message)["status"] == "available"
+                    )
+
         # Input budget: count this working view and its retrieval pointers.
         # The caller reserves space for instructions, tools and source text.
         def measure(value: dict, *, remaining_count: int | None = None) -> int | None:
@@ -5108,8 +5945,9 @@ class WorkingContext:
                 # whether optional context needs compaction. Scope/tool omissions
                 # can grow during compaction, so measure their current count.
                 count = ((len(remaining_positions) if remaining_count is None else remaining_count)
-                         + len(routine_own_outcomes)
-                         + len(archived_turns) + len(scope_omissions)
+                         + len(routine_visible)
+                         + len(archived_turns) - len(page_suppressed_turns)
+                         + len(scope_omissions)
                          + sum(len(item.get("omitted_item_refs", []))
                                for item in tool_compactions))
                 value = {**value, "omitted": _omission_marker(
@@ -5124,6 +5962,13 @@ class WorkingContext:
 
         def compact_reference_index() -> int | None:
             minimum = measure(index)
+            cue_pending = (
+                priority_cue_candidate
+                and "peer_payload" not in index.get("incoming_request", {})
+                and any(candidates[position][0] == "message"
+                        and candidates[position][1] is priority_message
+                        for position in remaining_positions)
+            )
             if (
                 minimum is not None
                 and minimum > allowance
@@ -5164,12 +6009,78 @@ class WorkingContext:
                     # message pointers, when answering an incoming question.
                     index.pop("outgoing_request_message_refs", None)
                     minimum = measure(index)
-                if minimum is not None and minimum > allowance:
+                if minimum is not None and minimum > allowance and not cue_pending:
+                    # Retain the priority question before duplicate pointers
+                    # to messages already reachable in this inclusion's exact
+                    # older-records page. A selected message without an
+                    # omission remains visible through its existing reference.
+                    older = index.get("older_records")
+                    exposed = set(call["body"].get("exposed_tools", []))
+                    permitted = set(call["body"].get("permitted_tools", []))
+
+                    def reader_available(name: str) -> bool:
+                        return (name in exposed
+                                or name in permitted and "request_capability" in exposed)
+
+                    if (isinstance(older, dict)
+                            and older.get("tool") == "read_context_page"
+                            and isinstance(older.get("inclusion_id"), str)
+                            and all(reader_available(name) for name in (
+                                "read_context_page", "read_context_record",
+                            ))):
+                        omitted_messages = set()
+                        for position in remaining_positions:
+                            label, item = candidates[position]
+                            if label == "message":
+                                omitted_messages.add((item["kind"], item["id"], item["version"]))
+                        if omitted_messages and index.get("message_refs"):
+                            kept = [pointer for pointer in index["message_refs"]
+                                    if (pointer["kind"], pointer["id"], pointer["version"])
+                                    not in omitted_messages]
+                            if kept:
+                                index["message_refs"] = kept
+                            else:
+                                index.pop("message_refs")
+                            minimum = measure(index)
+                if minimum is not None and minimum > allowance and not cue_pending:
+                    # Zero counts do not add records; nonzero counts and the
+                    # exact older-records path remain available.
+                    index["record_counts"] = {
+                        key: count for key, count in index["record_counts"].items() if count
+                    }
+                    minimum = measure(index)
+                if minimum is not None and minimum > allowance and not cue_pending:
+                    # The exact selected model remains pinned in the request
+                    # and configuration; its repeated index label is optional.
+                    index.pop("selected_model_id", None)
+                    minimum = measure(index)
+                if (minimum is not None and minimum > allowance
+                        and index["incoming_request"].get("question_delivery")
+                        != "full_in_current_tool_result"):
                     for window_chars in (300, 240, 180, 120):
                         index["incoming_request"] = incoming_preview(window_chars)
                         minimum = measure(index)
                         if minimum is not None and minimum <= allowance:
                             break
+                if (minimum is not None and minimum > allowance
+                        and current_incoming_question_in_tool_result()):
+                    # The exact scoped tool result already carries the whole
+                    # question, status and message ref. Keep its request and
+                    # requester visible without repeating a prefix or reader cue.
+                    card = index["incoming_request"]
+                    for key in ("question", "question_window", "question_status",
+                                "question_chars", "read_full_question", "recipient_id",
+                                "status"):
+                        card.pop(key, None)
+                    card["question_delivery"] = "full_in_current_tool_result"
+                    counts = index.get("record_counts", {})
+                    if counts.get("requests") == 1:
+                        counts.pop("requests")
+                    if counts.get("messages") == 1 and priority_message is not None:
+                        counts.pop("messages")
+                    if index.get("request_dispositions") == []:
+                        index.pop("request_dispositions")
+                    minimum = measure(index)
             dispositions = index.get("request_dispositions", [])
             if (minimum is not None and minimum > allowance
                     and len(dispositions) > 1
@@ -5311,6 +6222,8 @@ class WorkingContext:
         # Give a complete answer to its requester before spending this turn's
         # optional budget on older board, message, or report catalog detail.
         for answer in answers:
+            if answer["id"] in current_peer_report_answer_ids:
+                continue
             request = request_by_id.get(answer["body"].get("request_id"))
             if request is None:
                 continue
@@ -5320,10 +6233,13 @@ class WorkingContext:
             )
             if preview is None:
                 continue
-            proposed = {**index, "peer_answer_previews": [
+            proposed = {**deepcopy(index), "peer_answer_previews": [
                 *index.get("peer_answer_previews", []), preview,
             ]}
             size = measure(proposed)
+            if allowance is not None and size is not None and size > allowance:
+                compact_peer_projection(proposed)
+                size = measure(proposed)
             if allowance is not None and size is not None and size > allowance:
                 # The card already carries this request and answer. Remove
                 # only duplicate navigation for this exact pair; keep other
@@ -5388,6 +6304,8 @@ class WorkingContext:
                 card["answer_ref"]["id"] for card in index.get("peer_answer_review_cues", [])
             }
             for answer in answers:
+                if answer["id"] in current_peer_report_answer_ids:
+                    continue
                 if answer["id"] in previewed_answers or answer["id"] in cued_answers:
                     continue
                 request = request_by_id.get(answer["body"].get("request_id"))
@@ -5399,10 +6317,36 @@ class WorkingContext:
                 )
                 if cue is None:
                     continue
-                proposed = {**index, "peer_answer_review_cues": [
+                proposed = {**deepcopy(index), "peer_answer_review_cues": [
                     *index.get("peer_answer_review_cues", []), cue,
                 ]}
+                # This full cue already names the exact request and answer.
+                # Keep dispositions for other answers or changed status, but
+                # page the identical one-answer pointer before measuring it.
+                answer_refs = proposed.get("request_answer_refs", [])
+                if cue["answer_ref"] in answer_refs:
+                    remaining = [pointer for pointer in answer_refs
+                                 if pointer != cue["answer_ref"]]
+                    if remaining:
+                        proposed["request_answer_refs"] = remaining
+                    else:
+                        proposed.pop("request_answer_refs", None)
+                dispositions = proposed.get("request_dispositions", [])
+                remaining = [item for item in dispositions if not (
+                    item.get("ref") == cue["request_ref"]
+                    and item.get("answer_refs") == [cue["answer_ref"]]
+                    and item.get("accepted_answer_ref") is None
+                    and item.get("replacement_request_ref") is None
+                )]
+                if len(remaining) != len(dispositions):
+                    if remaining:
+                        proposed["request_dispositions"] = remaining
+                    else:
+                        proposed.pop("request_dispositions", None)
                 size = measure(proposed)
+                if allowance is not None and size is not None and size > allowance:
+                    compact_peer_projection(proposed)
+                    size = measure(proposed)
                 if allowance is not None and size is not None and size > allowance:
                     # The cue carries this exact answer and request status.
                     # Page duplicate navigation before optional details, keeping
@@ -5775,7 +6719,8 @@ class WorkingContext:
                     key: last_window[key]
                     for key in (
                         "response_ref", "result_ref", "window_ref", "next_cursor",
-                    )
+                        "next_request", "next_section_request", "progress_feedback",
+                    ) if key in last_window
                 }
                 index["last_checked_window"]["source_text_status"] = (
                     "checked_window_passages_in_selected_source_packet"
@@ -5854,14 +6799,30 @@ class WorkingContext:
                     == item["selected_model_input_status"]
                     == item["current_model_input_status"]
                 ):
+                    scope = item.get("selected_input_scope")
+                    if (
+                        item["status"] == "permitted"
+                        and isinstance(scope, dict)
+                        and scope.get("status") == "complete_extracted_text"
+                        and type(scope.get("total_chars")) is int
+                        and scope.get("covered_chars") == scope.get("total_chars")
+                        and scope.get("first_omitted_cursor") is None
+                        and scope.get("saved_read_status") == scope["status"]
+                    ):
+                        # A checked passage packet and the retained-copy
+                        # coverage independently establish these equal values.
+                        # Keep the basis and extracted-text scope explicit.
+                        scope = {key: scope[key] for key in (
+                            "basis", "status", "total_chars",
+                        )}
                     compact_sources.append(
                         {
                             "ref": item["ref"],
-                            "current_source_use_ref": item["current_source_use_ref"],
+                            **({"current_source_use_ref": item["current_source_use_ref"]}
+                               if item["status"] != "permitted" else {}),
                             "status": item["status"],
                             "selected_and_current_equal": True,
-                            **({"selected_input_scope": item["selected_input_scope"]}
-                               if "selected_input_scope" in item else {}),
+                            **({"selected_input_scope": scope} if scope is not None else {}),
                             **({"absence_claim_scope": item["absence_claim_scope"]}
                                if "absence_claim_scope" in item else {}),
                         }
@@ -5991,7 +6952,14 @@ class WorkingContext:
                 # Both exact records are already in the pageable omission
                 # index. Retain their refs and one existing fetch coordinate;
                 # a selected-source turn still keeps its permitted preview.
-                target.pop("fetch_exact_parent_target")
+                if sources:
+                    target.pop("fetch_exact_parent_target")
+                else:
+                    # A source-free follow-up needs this exact report reader;
+                    # the parent report ID is not a source-copy ID.
+                    if isinstance(target.get("target_body_preview"), str):
+                        target["target_body_preview"] = target["target_body_preview"][:100]
+                        target["preview_truncated_for_budget"] = True
                 target.pop("fetch_full_parent_scope")
                 target["parent_details_page"] = "older_records"
             required = measure(index)
@@ -6009,6 +6977,7 @@ class WorkingContext:
                 and self.checked_window_is_selected_input(
                     archived_turns[-1], call=call, control=control,
                     selected_source_refs=tuple(ref(item) for item in sources),
+                    selected_source_inputs=selected_source_inputs,
                 )
             ):
                 # The completed turn is in the exact older-records omission
@@ -6109,7 +7078,7 @@ class WorkingContext:
                     index["followup_target"] = {
                         key: target[key] for key in (
                             "target_ref", "parent_run_ref", "dependency_lineage_complete",
-                            "source_dependency_refs",
+                            "source_dependency_refs", "report_use_boundary",
                         ) if key in target
                     }
                     index["followup_target"].update({
@@ -6179,6 +7148,7 @@ class WorkingContext:
                 and self.checked_window_is_selected_input(
                     archived_turns[-1], call=call, control=control,
                     selected_source_refs=tuple(ref(item) for item in sources),
+                    selected_source_inputs=selected_source_inputs,
                 )
             ):
                 # The selected packet carries this checked text and passage
@@ -6187,9 +7157,8 @@ class WorkingContext:
                 # target preview and source dependencies in this tight turn.
                 view = retrieval[0]
                 scope = view["selected_input_scope"]
-                index["source_retrieval"] = [{
+                compact_retrieval = {
                     "ref": view["ref"],
-                    "current_source_use_ref": view["current_source_use_ref"],
                     "status": view["status"],
                     "selected_input_scope": {
                         key: scope[key] for key in (
@@ -6198,12 +7167,20 @@ class WorkingContext:
                         ) if key in scope
                     },
                     "absence_claim_scope": "Whole-source absence unverified from this selected excerpt.",
-                }]
+                }
+                if "current_source_use_ref" in view:
+                    compact_retrieval["current_source_use_ref"] = view[
+                        "current_source_use_ref"
+                    ]
+                index["source_retrieval"] = [compact_retrieval]
                 index["last_checked_window"] = {
                     "window_ref": last_window["window_ref"],
                     "next_cursor": last_window["next_cursor"],
                     "source_text_status": last_window["source_text_status"],
                     "read_event_page": "older_records",
+                    **{key: last_window[key] for key in (
+                        "next_request", "next_section_request", "progress_feedback",
+                    ) if key in last_window},
                 }
                 index["followup_target"] = {
                     key: target[key] for key in (
@@ -6281,6 +7258,118 @@ class WorkingContext:
         if allowance is not None and required is not None and required > allowance:
             required = compact_reference_index()
         if allowance is not None and required is not None and required > allowance:
+            # Two complete checked windows can coexist when their exact text
+            # is in the selected source packet. Page only repeated metadata;
+            # preserve the task, other retained source refs, source-use checks,
+            # any peer route, and the older-records reader.
+            run_scope = index.get("run_scope")
+            task_view = index.get("task")
+            retrieval = index.get("source_retrieval")
+            last_window = index.get("last_checked_window")
+            dispositions = index.get("request_dispositions")
+            pending_peer = bool(
+                isinstance(dispositions, list) and len(dispositions) == 1
+                and dispositions[0].get("status") == "unanswered"
+                and isinstance(dispositions[0].get("recipient_control_ref"), dict)
+                and dispositions[0].get("next_action") == (
+                    "Continue independent work, or request wait_for_dependencies "
+                    "and wait on this exact request and recipient control. "
+                    "Use review_peer_answer after an answer arrives."
+                )
+            )
+            no_peer = bool(
+                not dispositions and not index.get("incoming_request")
+                and not index.get("peer_answer_previews")
+                and not index.get("peer_answer_review_cues")
+                and not index.get("outgoing_request_message_refs")
+            )
+            if (
+                control and len(sources) >= 2
+                and selected_source_inputs is not None
+                and len(selected_source_inputs) == len(sources)
+                and isinstance(run_scope, dict)
+                and isinstance(task_view, dict)
+                and isinstance(task_view.get("objective"), str)
+                and run_scope.get("question_in_task_objective") is True
+                and run_scope.get("question_truncated") is False
+                and run_scope.get("question_chars") == len(task_view["objective"])
+                and isinstance(run_scope.get("inherited_source_refs"), list)
+                and all(ref(item) in run_scope["inherited_source_refs"] for item in sources)
+                and run_scope.get("additional_inherited_sources") == 0
+                and isinstance(run_scope.get("scope_preview"), str)
+                and run_scope.get("scope_chars") == len(run_scope["scope_preview"])
+                and isinstance(retrieval, list) and len(retrieval) == len(sources)
+                and all(
+                    item.get("ref") == ref(source)
+                    and item.get("status") == "permitted"
+                    and item.get("selected_and_current_equal") is True
+                    and isinstance(item.get("selected_input_scope"), dict)
+                    and item["selected_input_scope"].get("status")
+                    == "complete_extracted_text"
+                    for item, source in zip(retrieval, sources, strict=True)
+                )
+                and isinstance(last_window, dict)
+                and last_window.get("source_text_status")
+                == "checked_window_passages_in_selected_source_packet"
+                and last_window.get("read_event_page") == "older_records"
+                and last_window.get("next_cursor") is None
+                and isinstance(index.get("older_records"), dict)
+                and index["older_records"].get("tool") == "read_context_page"
+                and archived_turns
+                and self.checked_window_is_selected_input(
+                    archived_turns[-1], call=call, control=control,
+                    selected_source_refs=tuple(ref(item) for item in sources),
+                    selected_source_inputs=selected_source_inputs,
+                )
+                and (pending_peer or no_peer)
+                and task_view.get("next_action")
+                == "Choose a useful research action from the current evidence"
+            ):
+                run_scope = dict(run_scope)
+                for key in ("additional_inherited_sources", "question_chars",
+                            "question_truncated", "scope_chars"):
+                    run_scope.pop(key)
+                if run_scope.get("inherited_source_refs") == [ref(item) for item in sources]:
+                    run_scope.pop("inherited_source_refs")
+                index["run_scope"] = run_scope
+                index["source_retrieval"] = [{
+                    "ref": item["ref"], "status": item["status"],
+                    "selected_input_scope": {
+                        "status": item["selected_input_scope"]["status"],
+                        **({"total_chars": item["selected_input_scope"]["total_chars"]}
+                           if no_peer and "total_chars" in item["selected_input_scope"] else {}),
+                    },
+                } for item in retrieval]
+                if pending_peer:
+                    index.pop("last_checked_window")
+                    dispositions[0]["next_action"] = (
+                        "Wait via wait_for_dependencies; review via review_peer_answer."
+                    )
+                else:
+                    index["last_checked_window"] = {
+                        "window_ref": last_window["window_ref"],
+                        "read_event_page": "older_records",
+                        **{key: last_window[key] for key in (
+                            "next_request", "next_section_request", "progress_feedback",
+                        ) if key in last_window},
+                    }
+                    counts = index.get("record_counts")
+                    if (isinstance(counts, dict)
+                            and counts.get("routine_own_outcomes_compacted")
+                            == counts.get("shared_updates")):
+                        counts.pop("routine_own_outcomes_compacted", None)
+                task_view.pop("next_action")
+                if index.get("selected_model_id") == config["body"].get("model_id"):
+                    index.pop("selected_model_id")
+                required = measure(index)
+        if allowance is not None and required is not None and required > allowance:
+            target = index.get("followup_target")
+            if not sources and isinstance(target, dict) and target.get("fetch_exact_parent_target"):
+                target.pop("parent_details_page", None)
+                if not target.get("unavailable_source_refs"):
+                    target.pop("unavailable_source_refs", None)
+                required = measure(index)
+        if allowance is not None and required is not None and required > allowance:
             raise ContextOverflow(
                 f"Required task, configuration and reference index needs {required} input tokens; allowance is {allowance}. Fetch smaller exact detail or repair this turn",
                 required_tokens=required,
@@ -6293,7 +7382,11 @@ class WorkingContext:
             {
                 "type": "shared_update",
                 "ref": ref(item),
-                "reason": "routine_own_executor_outcome_compacted",
+                "reason": (
+                    "context_page_bookkeeping_compacted"
+                    if (item["id"], item["version"]) in routine_page_keys
+                    else "routine_own_executor_outcome_compacted"
+                ),
                 "fetch": ref(item),
             }
             for item in routine_own_outcomes
@@ -6302,7 +7395,11 @@ class WorkingContext:
             {
                 "type": "completed_tool_turn",
                 "ref": pointer,
-                "reason": "completed_history_compacted",
+                "reason": (
+                    "context_page_bookkeeping_compacted"
+                    if canonical(pointer) in page_suppressed_turns
+                    else "completed_history_compacted"
+                ),
                 "fetch": pointer,
             }
             for pointer in archived_turns
@@ -6323,8 +7420,10 @@ class WorkingContext:
         def omission_view(positions: set[int]) -> dict | None:
             count = (
                 len(positions)
-                + len(routine_omissions)
-                + len(history_omissions)
+                + sum(item["reason"] != "context_page_bookkeeping_compacted"
+                      for item in routine_omissions)
+                + sum(item["reason"] != "context_page_bookkeeping_compacted"
+                      for item in history_omissions)
                 + len(tool_page_omissions)
                 + len(scope_omissions)
             )
@@ -6409,6 +7508,119 @@ class WorkingContext:
             # smaller than the conservative early estimate. Retry the same
             # authorized cue before spending room on optional history/detail.
             try_peer_answer_cues()
+        # This actor's own note can carry earlier checked reading into a narrow
+        # one-source turn. The note is draft context, never checked evidence.
+        if (allowance is not None and len(sources) == 1
+                and selected_source_inputs is not None
+                and len(selected_source_inputs) == 1
+                and isinstance(index.get("older_records"), dict)
+                and index["older_records"].get("tool") == "read_context_page"):
+            retrieval = index.get("source_retrieval")
+            progress = index.get("source_progress")
+            selected = selected_source_inputs[0]
+            if (isinstance(retrieval, list) and len(retrieval) == 1
+                    and isinstance(progress, list) and len(progress) == 1
+                    and selected.get("copy_ref") == ref(sources[0])
+                    and retrieval[0].get("ref") == ref(sources[0])
+                    and retrieval[0].get("status") == "permitted"
+                    and retrieval[0].get("current_ref") == ref(sources[0])
+                    and retrieval[0].get("selected_input_scope", {}).get("status")
+                    == "complete_extracted_text"
+                    and progress[0].get("copy_ref") == ref(sources[0])
+                    and progress[0].get("selected_input_coverage", {}).get("status")
+                    == "complete_extracted_text"
+                    and progress[0].get("extracted_text_coverage", {}).get("status")
+                    == "complete_extracted_text"
+                    and progress[0].get("latest_window_next_cursor") is None
+                    and [span.get("ref") for span in progress[0].get("selected_spans", [])]
+                    == selected.get("passage_refs")):
+                note_positions = [
+                    (position, item)
+                    for position, (label, item) in enumerate(candidates)
+                    if label == "note" and position in remaining_positions
+                    and item["body"].get("status") == "peer_draft_not_accepted_evidence"
+                    and isinstance(item["body"].get("text"), str)
+                    and self.store.get("working_note", item["id"]) == item
+                ]
+                note_positions.sort(
+                    key=lambda pair: (pair[1]["body"].get("updated_at", ""), pair[1]["id"]),
+                    reverse=True,
+                )
+                for position, note in note_positions:
+                    access = self.working_note_text_access(note)
+                    dependencies = access["source_dependency_refs"]
+                    if (access["status"] != "available"
+                            or not access["dependency_lineage_complete"]
+                            or len(dependencies) < 2
+                            or all(pointer == ref(sources[0]) for pointer in dependencies)):
+                        continue
+                    proposed = deepcopy(index)
+                    proposed["working_note_continuation"] = {
+                        "ref": ref(note), "category": note["body"]["category"],
+                        "status": note["body"]["status"],
+                        "authority": "own_draft_not_source_evidence",
+                        "text": note["body"]["text"],
+                        "source_dependency_refs": dependencies,
+                    }
+                    proposed["omitted"] = omission_view(remaining_positions - {position})
+                    if proposed.get("note_refs") == [ref(note)]:
+                        proposed.pop("note_refs")
+                    source_scope = retrieval[0]["selected_input_scope"]
+                    proposed["source_retrieval"] = [{
+                        "ref": ref(sources[0]), "status": "permitted",
+                        "current_source_use_ref": retrieval[0].get("current_source_use_ref"),
+                        "selected_input_scope": {
+                            "status": source_scope["status"],
+                            "total_chars": source_scope.get("total_chars"),
+                            "scope": "retained_extracted_text_only",
+                            "original_source_partial": progress[0]["extracted_text_coverage"].get(
+                                "original_source_partial"
+                            ),
+                        },
+                        "latest_read_window_ref": progress[0].get("latest_read_window_ref"),
+                    }]
+                    proposed.pop("source_progress", None)
+                    proposed.pop("routine_own_outcomes", None)
+                    counts = proposed.get("record_counts")
+                    if isinstance(counts, dict):
+                        if counts.get("routine_own_outcomes_compacted") == counts.get(
+                            "shared_updates"
+                        ):
+                            counts.pop("routine_own_outcomes_compacted", None)
+                        proposed["record_counts"] = {
+                            key: count for key, count in counts.items() if count
+                        }
+                    if proposed.get("source_refs") == [ref(sources[0])]:
+                        proposed.pop("source_refs")
+                    scope = proposed.get("run_scope")
+                    task_view = proposed.get("task")
+                    if isinstance(scope, dict) and isinstance(task_view, dict):
+                        if task_view.get("next_action") == (
+                            "Choose a useful research action from the current evidence"
+                        ):
+                            task_view.pop("next_action")
+                        if (scope.get("question_in_task_objective") is True
+                                and scope.get("question_truncated") is False
+                                and scope.get("question_chars") == len(
+                                    task_view.get("objective", "")
+                                )):
+                            for key in ("question_ref", "question_chars", "question_truncated"):
+                                scope.pop(key, None)
+                        if (scope.get("scope_truncated") is False
+                                and scope.get("scope_chars") == len(scope.get("scope_preview", ""))):
+                            for key in ("scope_chars", "scope_sha256", "scope_truncated"):
+                                scope.pop(key, None)
+                        if scope.get("additional_inherited_sources") == 0:
+                            scope.pop("additional_inherited_sources")
+                    if proposed.get("selected_model_id") == config["body"].get("model_id"):
+                        proposed.pop("selected_model_id")
+                    size = measure(proposed)
+                    if size is not None and size <= allowance:
+                        index = proposed
+                        remaining_positions.remove(position)
+                        included.append(note)
+                        preincluded.add(position)
+                        break
         # A selected report or working-note window is exact working input.
         # Retain earlier checked reads when they fit, before optional board
         # metadata. Replay rechecks the original scope and current source use.
@@ -6771,6 +7983,7 @@ class WorkingContext:
                 proposed.pop("user_input_guidance", None)
                 proposed["current_user_inputs"] = view
                 original_index = index
+                original_past = list(past)
                 index = proposed
                 size = measure(index)
                 if allowance is not None and size is not None and size > allowance:
@@ -6782,9 +7995,16 @@ class WorkingContext:
                     # room. Equality proves no other shared update is hidden.
                     index["record_counts"].pop("routine_own_outcomes_compacted", None)
                     size = measure(index)
+                if (allowance is not None and size is not None and size > allowance
+                        and defer_tool_inventory()):
+                    # The long request-first catalog is recoverable through the
+                    # attached discovery tool. Keep the two exact user-input
+                    # read cards ahead of that optional navigation list.
+                    size = measure(index)
                 if allowance is None or size is not None and size <= allowance:
                     return True
                 index = original_index
+                past[:] = original_past
                 return False
 
             for direction_chars, paste_chars in (
@@ -6795,38 +8015,19 @@ class WorkingContext:
         if current_incoming is not None and "incoming_request" in index:
             # The request's originating message ref predates delivery. Name
             # only the exact latest delivered version omitted from this input.
-            origin = current_incoming["body"].get("message_ref") or {}
-            peer_message = next((item for item in messages
-                                 if item["id"] == origin.get("id")
-                                 and item["body"].get("request_id") == current_incoming["id"]
-                                 and item["body"].get("delivered_at") is not None
-                                 and item["body"].get("sender_ref", {}).get("id")
-                                 == current_incoming["body"].get("requester_id")
-                                 and item["body"].get("recipient_ref", {}).get("id")
-                                 == actor_id), None)
+            peer_message = priority_message
             omitted_message = peer_message is not None and any(
                 position in remaining_positions and label == "message"
                 and item is peer_message
                 for position, (label, item) in enumerate(candidates)
             )
-            payload = peer_message["body"].get("payload") if peer_message else None
-            question = current_incoming["body"]["question"]
-            substantive_payload = bool(peer_message and (
-                peer_message["body"].get("evidence_refs")
-                or payload not in (None, "", [], {}) and (
-                    not isinstance(payload, dict)
-                    or payload.get("question") != question
-                    or any(value not in (None, "", [], {}) for key, value in payload.items()
-                           if key != "question")
-                )
-            ))
             exposed = set(call["body"].get("exposed_tools", []))
             permitted = set(call["body"].get("permitted_tools", []))
             callable_now = ("exposed_tools" not in call["body"]
                             or "read_context_record" in exposed)
             requestable = (not callable_now and "read_context_record" in permitted
                            and "request_capability" in exposed)
-            if (omitted_message and substantive_payload and (callable_now or requestable)
+            if (omitted_message and priority_payload_distinct and (callable_now or requestable)
                     and self._peer_message_text_access(peer_message)["status"] == "available"):
                 pointer = ref(peer_message)
                 proposed = deepcopy(index)
@@ -6890,6 +8091,41 @@ class WorkingContext:
                 if ("peer_payload" not in index.get("incoming_request", {})
                         or allowance is not None and size is not None and size > allowance):
                     index = original_index
+        if (index.get("incoming_request") or index.get("peer_answer_previews")
+                or index.get("peer_answer_review_cues")):
+            # Pack optional history first; then remove repeated scope/source
+            # navigation so its saved tokens lower this actual model request.
+            compact_peer_projection(index)
+        if current_incoming is not None and "incoming_request" in index:
+            # Add explicit response guidance only after packing actual text.
+            # It must not shorten a previously fitting question or source.
+            proposed = deepcopy(index)
+            card = proposed["incoming_request"]
+            card["response_needed"] = True
+            complete_question = card.get("question_delivery") == "full_saved_text" or (
+                card.get("question_delivery") == "full_in_current_tool_result"
+                and current_incoming_question_in_tool_result()
+            )
+            exposed = set(call["body"].get("exposed_tools", []))
+            permitted = set(call["body"].get("permitted_tools", []))
+            reply_callable = "publish_result" in exposed
+            reply_requestable = ("publish_result" in permitted
+                                 and "request_capability" in exposed)
+            if complete_question and (reply_callable or reply_requestable):
+                card["reply"] = {
+                    "tool": "publish_result", "answer_request_id": current_incoming["id"],
+                }
+                if not reply_callable:
+                    card["reply_setup"] = {
+                        "tool": "request_capability", "tool_id": "publish_result",
+                    }
+            size = measure(proposed)
+            if allowance is None or size is not None and size <= allowance:
+                index = proposed
+        if index.get("omitted") is None and not candidates and not shared_materials:
+            # The saved inclusion can still page routine history. An empty
+            # actionable page with no record-reader target is not a useful cue.
+            index.pop("older_records", None)
         try:
             _messages([*past, {"role": "user", "content": canonical(index)}])
         except ModelPreflightError as exc:
@@ -6929,6 +8165,7 @@ class WorkingContext:
                    for item in visible_note_refs}.values()),
             tuple({(item["kind"], item["id"], item["version"]): item
                    for item in conversation_dependencies}.values()),
+            selected_source_inputs,
         )
 
     def _peer_message_text_access(self, message: dict) -> dict:
@@ -7155,6 +8392,11 @@ class WorkingContext:
                     self.store, mission_id=mission_id, actor_id=actor_id,
                     task_id=task_id, pointer=pointer,
                 )
+                if shared_entry is None and kind == "report":
+                    shared_entry = self._included_peer_answer_report(
+                        inclusion, pointer, mission_id=mission_id,
+                        actor_id=actor_id, task_id=task_id,
+                    )
                 # The exact inclusion already fixed this pointer. If current
                 # authority later disappears, keep the page cursor usable and
                 # show only a generic unavailable marker for this saved slot.
@@ -7349,6 +8591,17 @@ class WorkingContext:
                         key: value for key, value in observation.items()
                         if key in {"tool_call_id", "tool_name", "result_ref", "effect_ref"}
                     })
+                    public = self.archived_public_assistant_text_access(
+                        pointer, mission_id=mission_id,
+                        actor_id=actor_id, task_id=task_id,
+                    )
+                    if public["status"] != "empty":
+                        summary["public_assistant_text"] = {
+                            "status": public["status"],
+                            **({"total_chars": public["total_chars"],
+                                "reader_tool": "read_context_record"}
+                               if public["status"] == "available" else {}),
+                        }
                     if search := observation.get("search"):
                         summary["search"] = {
                             key: search[key]
@@ -7460,27 +8713,13 @@ class WorkingContext:
                 mission_id=mission_id, actor_id=actor_id, task_id=task_id,
                 inclusion_ref=inclusion_ref, cursor=len(omitted), limit=1,
             )
-            included_refs = inclusion["body"].get("included_refs", [])
-            if not isinstance(included_refs, list):
+            if not isinstance(inclusion["body"].get("included_refs", []), list):
                 raise ContextError("Saved included records are unavailable")
-            for answer_ref in included_refs:
-                if (type(answer_ref) is not dict
-                        or set(answer_ref) != {"kind", "id", "version"}
-                        or answer_ref.get("kind") != "mail_answer"
-                        or type(answer_ref.get("id")) is not str or not answer_ref["id"]
-                        or type(answer_ref.get("version")) is not int
-                        or answer_ref["version"] < 1):
-                    continue
-                answer = self.store.get(**answer_ref)
-                request = self.store.get("mail_request", answer["body"].get("request_id")) if answer else None
-                if (answer is None or ref(answer) != answer_ref or request is None
-                        or self._provisional_peer_answer_entry(
-                            request, answer, mission_id=mission_id,
-                            actor_id=actor_id, task_id=task_id, pointer=pointer,
-                        ) is None):
-                    continue
-                included_peer_answer = linked_report = True
-                break
+            included_peer_answer = self._included_peer_answer_report(
+                inclusion, pointer, mission_id=mission_id,
+                actor_id=actor_id, task_id=task_id,
+            ) is not None
+            linked_report = included_peer_answer
         if position is None and not included_peer_answer:
             raise ContextError("Record was not omitted from this exact model input")
         if position is not None:
@@ -7501,11 +8740,19 @@ class WorkingContext:
             raise ContextError("Linked report is unavailable in this mission")
         body = record["body"]
         kind = record["kind"]
+        linked_answer_report = False
         if omission_type == "shared_material" and shared_material_entry(
             self.store, mission_id=mission_id, actor_id=actor_id,
             task_id=task_id, pointer=pointer,
         ) is None:
-            raise ContextError("Shared material is no longer available to this task")
+            linked_answer_report = bool(
+                kind == "report" and self._included_peer_answer_report(
+                    inclusion, pointer, mission_id=mission_id,
+                    actor_id=actor_id, task_id=task_id,
+                )
+            )
+            if not linked_answer_report:
+                raise ContextError("Shared material is no longer available to this task")
         if kind == "model_response_receipt" and omission_type == "partial_visible_output":
             try:
                 result = read_partial_output_window(
@@ -7553,10 +8800,10 @@ class WorkingContext:
             access = (
                 self._followup_target_text_access(inclusion, record)
                 if omission_type == "followup_target_detail"
+                else self._peer_answer_report_text_access(inclusion, record)
+                if omission_type == "included_peer_answer" or linked_answer_report
                 else self._shared_report_text_access(inclusion, record)
                 if omission_type == "shared_material"
-                else self._peer_answer_report_text_access(inclusion, record)
-                if omission_type == "included_peer_answer"
                 else self._same_mission_report_text_access(inclusion, record)
             )
             projection = (
@@ -7597,6 +8844,24 @@ class WorkingContext:
             projection = shared_material_view(projection)
         elif kind == "model_response_receipt" and not linked_report:
             projection = self._archived_tool_observation(pointer)
+            public = self.archived_public_assistant_text_access(
+                pointer, mission_id=mission_id, actor_id=actor_id, task_id=task_id,
+            )
+            projection["public_assistant_text_status"] = public["status"]
+            if public["status"] == "available":
+                projection.update(
+                    public_assistant_text=public["text"],
+                    public_assistant_text_chars=public["total_chars"],
+                    public_assistant_text_authority=(
+                        "saved_public_model_content_not_verified_evidence"
+                    ),
+                    source_dependency_refs=public["source_dependency_refs"],
+                )
+            elif public["status"] == "withheld_due_source_use":
+                projection.update(
+                    source_dependency_refs=public["source_dependency_refs"],
+                    unavailable_source_refs=public["unavailable_source_refs"],
+                )
             if projection.get("search", {}).get("outcome") in {"success", "empty"}:
                 hit_ids = self._saved_search_hit_ids(pointer, projection)
                 projection["search"]["saved_hit_ids"] = hit_ids
@@ -7740,14 +9005,32 @@ class WorkingContext:
         if tuple(body.get("context_source_dependency_refs", [])) != dependency_refs:
             raise ContextError("Prepared source dependencies differ from assembled context")
         context_index = json.loads(pack.messages[-1]["content"])
-        if context_index.get("older_records", {}).get("inclusion_id") != f"context:{intent['id']}":
+        older_records = context_index.get("older_records")
+        if older_records is None:
+            omitted = context_index.get("omitted")
+            actionable = sum(item.get("reason") != "context_page_bookkeeping_compacted"
+                             for item in pack.omitted)
+            exact_fetch = {"tool": "read_context_page",
+                           "inclusion_id": f"context:{intent['id']}", "cursor": 0}
+            if not (omitted is None and actionable == 0
+                    or isinstance(omitted, dict)
+                    and omitted.get("count") == actionable
+                    and omitted.get("fetch") == exact_fetch):
+                raise ContextError("Context page reference differs from saved intent")
+        elif (not isinstance(older_records, dict)
+              or older_records.get("inclusion_id") != f"context:{intent['id']}"):
             raise ContextError("Context page reference differs from saved intent")
         prefix = actual["messages"][: -len(pack.messages)]
         config = self.store.get(**pack.configuration_ref)
+        instruction_role = (
+            "system" if config is not None and config["body"].get("model_id") == QWEN_MODEL
+            else "developer"
+        )
         if (
             config is None
             or not prefix
-            or prefix[0] != {"role": "developer", "content": config["body"].get("instructions")}
+            or prefix[0] != {"role": instruction_role,
+                             "content": config["body"].get("instructions")}
         ):
             raise ContextError("Prepared model instructions differ from pinned configuration")
         if pack.source_refs:
@@ -7766,6 +9049,23 @@ class WorkingContext:
                     "sha256"
                 ):
                     raise ContextError("Prepared source text differs from its checksum")
+            if pack.selected_source_inputs is not None:
+                expected = list(pack.selected_source_inputs)
+                decisions = body.get("source_decisions", [])
+                if (
+                    len(packets) != len(expected)
+                    or not isinstance(decisions, list)
+                    or [
+                        {"copy_ref": item.get("copy_ref"),
+                         "passage_refs": item.get("passage_refs")}
+                        for item in decisions
+                    ] != expected
+                    or any(
+                        packet.get("passage_refs") != item["passage_refs"]
+                        for packet, item in zip(packets, expected, strict=True)
+                    )
+                ):
+                    raise ContextError("Current passage coverage differs from prepared source packets")
             progress = context_index.get("source_progress")
             if progress:
                 decisions = body.get("source_decisions", [])

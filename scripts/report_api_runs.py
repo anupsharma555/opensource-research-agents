@@ -31,6 +31,18 @@ def number(value: int | float | None) -> str:
     return f"{value:,}" if value is not None else "Unknown"
 
 
+def attempt_model(report: dict, attempt: dict) -> str:
+    """Show a sent model when verified; older natural rows stay unknown."""
+    model = attempt.get("model_id")
+    if isinstance(model, str) and model:
+        return model
+    if report.get("kind") == "api_diagnostic":
+        model = report.get("model_label")
+        if isinstance(model, str) and model:
+            return model
+    return "Unknown"
+
+
 def cache_text(report: dict) -> str:
     usage = report["usage"]
     cache = usage["cache_fraction_reported_subset"]
@@ -174,10 +186,11 @@ def render_markdown(rows: list[dict]) -> str:
                       f"Known usage: {number(known_total(report))} tokens. "
                       f"Unknown-usage attempts: {counts['model_usage_unknown_attempts']}.", "",
                       timing_text(report), "",
-                      "| Attempt | Phase | HTTP | HTTP seconds | Input | Output | Reasoning subset | Cache |",
-                      "| ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |"])
+                      "| Attempt | Phase | Model | HTTP | HTTP seconds | Input | Output | Reasoning subset | Cache |",
+                      "| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |"])
         for attempt in report["attempts"]:
-            lines.append(f"| {attempt['index']} | {attempt['phase']} | {attempt['http_status']} "
+            model = html.escape(attempt_model(report, attempt)).replace("|", "/").replace("\n", " ")
+            lines.append(f"| {attempt['index']} | {attempt['phase']} | {model} | {attempt['http_status']} "
                          f"| {number(attempt['http_duration_seconds'])} "
                          f"| {number(attempt['input_tokens'])} | {number(attempt['output_tokens'])} "
                          f"| {number(attempt['reasoning_tokens'])} "
@@ -203,7 +216,8 @@ def render_html(rows: list[dict]) -> str:
         kind = "Natural agent task" if r["kind"] == "natural_agent" else "Direct API diagnostic"
         attempts = "".join(
             "<tr>" + "".join(f"<td>{e(str(cell))}</td>" for cell in (
-                a["index"], a["http_status"], number(a['http_duration_seconds']), number(a["input_tokens"]),
+                a["index"], attempt_model(r, a), a["http_status"],
+                number(a['http_duration_seconds']), number(a["input_tokens"]),
                 number(a["output_tokens"]), number(a["reasoning_tokens"]),
                 a["cache_observation"].replace("_", " "))) + "</tr>"
             for a in r["attempts"])
@@ -222,7 +236,7 @@ def render_html(rows: list[dict]) -> str:
 {c['retrieval_http_attempts']} retrieval attempts · {c['model_usage_unknown_attempts']} attempts with unknown usage</p>
 <p class="timing">{e(timing_text(r))}</p>
 <details><summary>Per-attempt evidence</summary><div class="table-wrap"><table><thead><tr>
-<th>Attempt</th><th>HTTP</th><th>Seconds</th><th>Input</th><th>Output</th><th>Reasoning</th><th>Cache observation</th>
+<th>Attempt</th><th>Model</th><th>HTTP</th><th>Seconds</th><th>Input</th><th>Output</th><th>Reasoning</th><th>Cache observation</th>
 </tr></thead><tbody>{attempts}</tbody></table></div></details>
 <p class="links"><a href="{e(row['full_report'], quote=True)}">Full input-to-output report ↗</a>{cloud}</p>
 <p class="meta">{e(_stamp(r))} · {e(r['profile_label'].title())} Groq API key · {e(r['model_label'])}</p></article>''')

@@ -6,6 +6,8 @@ import json
 import socket
 import time
 
+import pytest
+
 from ora.contracts.models import LiveStartRequest
 from ora.coordination.board import ref
 from tests.mission.test_service import answer, serialized_peer_name, service, tool
@@ -21,6 +23,8 @@ def _drive_until(host, run_id: str, predicate) -> None:
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         host._drive_run(host._run(run_id))
+        if errors := getattr(host, "_fixture_transport_errors", []):
+            raise errors[0]
         if predicate():
             return
         time.sleep(.005)
@@ -34,8 +38,17 @@ def _last_tool(packet: dict) -> tuple[str, dict]:
     return "", {}
 
 
+def _allow_injected_profile(host, monkeypatch) -> None:
+    # Only the injected adapter uses this gate. The live operator's Primary
+    # pause still governs real provider dispatch outside this test.
+    monkeypatch.setattr(host.credential_profiles, "is_run_enabled", lambda *_args: True)
+    monkeypatch.setattr(host.session.adapter.credential_profiles,
+                        "is_enabled", lambda *_args: True)
+
+
+@pytest.mark.parametrize("restart_after_answer", [False, True])
 def test_finished_peer_explicit_reply_is_read_reviewed_and_both_required_finish(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, restart_after_answer,
 ) -> None:
     def no_network(*_args, **_kwargs):
         raise AssertionError("Scripted peer mechanism must not reach the network")
@@ -82,12 +95,12 @@ def test_finished_peer_explicit_reply_is_read_reviewed_and_both_required_finish(
 
         saved = host.store.records("mail_request")[0]
         context = json.loads(packet["messages"][-1]["content"])
-        disposition = next(
-            item for item in context["request_dispositions"]
-            if item["ref"]["id"] == saved["id"]
-        )
         names = {item["function"]["name"] for item in packet["tools"]}
         if not saved["body"]["answer_refs"]:
+            disposition = next(
+                item for item in context["request_dispositions"]
+                if item["ref"]["id"] == saved["id"]
+            )
             if "wait_for_dependencies" not in names:
                 return tool("request_capability", {"tool_id": "wait_for_dependencies"}, tool_id)
             target = host._control(run.run_id, "agent-critique")
@@ -120,22 +133,23 @@ def test_finished_peer_explicit_reply_is_read_reviewed_and_both_required_finish(
             assert saved["body"]["accepted_answer_ref"] == answer_ref
             seen["review"] = True
             return answer("The independent check supports only a limited synthetic conclusion.", tool_id)
-        assert disposition["status"] in {"awaiting_review", "partial_awaiting_review"}
-        assert answer_ref in context["request_answer_refs"]
-        assert "peer_answer_previews" not in context
+        cue = next(item for item in context["peer_answer_review_cues"]
+                   if item["request_ref"]["id"] == saved["id"])
+        assert cue["question"] == QUESTION
+        assert cue["answer_ref"] == answer_ref
+        assert cue["owner"] == "you"
+        assert cue["action"] == "review_peer_answer"
         assert PEER_TEXT not in json.dumps(packet["messages"])
-        entry = next(
-            item for item in context["shared_materials"]["entries"]
-            if item["ref"] == peer_report_ref
-        )
-        read_request = entry["read_request"]
+        read_request = cue["read_request"]
         assert read_request["tool"] == "read_context_record"
+        assert {key: read_request[key] for key in ("kind", "id", "version")} == peer_report_ref
         assert "read_context_record" in names
         return tool("read_context_record", {
             key: value for key, value in read_request.items() if key != "tool"
         }, tool_id)
 
     host = service(tmp_path, monkeypatch, transport)
+    _allow_injected_profile(host, monkeypatch)
     try:
         run = host.start(LiveStartRequest(
             request_id="finished-peer-explicit-reply",
@@ -158,6 +172,20 @@ def test_finished_peer_explicit_reply_is_read_reviewed_and_both_required_finish(
             host._control(run.run_id, "agent-synthesis"),
             phase="ready_model", waiting_reason=None, retry_at=None,
         )
+        _drive_until(host, run.run_id,
+                     lambda: len(host.store.records("mail_answer")) == 1)
+        assert seen == {"incoming": True, "read": False, "review": False}
+        request_before = host.store.records("mail_request")[0]
+        answer_before = host.store.records("mail_answer")[0]
+        report_before = host.store.get(**answer_before["body"]["artifact_ref"])
+        assert request_before["body"]["accepted_answer_ref"] is None
+        if restart_after_answer:
+            host.close()
+            host = service(tmp_path, monkeypatch, transport)
+            _allow_injected_profile(host, monkeypatch)
+            assert host.store.records("mail_request") == [request_before]
+            assert host.store.records("mail_answer") == [answer_before]
+            assert host.store.get(**answer_before["body"]["artifact_ref"]) == report_before
         _drive_until(host, run.run_id, lambda: host._run(run.run_id)["body"]["status"] == "completed")
         saved = host.store.records("mail_request")
         assert len(saved) == 1

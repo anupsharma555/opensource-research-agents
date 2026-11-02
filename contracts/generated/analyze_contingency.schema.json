@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "eventA": {
+      "maximum": 1000000,
+      "minimum": 0,
+      "title": "Eventa",
+      "type": "integer"
+    },
+    "eventB": {
+      "maximum": 1000000,
+      "minimum": 0,
+      "title": "Eventb",
+      "type": "integer"
+    },
+    "noneventA": {
+      "maximum": 1000000,
+      "minimum": 0,
+      "title": "Noneventa",
+      "type": "integer"
+    },
+    "noneventB": {
+      "maximum": 1000000,
+      "minimum": 0,
+      "title": "Noneventb",
+      "type": "integer"
+    },
+    "operation": {
+      "enum": [
+        "risk_ratio",
+        "odds_ratio",
+        "risk_difference"
+      ],
+      "title": "Operation",
+      "type": "string"
+    },
+    "zeroCellPolicy": {
+      "description": "For odds ratio, any zero cell needs add_half; for risk ratio, a zero event cell needs add_half but a zero nonevent cell can be valid. Correction adds 0.5 to all four cells. Risk difference uses raw counts; choose reject.",
+      "enum": [
+        "reject",
+        "add_half"
+      ],
+      "title": "Zerocellpolicy",
+      "type": "string"
+    }
+  },
+  "required": [
+    "eventA",
+    "noneventA",
+    "eventB",
+    "noneventB",
+    "operation",
+    "zeroCellPolicy"
+  ],
+  "title": "AnalyzeContingencyInput",
+  "type": "object"
+}

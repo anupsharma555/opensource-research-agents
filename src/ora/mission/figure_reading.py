@@ -22,6 +22,7 @@ from ora.coordination.board import ref
 from ora.credentials import CredentialProfileError, GroqCredentialProfiles
 from ora.evidence.library import EvidenceError
 from ora.live.provider import URL, USER_AGENT, CredentialUnavailable, GroqProvider
+from ora.models.output_limits import output_limit_observation
 from ora.models.reasoning_artifacts import (
     export_receipt_reasoning,
     record_export_failure,
@@ -443,6 +444,13 @@ class FigureReader:
                 raise FigureDispatchUncertain("Figure response could not be verified") from exc
         elif not 400 <= http_status < 500:
             raise FigureDispatchUncertain("Figure provider response may need reconciliation")
+        output_limit = None
+        if http_status == 429 and len(raw) <= 65_536:
+            try:
+                error = json.loads(raw).get("error")
+            except (ValueError, TypeError, AttributeError):
+                error = None
+            output_limit = output_limit_observation(http_status, error, body["model"])
         rate_headers = {
             key.lower(): value for key, value in (headers.items() if headers else ())
             if isinstance(key, str) and isinstance(value, str)
@@ -502,6 +510,8 @@ class FigureReader:
             "document_ref": body["document_ref"], "page_image_ref": body["page_image_ref"],
             "ocr_ref": body["ocr_ref"], "page_number": body["page_number"],
         }
+        if output_limit is not None:
+            receipt_body["output_rate_limit_observation"] = output_limit
 
         def capture(tx: Transaction) -> dict:
             prior = tx.get("figure_response_receipt", receipt_id)

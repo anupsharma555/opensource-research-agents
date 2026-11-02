@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "fromUnit": {
+      "enum": [
+        "gram",
+        "milligram",
+        "kilogram",
+        "meter",
+        "centimeter",
+        "millimeter",
+        "second",
+        "millisecond",
+        "minute",
+        "hour",
+        "liter",
+        "milliliter"
+      ],
+      "title": "Fromunit",
+      "type": "string"
+    },
+    "toUnit": {
+      "enum": [
+        "gram",
+        "milligram",
+        "kilogram",
+        "meter",
+        "centimeter",
+        "millimeter",
+        "second",
+        "millisecond",
+        "minute",
+        "hour",
+        "liter",
+        "milliliter"
+      ],
+      "title": "Tounit",
+      "type": "string"
+    },
+    "values": {
+      "items": {
+        "maximum": 1000000000000.0,
+        "minimum": -1000000000000.0,
+        "type": "number"
+      },
+      "maxItems": 200,
+      "minItems": 1,
+      "title": "Values",
+      "type": "array"
+    }
+  },
+  "required": [
+    "values",
+    "fromUnit",
+    "toUnit"
+  ],
+  "title": "ConvertValuesUnitsInput",
+  "type": "object"
+}

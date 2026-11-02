@@ -10,6 +10,7 @@ from ora.contracts.models import LiveStartRequest
 from ora.credentials import CredentialProfileError, GroqCredentialProfiles
 from ora.mission import MissionService
 from ora.models import GroqSelectedAdapter, ModelSession
+from ora.models.profiles import SUPPORTED_MODELS, model_quota_scope
 from ora.state import StateStore
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -99,7 +100,12 @@ def test_existing_workspace_adds_backup_scope_and_holds_old_backup_call(tmp_path
     monkeypatch.setenv("GROQ_API_KEY", "synthetic-primary-token")
     reopened = host(state_dir, config_root, monkeypatch, transport=primary_only_transport)
     try:
-        assert reopened.store.get("capacity_config", "default")["version"] == 2
+        expanded = reopened.store.get("capacity_config", "default")
+        assert expanded["version"] == original_policy["version"] + 1 + len(SUPPORTED_MODELS)
+        assert set(expanded["body"]["quotas"]) - set(original_policy["body"]["quotas"]) == {
+            "groq-verified-backup",
+            *(model_quota_scope("groq-verified-backup", model) for model in SUPPORTED_MODELS),
+        }
         bridge = reopened.store.get("capacity_quota_bridge", "groq-verified-backup")
         assert bridge["body"]["prior_config_ref"]["version"] == original_policy["version"]
         assert reopened.start(backup_request).reused is True
@@ -132,7 +138,7 @@ def test_existing_workspace_adds_backup_scope_and_holds_old_backup_call(tmp_path
 
     again = host(state_dir, config_root, monkeypatch)
     try:
-        assert again.store.get("capacity_config", "default")["version"] == 2
+        assert again.store.get("capacity_config", "default") == expanded
         assert again.store.get("capacity_quota_bridge", "groq-verified-backup") == bridge
     finally:
         again.close()

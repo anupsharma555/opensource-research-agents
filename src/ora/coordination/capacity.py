@@ -13,8 +13,10 @@ import math
 import re
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Mapping
 
+from ora.models.profiles import SUPPORTED_MODELS, model_quota_scope
 from ora.models.token_estimate import LEGACY_BASIS, estimate_request_tokens
 from ora.state.blobs import IntegrityFault
 from ora.state.store import StateConflict, StateError, StateStore, Transaction, canonical
@@ -22,9 +24,18 @@ from ora.state.store import StateConflict, StateError, StateStore, Transaction, 
 KINDS = frozenset({"model", "retrieval", "compute"})
 OPERATION = "capacity_operation"
 QUOTA = "capacity_quota"
+OUTPUT_QUOTA = "capacity_output_quota"
+OUTPUT_WINDOW_SECONDS = 60.0
 CONFIG = "capacity_config"
 BRIDGE = "capacity_quota_bridge"
-_RESET_PART = re.compile(r"(\d+(?:\.\d+)?)([dhms])")
+_RESET_PART = re.compile(r"(\d+(?:\.\d+)?)(ms|[dhms])")
+
+
+class QuotaReconciliationNeeded(StateConflict):
+    """Only the affected old credential/model lane needs a frozen debt proof."""
+
+
+_RECONCILIATION_DIAGNOSTIC = "legacy_model_scope_reconciliation_needed"
 
 
 def _reset_seconds(value: object) -> float | None:
@@ -33,7 +44,7 @@ def _reset_seconds(value: object) -> float | None:
         return None
     position = 0
     seconds = 0.0
-    units = {"d": 86400, "h": 3600, "m": 60, "s": 1}
+    units = {"d": 86400, "h": 3600, "m": 60, "s": 1, "ms": 0.001}
     for match in _RESET_PART.finditer(value):
         if match.start() != position:
             return None
@@ -78,6 +89,57 @@ def _saved_token_limit(tx: Transaction, snapshot: dict) -> int | None:
     if receipt is None or receipt["body"].get("call_ref") != pointer:
         return None
     return _remaining((receipt["body"].get("rate_headers") or {}).get("x-ratelimit-limit-tokens"))
+
+
+def _saved_reset_at(tx: Transaction, snapshot: dict, scope: str, dimension: str) -> float | None:
+    """Recover a legacy missing reset only from its linked provider receipt."""
+    saved = snapshot.get(f"{dimension}_reset_at")
+    if isinstance(saved, (int, float)):
+        return saved
+    observed_at = snapshot.get("observed_at")
+    source = snapshot.get("source_operation_id")
+    if not isinstance(observed_at, (int, float)) or not isinstance(source, str):
+        return None
+    operation = tx.get(OPERATION, source)
+    if operation is None:
+        return None
+    item = operation["body"]
+    call_id = item.get("call_id")
+    call = tx.get("agent_call", call_id) if isinstance(call_id, str) else None
+    if call is None:
+        return None
+    call_ref = {"kind": "agent_call", "id": call["id"], "version": call["version"]}
+    intent_id = f"model-intent:{call['id']}:{call['version']}"
+    intent = tx.get("model_request_intent", intent_id)
+    receipt = tx.get("model_response_receipt", f"model-response:{intent_id}")
+    if intent is None or receipt is None:
+        return None
+    response = receipt["body"]
+    source_scope = response.get("quota_domain")
+    bridged_source = source_scope == scope or any(
+        entry["source_scope"] == source_scope
+        and source in {item["id"] for item in entry["inherited_operation_refs"]}
+        for _target, saved in _bridge_chain(tx, scope)
+        for entry in _bridge_sources(tx, saved)
+    )
+    if (
+        source_scope not in item.get("quota_scopes", ())
+        or not bridged_source
+        or response.get("call_ref") != call_ref
+        or response.get("intent_ref") != {"kind": intent["kind"], "id": intent["id"], "version": intent["version"]}
+        or intent["body"].get("call_ref") != call_ref
+        or response.get("request_sha256") != intent["body"].get("request_sha256")
+        or any(response.get(key) != item.get(key) for key in ("mission_id", "task_id", "attempt_id"))
+    ):
+        return None
+    headers = response.get("rate_headers") or {}
+    if _remaining(headers.get(f"x-ratelimit-remaining-{dimension}")) != snapshot.get(f"remaining_{dimension}"):
+        return None
+    limit = snapshot.get("observed_token_limit")
+    if dimension == "tokens" and type(limit) is int and _remaining(headers.get("x-ratelimit-limit-tokens")) != limit:
+        return None
+    delay = _reset_seconds(headers.get(f"x-ratelimit-reset-{dimension}"))
+    return observed_at + delay if delay is not None else None
 
 
 def _blocked_model_dispatch_tx(tx: Transaction, body: dict, intent_ref: dict) -> bool:
@@ -151,6 +213,275 @@ def _heads(tx: Transaction, kind: str) -> list[dict]:
     return [{"kind": kind, "id": row["id"], "version": row["version"], "body": json.loads(row["body"])} for row in rows]
 
 
+def _proved_operation_model(tx: Transaction, operation: dict | None) -> str | None:
+    """Name an old call's model only when saved call/config lineage agrees."""
+    if operation is None or operation["body"].get("kind") != "model":
+        return None
+    body = operation["body"]
+    call_id = body.get("call_id")
+    call = tx.get("agent_call", call_id) if isinstance(call_id, str) and call_id else None
+    if call is None:
+        return None  # Auxiliary figure or older work: inherit conservatively.
+    selected = call["body"]
+    config_id = selected.get("configuration_id")
+    config = tx.get("agent_configuration", config_id, 1) if isinstance(config_id, str) else None
+    if (config is None or not isinstance(selected.get("model_id"), str)
+            or selected["model_id"] != config["body"].get("model_id")
+            or selected.get("configuration_id") != body.get("budget_version")
+            or any(selected.get(key) != body.get(key)
+                   for key in ("mission_id", "task_id", "attempt_id"))
+            or config["body"].get("mission_id") != body.get("mission_id")):
+        return None
+    return selected["model_id"]
+
+
+def _head_applies_to_model(tx: Transaction, head: dict, model_id: str | None) -> bool:
+    if model_id is None:
+        return True
+    source = head.get("source_operation_id")
+    operation = tx.get(OPERATION, source) if isinstance(source, str) else None
+    proved = _proved_operation_model(tx, operation)
+    return proved is None or proved == model_id
+
+
+def _record_ref(record: dict) -> dict:
+    return {key: record[key] for key in ("kind", "id", "version")}
+
+
+def _old_model_scopes(from_scope: str, old_config: dict) -> list[tuple[str, str]]:
+    """Find only model lanes configured under this exact old Groq domain."""
+    found = []
+    for model in sorted(SUPPORTED_MODELS):
+        try:
+            scope = model_quota_scope(from_scope, model)
+        except (ValueError, TypeError):
+            return []  # Non-Groq quota bridges have no model child lanes.
+        if scope in old_config.get("quotas", {}):
+            found.append((model, scope))
+    return found
+
+
+def _bridge_sources(tx: Transaction, saved: dict) -> list[dict]:
+    """Read frozen direct and old model-child members without adding later work."""
+    direct = {"source_scope": saved["from_scope"],
+              "inherited_operation_refs": saved["inherited_operation_refs"],
+              "cutover_quota_ref": saved.get("cutover_quota_ref")}
+    prior_ref = saved.get("prior_config_ref")
+    prior = tx.get(**prior_ref) if isinstance(prior_ref, dict) else None
+    if prior is None or prior.get("kind") != CONFIG:
+        raise StateConflict("Quota bridge lost its prior policy")
+    expected = _old_model_scopes(saved["from_scope"], prior["body"])
+    snapshot = saved.get("child_scope_snapshot")
+    if snapshot is None:
+        if saved.get("model_id") is None and expected:
+            cutover = saved.get("cutover_at")
+            if type(cutover) not in {int, float} or not math.isfinite(cutover):
+                raise StateConflict("Older credential bridge has no usable cutover time")
+            now = tx.store.clock()
+            rows = tx.db.execute(
+                "SELECT id,created_at,body FROM records WHERE kind=? AND version=1",
+                (OPERATION,),
+            ).fetchall()
+
+            def before_cutover(item: dict) -> bool:
+                try:
+                    at = datetime.fromisoformat(
+                        item["created_at"].replace("Z", "+00:00")
+                    ).timestamp()
+                except (KeyError, TypeError, ValueError, OverflowError):
+                    raise StateConflict("Older bridge cannot date model-scope debt") from None
+                return at <= cutover
+
+            for _model, scope in expected:
+                limit = prior["body"]["quotas"][scope]
+                window = limit.get("window_seconds") if isinstance(limit, dict) else None
+                if type(window) not in {int, float} or not math.isfinite(window) or window <= 0:
+                    raise StateConflict("Older bridge has no model-scope window")
+                old_operation_ids = set()
+                for row in rows:
+                    original = {"created_at": row["created_at"],
+                                "body": json.loads(row["body"])}
+                    if (scope not in original["body"].get("quota_scopes", ())
+                            or not before_cutover(original)):
+                        continue
+                    old_operation_ids.add(row["id"])
+                    current = tx.get(OPERATION, row["id"])
+                    if current is None:
+                        raise StateConflict("Older bridge model operation disappeared")
+                    body = current["body"]
+                    attempts = body.get("attempts")
+                    if not isinstance(attempts, list):
+                        raise StateConflict("Older bridge model attempts are unavailable")
+                    active = (body.get("reservation") is True
+                              or body.get("phase") in {
+                                  "admitted", "dispatched", "uncertain",
+                              })
+                    recent = any(
+                        attempt.get("status") != "terminal_no_effect"
+                        and (type(attempt.get("at")) not in {int, float}
+                             or attempt["at"] > now - window)
+                        for attempt in attempts if isinstance(attempt, dict)
+                    )
+                    if any(not isinstance(attempt, dict) for attempt in attempts):
+                        raise StateConflict("Older bridge model attempt is malformed")
+                    if active or recent:
+                        raise QuotaReconciliationNeeded(
+                            "Older credential bridge lacks frozen model-scope debt"
+                        )
+                head = tx.get(QUOTA, scope, 1)
+                if head is not None and before_cutover(head):
+                    body = head["body"]
+                    blocked = body.get("blocked_until")
+                    resets = (body.get("requests_reset_at"), body.get("tokens_reset_at"))
+                    if (blocked is None or type(blocked) in {int, float} and blocked > now
+                            or now < cutover + window
+                            or any(type(reset) in {int, float} and reset > now
+                                   for reset in resets)):
+                        raise QuotaReconciliationNeeded(
+                            "Older credential bridge lacks frozen model-scope headroom"
+                        )
+                current_head = tx.get(QUOTA, scope)
+                if current_head is not None and old_operation_ids:
+                    body = current_head["body"]
+                    source_id = body.get("source_operation_id")
+                    source_first = tx.get(OPERATION, source_id, 1) if isinstance(
+                        source_id, str) and source_id else None
+                    proved_later = (source_first is not None
+                                    and scope in source_first["body"].get("quota_scopes", ())
+                                    and not before_cutover(source_first))
+                    blocked = body.get("blocked_until")
+                    observed = body.get("observed_at")
+                    resets = (body.get("requests_reset_at"), body.get("tokens_reset_at"))
+                    unexpired = (type(observed) in {int, float}
+                                 and observed + window > now)
+                    if not proved_later and (blocked is None or type(blocked) in {int, float}
+                            and blocked > now or unexpired and any(
+                                type(body.get(key)) is int for key in (
+                                    "remaining_requests", "remaining_tokens",
+                                )) or any(type(reset) in {int, float} and reset > now
+                                         for reset in resets)):
+                        raise QuotaReconciliationNeeded(
+                            "Older credential bridge lacks later model-scope headroom"
+                        )
+        sources = [direct]
+    else:
+        if (saved.get("model_id") is not None
+                or type(snapshot) is not dict or set(snapshot) != {"version", "sources"}
+                or snapshot["version"] != 1 or type(snapshot["sources"]) is not list
+                or len(snapshot["sources"]) != len(expected)):
+            raise StateConflict("Credential bridge child-scope snapshot is unsupported")
+        sources = [direct]
+        for entry, (model, scope) in zip(snapshot["sources"], expected, strict=True):
+            if (type(entry) is not dict
+                    or set(entry) != {"model_id", "source_scope",
+                                      "inherited_operation_refs", "cutover_quota_ref"}
+                    or entry["model_id"] != model or entry["source_scope"] != scope
+                    or type(entry["inherited_operation_refs"]) is not list):
+                raise StateConflict("Credential bridge child scope differs from old policy")
+            sources.append(entry)
+    for entry in sources:
+        refs = entry["inherited_operation_refs"]
+        if type(refs) is not list or len({item.get("id") for item in refs
+                                            if isinstance(item, dict)}) != len(refs):
+            raise StateConflict("Quota bridge has invalid inherited operations")
+        for pointer in refs:
+            if (type(pointer) is not dict
+                    or set(pointer) != {"kind", "id", "version"}
+                    or pointer["kind"] != OPERATION
+                    or type(pointer["id"]) is not str or not pointer["id"]
+                    or type(pointer["version"]) is not int or pointer["version"] < 1):
+                raise StateConflict("Quota bridge has an invalid operation reference")
+            record = tx.get(**pointer)
+            if (record is None or entry["source_scope"] not in record["body"].get(
+                    "quota_scopes", ())):
+                raise StateConflict("Inherited quota operation changed scope")
+        pointer = entry["cutover_quota_ref"]
+        if pointer is not None:
+            if (type(pointer) is not dict
+                    or set(pointer) != {"kind", "id", "version"}
+                    or pointer["kind"] != QUOTA
+                    or pointer["id"] != entry["source_scope"]
+                    or type(pointer["version"]) is not int or pointer["version"] < 1
+                    or tx.get(**pointer) is None):
+                raise StateConflict("Inherited provider headroom is unavailable")
+    return sources
+
+
+def _bridge_chain(tx: Transaction, scope: str) -> list[tuple[str, dict]]:
+    """Follow only saved, additive scope transitions; old bridge bodies remain valid."""
+    chain: list[tuple[str, dict]] = []
+    seen = set()
+    current = scope
+    selected_model = None
+    while bridge := tx.get(BRIDGE, current):
+        body = bridge["body"]
+        original = tx.get(BRIDGE, current, 1)
+        if original is None or any(body.get(key) != original["body"].get(key)
+                                   for key in (
+                                       "from_scope", "model_id", "prior_config_ref",
+                                       "new_config_ref", "cutover_at",
+                                       "inherited_operation_refs", "cutover_quota_ref",
+                                       "child_scope_snapshot",
+                                   )):
+            raise StateConflict("Frozen quota bridge membership changed")
+        source = body.get("from_scope")
+        model = body.get("model_id")
+        if (current in seen
+                or body.get("schema") != "capacity.quota_bridge.v1"
+                or not isinstance(source, str) or not source or source == current
+                or model is not None and (not isinstance(model, str)
+                                          or selected_model is not None
+                                          and model != selected_model)
+                or not isinstance(body.get("inherited_operation_refs"), list)
+                or not isinstance(body.get("later_quota_events"), list)):
+            raise StateConflict("Saved quota bridge chain is invalid")
+        if model is not None:
+            selected_model = model
+        seen.add(current)
+        chain.append((current, body))
+        current = source
+    if current in seen:
+        raise StateConflict("Saved quota bridge chain cycles")
+    return chain
+
+
+def _bridge_heads(tx: Transaction, chain: list[tuple[str, dict]],
+                  model_id: str | None) -> list[dict]:
+    """Read cutover and later heads through their frozen bridge membership."""
+    heads = []
+    for _target, saved in chain:
+        sources = {entry["source_scope"]: entry for entry in _bridge_sources(tx, saved)}
+        for source_scope, entry in sources.items():
+            pointer = entry["cutover_quota_ref"]
+            if pointer is not None:
+                record = tx.get(**pointer)
+                if record is None or record["kind"] != QUOTA or record["id"] != source_scope:
+                    raise StateConflict("Inherited provider headroom is unavailable")
+                if _head_applies_to_model(tx, record["body"], model_id):
+                    heads.append(record["body"])
+        for event in saved["later_quota_events"]:
+            if not isinstance(event, dict):
+                raise StateConflict("Inherited provider event is malformed")
+            source_scope = event.get("source_scope", saved["from_scope"])
+            entry = sources.get(source_scope)
+            if (entry is None
+                    or event.get("source_operation_id") not in {
+                        item["id"] for item in entry["inherited_operation_refs"]
+                    }
+                    or not isinstance(event.get("constraint"), dict)):
+                raise StateConflict("Inherited provider event lost its source operation")
+            pointer = event.get("quota_ref")
+            if pointer is not None:
+                record = tx.get(pointer["kind"], pointer["id"], pointer["version"])
+                if record is None or record["kind"] != QUOTA or record["id"] != source_scope:
+                    raise StateConflict("Inherited provider headroom is unavailable")
+            constraint = {**event["constraint"],
+                          "source_operation_id": event["source_operation_id"]}
+            if _head_applies_to_model(tx, constraint, model_id):
+                heads.append(constraint)
+    return heads
+
+
 class CapacityScheduler:
     """One admission topology shared by all dispatchers using the same database."""
 
@@ -211,6 +542,7 @@ class CapacityScheduler:
     @staticmethod
     def reconcile_additive_quota_domain(
         store: StateStore, policy: CapacityPolicy, *, from_scope: str, to_scope: str,
+        model_id: str | None = None,
     ) -> dict:
         """Explicitly add one verified scope with a conservative legacy-debt bridge.
 
@@ -220,11 +552,21 @@ class CapacityScheduler:
         if (
             not isinstance(from_scope, str) or not isinstance(to_scope, str)
             or not from_scope or not to_scope or from_scope == to_scope
+            or model_id is not None and (not isinstance(model_id, str) or not model_id)
         ):
             raise StateError("Quota migration needs distinct named scopes")
+        if model_id is not None:
+            try:
+                expected_scope = model_quota_scope(from_scope, model_id)
+            except (ValueError, TypeError) as exc:
+                raise StateError("Model quota migration needs a supported exact model") from exc
+            if to_scope != expected_scope:
+                raise StateError("Model quota migration scope differs from selected model")
         desired = policy.snapshot()
         request = {"schema": "capacity.quota_bridge.v1", "policy": desired,
                    "from_scope": from_scope, "to_scope": to_scope}
+        if model_id is not None:
+            request["model_id"] = model_id
 
         def save(tx):
             existing = tx.get(CONFIG, "default")
@@ -244,11 +586,15 @@ class CapacityScheduler:
                 {"kind": OPERATION, "id": record["id"], "version": record["version"]}
                 for record in _heads(tx, OPERATION)
                 if from_scope in record["body"]["quota_scopes"]
+                and (model_id is None or _proved_operation_model(tx, record) in (None, model_id))
             ]
             prior_quota = tx.get(QUOTA, from_scope)
+            if (prior_quota is not None and not _head_applies_to_model(
+                    tx, prior_quota["body"], model_id)):
+                prior_quota = None
             cutover_at = store.clock()
             updated = tx.put(CONFIG, "default", desired, expected_version=existing["version"])
-            bridge = tx.put(BRIDGE, to_scope, {
+            bridge_body = {
                 "schema": "capacity.quota_bridge.v1",
                 "from_scope": from_scope, "to_scope": to_scope,
                 "cutover_at": cutover_at,
@@ -261,7 +607,25 @@ class CapacityScheduler:
                                       if prior_quota else None),
                 "inherited_operation_refs": inherited,
                 "later_quota_events": [],
-            })
+            }
+            if model_id is not None:
+                bridge_body["model_id"] = model_id
+            elif _old_model_scopes(from_scope, old):
+                bridge_body["child_scope_snapshot"] = {
+                    "version": 1,
+                    "sources": [{
+                        "model_id": child_model, "source_scope": child_scope,
+                        "inherited_operation_refs": [
+                            _record_ref(record) for record in _heads(tx, OPERATION)
+                            if child_scope in record["body"]["quota_scopes"]
+                        ],
+                        "cutover_quota_ref": (
+                            _record_ref(head) if (head := tx.get(QUOTA, child_scope))
+                            else None
+                        ),
+                    } for child_model, child_scope in _old_model_scopes(from_scope, old)],
+                }
+            bridge = tx.put(BRIDGE, to_scope, bridge_body)
             return {"bridge_ref": {"kind": BRIDGE, "id": bridge["id"],
                                    "version": bridge["version"]},
                     "config_ref": {"kind": CONFIG, "id": updated["id"],
@@ -281,6 +645,7 @@ class CapacityScheduler:
         attempt_id: str = "", call_id: str = "", budget_version: str = "",
         retry_limit: int = 2,
         request_token_estimate: dict | None = None,
+        output_reservation_tokens: int | None = None,
     ) -> dict:
         if kind not in KINDS or not isinstance(task_id, str) or not task_id or not isinstance(lane, str) or not lane:
             raise StateError("Capacity work needs task, lane and known resource kind")
@@ -292,6 +657,10 @@ class CapacityScheduler:
             raise StateError("Estimated tokens must be nonnegative")
         if type(retry_limit) is not int or retry_limit < 0:
             raise StateError("Transport retry limit must be nonnegative")
+        if output_reservation_tokens is not None and (
+                kind != "model" or type(output_reservation_tokens) is not int
+                or output_reservation_tokens < 1):
+            raise StateError("Output reservation needs a positive model completion cap")
         if kind != "model" and (estimated_tokens or review):
             raise StateError("Non-model work uses request quotas and no review reserve")
         if request_token_estimate is not None and (
@@ -315,6 +684,8 @@ class CapacityScheduler:
         }
         if request_token_estimate is not None:
             intent["request_token_estimate"] = request_token_estimate
+        if output_reservation_tokens is not None:
+            intent["output_reservation_tokens"] = output_reservation_tokens
         body = {
             **intent, "phase": "queued",
             "estimate_basis": (request_token_estimate["basis"] if request_token_estimate
@@ -675,7 +1046,7 @@ class CapacityScheduler:
                     return None
                 ready = max(ready, blocked_until)
                 observed_ready = self._observed_ready_at(
-                    block["body"], scope, body, scoped_operations, now,
+                    tx, block["body"], scope, body, scoped_operations, now,
                 )
                 if observed_ready is None:
                     return None
@@ -700,7 +1071,7 @@ class CapacityScheduler:
                 observed = _saved_token_limit(tx, block["body"])
                 if type(observed) is int and observed > 0:
                     observed_limits.append(observed)
-                reset_at = block["body"].get("tokens_reset_at")
+                reset_at = _saved_reset_at(tx, block["body"], scope, "tokens")
                 # Once a provider headroom snapshot expires, its reported limit
                 # still bounds simultaneous local reservations in the new window.
                 # A fresh headroom receipt takes over again when one arrives.
@@ -715,7 +1086,7 @@ class CapacityScheduler:
                     return None  # An inherited provider hold has no known wake.
                 ready = max(ready, blocked_until)
                 observed_ready = self._observed_ready_at(
-                    inherited, scope, body, scoped_operations, now,
+                    tx, inherited, scope, body, scoped_operations, now,
                 )
                 if observed_ready is None:
                     return None
@@ -751,29 +1122,122 @@ class CapacityScheduler:
                         break
                 else:
                     return None
+            output_ready = self._output_ready_at(tx, scope, body, operations, now)
+            if output_ready is None:
+                return None
+            ready = max(ready, output_ready)
         return ready
+
+    @staticmethod
+    def _output_overflow(tx: Transaction, body: dict) -> dict | None:
+        demand = body.get("output_reservation_tokens")
+        if demand is None:
+            return None
+        for scope in body["quota_scopes"]:
+            record = tx.get(OUTPUT_QUOTA, scope)
+            if record and demand > record["body"]["limit_tokens"]:
+                return {"state": "request_exceeds_observed_output_minute_limit",
+                        "scope": scope, "requested_tokens": demand,
+                        "limit_tokens": record["body"]["limit_tokens"]}
+        return None
+
+    @staticmethod
+    def _output_ready_at(
+        tx: Transaction, scope: str, candidate: dict, operations: list[dict], now: float,
+    ) -> float | None:
+        """Reserve one model's output minute against known usage and uncertain calls."""
+        demand = candidate.get("output_reservation_tokens")
+        head = tx.get(OUTPUT_QUOTA, scope) if demand is not None else None
+        if head is None:
+            return now
+        saved = head["body"]
+        ceiling = saved["limit_tokens"]
+        if demand > ceiling:
+            return None  # The caller must change the requested cap explicitly.
+        charges: list[tuple[float, int]] = []
+        pending = 0
+        after_observation = 0
+        observed_at = saved["observed_at"]
+        for record in operations:
+            item = record["body"]
+            if scope not in item["quota_scopes"]:
+                continue
+            for attempt in item["attempts"]:
+                amount = attempt.get("charged_output_tokens")
+                if (attempt["status"] == "terminal_no_effect" or type(amount) is not int
+                        or attempt["at"] <= now - OUTPUT_WINDOW_SECONDS):
+                    continue
+                charges.append((attempt["at"] + OUTPUT_WINDOW_SECONDS, amount))
+                if attempt["at"] >= observed_at:
+                    after_observation += amount
+            if item["reservation"] and item["phase"] == "admitted":
+                amount = item.get("output_reservation_tokens")
+                if type(amount) is int:
+                    pending += amount
+                    after_observation += amount
+        local_total = sum(amount for _, amount in charges) + pending
+        ready = now
+        if local_total + demand > ceiling:
+            for expiry, amount in sorted(charges):
+                local_total -= amount
+                if local_total + demand <= ceiling:
+                    ready = max(ready, expiry)
+                    break
+            else:
+                return None  # Wait for another admitted reservation to settle.
+        used = saved.get("used_tokens")
+        if type(used) is int:
+            delay = saved.get("retry_after")
+            wait_until = saved["observed_at"] + (
+                delay if delay is not None else OUTPUT_WINDOW_SECONDS)
+            if now < wait_until and used + after_observation + demand > ceiling:
+                ready = max(ready, wait_until)
+        return ready
+
+    def output_capacity_status(self, operation_id: str) -> dict | None:
+        """Expose a hard request mismatch without changing the selected cap."""
+        operation = self.store.get(OPERATION, operation_id)
+        if operation is None:
+            return None
+        demand = operation["body"].get("output_reservation_tokens")
+        if demand is None:
+            return None
+        for scope in operation["body"]["quota_scopes"]:
+            head = self.store.get(OUTPUT_QUOTA, scope)
+            if head and demand > head["body"]["limit_tokens"]:
+                return {"state": "request_exceeds_observed_output_minute_limit",
+                        "scope": scope, "requested_tokens": demand,
+                        "limit_tokens": head["body"]["limit_tokens"]}
+        return None
 
     @staticmethod
     def _bridged_operations(
         tx: Transaction, scope: str, candidate: dict, operations: list[dict], now: float,
         window_seconds: float,
     ) -> tuple[list[dict] | None, list[dict]]:
-        bridge = tx.get(BRIDGE, scope)
-        if bridge is None:
+        chain = _bridge_chain(tx, scope)
+        if not chain:
             return operations, []
-        saved = bridge["body"]
+        model_id = next((saved["model_id"] for _target, saved in chain
+                         if saved.get("model_id") is not None), None)
         by_id = {record["id"]: record for record in operations}
-        inherited_ids = {item["id"] for item in saved["inherited_operation_refs"]}
-        if len(inherited_ids) != len(saved["inherited_operation_refs"]):
-            raise StateConflict("Quota bridge has duplicate inherited operations")
+        inherited_ids = set()
+        for _target, saved in chain:
+            for entry in _bridge_sources(tx, saved):
+                for pointer in entry["inherited_operation_refs"]:
+                    identifier = pointer["id"]
+                    record = by_id.get(identifier)
+                    if (record is None or entry["source_scope"] not in record["body"][
+                            "quota_scopes"]):
+                        raise StateConflict("Inherited quota operation changed scope")
+                    if model_id is None or _proved_operation_model(tx, record) in (None, model_id):
+                        inherited_ids.add(identifier)
         merged = []
         recent_inherited_charge = False
         for record in operations:
             if record["id"] not in inherited_ids:
                 merged.append(record)
                 continue
-            if saved["from_scope"] not in record["body"]["quota_scopes"]:
-                raise StateConflict("Inherited quota operation changed scope")
             item = record["body"]
             if item["reservation"] or item["phase"] in {"admitted", "dispatched", "uncertain"}:
                 return None, []
@@ -783,33 +1247,18 @@ class CapacityScheduler:
                 for attempt in item["attempts"]
             )
             merged.append({**record, "body": {
-                **item, "quota_scopes": [*item["quota_scopes"], scope],
+                **item, "quota_scopes": list(dict.fromkeys([*item["quota_scopes"], scope])),
             }})
-        if inherited_ids - by_id.keys():
-            raise StateConflict("Inherited quota operation is unavailable")
-        heads = []
-        if saved["cutover_quota_ref"] is not None:
-            pointer = saved["cutover_quota_ref"]
-            record = tx.get(pointer["kind"], pointer["id"], pointer["version"])
-            if record is None or record["kind"] != QUOTA or record["id"] != saved["from_scope"]:
-                raise StateConflict("Inherited provider headroom is unavailable")
-            heads.append(record["body"])
-        for event in saved["later_quota_events"]:
-            pointer = event["quota_ref"]
-            if pointer is not None:
-                record = tx.get(pointer["kind"], pointer["id"], pointer["version"])
-                if record is None or record["kind"] != QUOTA or record["id"] != saved["from_scope"]:
-                    raise StateConflict("Inherited provider headroom is unavailable")
-            heads.append(event["constraint"])
+        heads = _bridge_heads(tx, chain, model_id)
         future_head = any(
             head.get("blocked_until") is None
             or head["blocked_until"] > now
             or CapacityScheduler._observed_ready_at(
-                head, scope, candidate, merged, now,
+                tx, head, scope, candidate, merged, now,
             ) is None
             or any(
-                (isinstance(head.get(f"{dimension}_reset_at"), (int, float))
-                    and head[f"{dimension}_reset_at"] > now)
+                (reset_at := _saved_reset_at(tx, head, scope, dimension)) is not None
+                and reset_at > now
                 for dimension in ("requests", "tokens")
             )
             for head in heads
@@ -829,13 +1278,29 @@ class CapacityScheduler:
                    if quota is not None else None)
         for bridge in _heads(tx, BRIDGE):
             body = bridge["body"]
-            if (body["from_scope"] != scope or source_operation_id not in {
+            if body["from_scope"] == scope and source_operation_id in {
                 item["id"] for item in body["inherited_operation_refs"]
-            }):
+            }:
+                source_entry = {"source_scope": scope}
+            elif (not isinstance(body.get("child_scope_snapshot"), dict)
+                  or not isinstance(body["child_scope_snapshot"].get("sources"), list)
+                  or scope not in {
+                      entry.get("source_scope")
+                      for entry in body["child_scope_snapshot"]["sources"]
+                      if isinstance(entry, dict)
+                  }):
+                continue
+            else:
+                source_entry = next((entry for entry in _bridge_sources(tx, body)
+                                     if entry["source_scope"] == scope
+                                     and source_operation_id in {item["id"] for item in entry[
+                                         "inherited_operation_refs"]}), None)
+            if source_entry is None:
                 continue
             tx.put(BRIDGE, bridge["id"], {
                 **body, "later_quota_events": [*body["later_quota_events"], {
                     "source_operation_id": source_operation_id,
+                    **({"source_scope": scope} if scope != body["from_scope"] else {}),
                     "quota_ref": pointer,
                     "observation_id": observation_id,
                     "constraint": constraint,
@@ -844,19 +1309,10 @@ class CapacityScheduler:
 
     @staticmethod
     def _inherited_provider_hold(tx: Transaction, scope: str, now: float) -> bool:
-        bridge = tx.get(BRIDGE, scope)
-        if bridge is None:
-            return False
-        saved = bridge["body"]
-        heads = []
-        if saved["cutover_quota_ref"] is not None:
-            pointer = saved["cutover_quota_ref"]
-            quota = tx.get(pointer["kind"], pointer["id"], pointer["version"])
-            if quota is None:
-                raise StateConflict("Inherited provider headroom is unavailable")
-            heads.append(quota["body"])
-        heads.extend(event["constraint"] for event in saved["later_quota_events"])
-        for head in heads:
+        chain = _bridge_chain(tx, scope)
+        model_id = next((saved["model_id"] for _target, saved in chain
+                         if saved.get("model_id") is not None), None)
+        for head in _bridge_heads(tx, chain, model_id):
             blocked_until = head.get("blocked_until")
             if blocked_until is None or blocked_until > now:
                 return True
@@ -864,7 +1320,8 @@ class CapacityScheduler:
 
     @staticmethod
     def _observed_ready_at(
-        snapshot: dict, scope: str, candidate: dict, operations: list[dict], now: float
+        tx: Transaction, snapshot: dict, scope: str, candidate: dict,
+        operations: list[dict], now: float,
     ) -> float | None:
         """Reserve local calls not accounted for by a fresh provider snapshot."""
         observed_at = snapshot.get("observed_at")
@@ -875,7 +1332,7 @@ class CapacityScheduler:
             ):
                 remaining = snapshot.get(f"remaining_{dimension}")
                 if type(remaining) is int and needed > remaining:
-                    reset_at = snapshot.get(f"{dimension}_reset_at")
+                    reset_at = _saved_reset_at(tx, snapshot, scope, dimension)
                     if not isinstance(reset_at, (int, float)):
                         return None
                     if now < reset_at:
@@ -915,7 +1372,7 @@ class CapacityScheduler:
             ("tokens", extra_tokens + demand),
         ):
             remaining = snapshot.get(f"remaining_{dimension}")
-            reset_at = snapshot.get(f"{dimension}_reset_at")
+            reset_at = _saved_reset_at(tx, snapshot, scope, dimension)
             if type(remaining) is int and needed > remaining:
                 if not isinstance(reset_at, (int, float)):
                     return None
@@ -948,6 +1405,12 @@ class CapacityScheduler:
             # The reserve is shared by missions. A mission-filtered caller must
             # still leave a slot for a ready review queued by another mission.
             # Future wakes and quota-blocked reviews do not idle a usable slot.
+            def ready_review(item: dict) -> bool:
+                try:
+                    return self._quota_ready_at(tx, item, operations, now) == now
+                except QuotaReconciliationNeeded:
+                    return False
+
             review_waiting = kind == "model" and any(
                 r["body"]["kind"] == "model" and r["body"]["review"]
                 and (eligible_operation_ids is None or r["id"] in eligible_operation_ids
@@ -955,7 +1418,7 @@ class CapacityScheduler:
                 and r["body"]["phase"] in {"queued", "waiting"}
                 and (r["body"]["wake_at"] is None or r["body"]["wake_at"] <= now)
                 and not r["body"]["cancel_requested"]
-                and self._quota_ready_at(tx, r["body"], operations, now) == now
+                and ready_review(r["body"])
                 for r in operations
             )
             recent_allocations = {}
@@ -988,6 +1451,13 @@ class CapacityScheduler:
             ))
             for record in candidates:
                 item = record["body"]
+                if mismatch := self._output_overflow(tx, item):
+                    if item.get("diagnostic") != mismatch["state"] or item["phase"] != "waiting":
+                        tx.put(OPERATION, record["id"], dict(
+                            item, phase="waiting", wake_at=None, wait_started_at=now,
+                            wait_reason="provider", diagnostic=mismatch["state"],
+                        ), expected_version=record["version"])
+                    continue
                 if any(
                     self.policy.quotas[scope].concurrency is not None
                     and sum(scope in a["quota_scopes"] for a in active)
@@ -999,7 +1469,35 @@ class CapacityScheduler:
                     normal_active = sum(not a["review"] for a in active)
                     if normal_active >= self.policy.permits[kind] - self.policy.review_reserve:
                         continue
-                ready = self._quota_ready_at(tx, item, operations, now)
+                try:
+                    ready = self._quota_ready_at(tx, item, operations, now)
+                except QuotaReconciliationNeeded:
+                    if (item["phase"] != "waiting" or item.get("wake_at") is not None
+                            or item.get("wait_reason") != "provider"
+                            or item.get("diagnostic") != _RECONCILIATION_DIAGNOSTIC):
+                        prior = {}
+                        wait_started = now
+                        if item["phase"] == "queued":
+                            prior["queue_wait_seconds"] = (item["queue_wait_seconds"]
+                                                           + max(0, now - item["queued_at"]))
+                        elif item.get("wait_started_at") is not None:
+                            if item.get("wait_reason") == "provider":
+                                wait_started = item["wait_started_at"]
+                            else:
+                                prior_key = {
+                                    "quota": "quota_wait_seconds",
+                                    "retry": "retry_wait_seconds",
+                                }.get(item.get("wait_reason"))
+                                if prior_key is not None:
+                                    prior[prior_key] = (item[prior_key] + max(
+                                        0, now - item["wait_started_at"],
+                                    ))
+                        tx.put(OPERATION, record["id"], dict(
+                            item, phase="waiting", wake_at=None,
+                            wait_started_at=wait_started, wait_reason="provider",
+                            diagnostic=_RECONCILIATION_DIAGNOSTIC, **prior,
+                        ), expected_version=record["version"])
+                    continue
                 if ready is None:
                     continue
                 if ready > now:
@@ -1039,7 +1537,12 @@ class CapacityScheduler:
                                lease_until=now + lease_seconds, wake_at=None, reservation=True,
                                local_active=True, external_active=False, admitted_at=now,
                                last_progress_at=now, last_heartbeat_at=now,
-                               wait_started_at=None, wait_reason=None, **wait)
+                               wait_started_at=None, wait_reason=None,
+                               diagnostic=(None if item.get("diagnostic") in {
+                                   "request_exceeds_observed_output_minute_limit",
+                                   _RECONCILIATION_DIAGNOSTIC,
+                               }
+                                           else item.get("diagnostic")), **wait)
                 tx.put(OPERATION, record["id"], updated, expected_version=record["version"])
                 return {"admitted": {"operation_id": record["id"], **updated}}
             return {"admitted": None}
@@ -1090,6 +1593,10 @@ class CapacityScheduler:
                        "reserved_tokens": body["estimated_tokens"],
                        "charged_tokens": body["estimated_tokens"], "usage_known": False,
                        "cached_tokens": None, "status": "dispatched"}
+            if body.get("output_reservation_tokens") is not None:
+                attempt.update(reserved_output_tokens=body["output_reservation_tokens"],
+                               charged_output_tokens=body["output_reservation_tokens"],
+                               output_usage_known=False)
             updated = dict(body, phase="dispatched", attempts=[*body["attempts"], attempt], external_active=True)
             return tx.put(OPERATION, operation_id, updated, expected_version=record["version"])["body"]
 
@@ -1097,21 +1604,30 @@ class CapacityScheduler:
         return self.get(operation_id)
 
     def settle(self, operation_id: str, owner: str, generation: int, *, used_tokens: int | None,
-               outcome: str, output_ref: str | None = None, cached_tokens: int = 0) -> dict:
+               outcome: str, output_ref: str | None = None, cached_tokens: int = 0,
+               used_output_tokens: int | None = None) -> dict:
         """Reconcile a confirmed external result; unknown usage keeps its reserve."""
         self._check_usage(outcome, used_tokens, cached_tokens)
+        self._check_output_usage(used_output_tokens, used_tokens)
         def save(tx):
             return self.settle_tx(tx, operation_id, owner, generation, used_tokens=used_tokens,
-                                  outcome=outcome, output_ref=output_ref, cached_tokens=cached_tokens)
+                                  outcome=outcome, output_ref=output_ref, cached_tokens=cached_tokens,
+                                  used_output_tokens=used_output_tokens)
 
-        self.store.transact(f"capacity-settle-{operation_id}-{generation}", {"owner": owner, "generation": generation, "outcome": outcome, "used_tokens": used_tokens, "cached_tokens": cached_tokens, "output_ref": output_ref}, save)
+        request = {"owner": owner, "generation": generation, "outcome": outcome,
+                   "used_tokens": used_tokens, "cached_tokens": cached_tokens,
+                   "output_ref": output_ref}
+        if used_output_tokens is not None:
+            request["used_output_tokens"] = used_output_tokens
+        self.store.transact(f"capacity-settle-{operation_id}-{generation}", request, save)
         return self.get(operation_id)
 
     def settle_tx(self, tx: Transaction, operation_id: str, owner: str, generation: int, *,
                   used_tokens: int | None, outcome: str, output_ref: str | None = None,
-                  cached_tokens: int = 0) -> dict:
+                  cached_tokens: int = 0, used_output_tokens: int | None = None) -> dict:
         """Release capacity inside a caller's accepted-result transaction."""
         self._check_usage(outcome, used_tokens, cached_tokens)
+        self._check_output_usage(used_output_tokens, used_tokens)
         now = self.store.clock()
         record = self._owned(tx, operation_id, owner, generation, now)
         body = record["body"]
@@ -1121,6 +1637,7 @@ class CapacityScheduler:
         attempts[-1] = dict(attempts[-1], charged_tokens=used_tokens if used_tokens is not None else attempts[-1]["charged_tokens"],
                             usage_known=used_tokens is not None, cached_tokens=cached_tokens if used_tokens is not None else None,
                             status=outcome, completed_at=now)
+        self._settle_output_attempt(attempts[-1], used_output_tokens)
         updated = dict(body, phase=outcome, attempts=attempts, reservation=False,
                        local_active=False, external_active=False, output_ref=output_ref,
                        active_seconds=body["active_seconds"] + max(0, now - attempts[-1]["at"]))
@@ -1128,9 +1645,11 @@ class CapacityScheduler:
 
     def record_unaccepted_tx(self, tx: Transaction, operation_id: str, owner: str,
                              generation: int, *, used_tokens: int | None,
-                             output_ref: str, cached_tokens: int = 0) -> dict:
+                             output_ref: str, cached_tokens: int = 0,
+                             used_output_tokens: int | None = None) -> dict:
         """Release a known external result without accepting scientific work."""
         self._check_usage("completed", used_tokens, cached_tokens)
+        self._check_output_usage(used_output_tokens, used_tokens)
         now = self.store.clock()
         record = self._owned(tx, operation_id, owner, generation, now)
         body = record["body"]
@@ -1142,6 +1661,7 @@ class CapacityScheduler:
                             usage_known=used_tokens is not None,
                             cached_tokens=cached_tokens if used_tokens is not None else None,
                             status="known_unaccepted", completed_at=now)
+        self._settle_output_attempt(attempts[-1], used_output_tokens)
         updated = dict(body, phase="known_unaccepted", attempts=attempts,
                        reservation=False, local_active=False, external_active=False,
                        output_ref=output_ref, owner=None, lease_until=None,
@@ -1157,14 +1677,33 @@ class CapacityScheduler:
         if type(cached_tokens) is not int or cached_tokens < 0 or (used_tokens is None and cached_tokens != 0) or (used_tokens is not None and cached_tokens > used_tokens):
             raise StateError("Cached tokens must be included in known total usage")
 
+    @staticmethod
+    def _check_output_usage(used_output_tokens: int | None, used_tokens: int | None) -> None:
+        if used_output_tokens is not None and (
+                type(used_output_tokens) is not int or used_output_tokens < 0
+                or used_tokens is not None and used_output_tokens > used_tokens):
+            raise StateError("Completion usage must be a nonnegative subset of total usage")
+
+    @staticmethod
+    def _settle_output_attempt(attempt: dict, used_output_tokens: int | None) -> None:
+        if "charged_output_tokens" not in attempt:
+            if used_output_tokens is not None:
+                raise StateError("Legacy work has no output reservation")
+            return
+        if used_output_tokens is not None:
+            attempt["charged_output_tokens"] = used_output_tokens
+            attempt["output_usage_known"] = True
+
     def rate_limited(self, operation_id: str, owner: str, generation: int, *, scope: str,
                      retry_after: float, source: str = "retry_after",
-                     used_tokens: int | None = None) -> dict:
+                     used_tokens: int | None = None,
+                     used_output_tokens: int | None = None) -> dict:
         """Persist 429 and wake; no model call or local permit remains active."""
         if scope not in self.policy.quotas or not math.isfinite(retry_after) or retry_after < 0 or source not in {"retry_after", "reset"}:
             raise StateError("Rate limit needs configured scope and finite delay")
         if used_tokens is not None and (type(used_tokens) is not int or used_tokens < 0):
             raise StateError("Rate-limit usage must be a nonnegative observed total")
+        self._check_output_usage(used_output_tokens, used_tokens)
         now = self.store.clock()
 
         def save(tx):
@@ -1178,6 +1717,18 @@ class CapacityScheduler:
                                 usage_known=used_tokens is not None,
                                 cached_tokens=0 if used_tokens is not None else None,
                                 status="rate_limited", completed_at=now)
+            self._settle_output_attempt(attempts[-1], used_output_tokens)
+            hard_output = self._output_overflow(tx, body)
+            if hard_output is not None:
+                updated = dict(body, phase="waiting", attempts=attempts, wake_at=None,
+                               reservation=False, local_active=False, external_active=False,
+                               owner=None, lease_until=None,
+                               active_seconds=body["active_seconds"] + max(
+                                   0, now - attempts[-1]["at"]),
+                               wait_started_at=now, wait_reason="provider",
+                               diagnostic=hard_output["state"])
+                return tx.put(OPERATION, operation_id, updated,
+                              expected_version=record["version"])["body"]
             wake = now + retry_after
             block = tx.get(QUOTA, scope)
             old_until = block["body"]["blocked_until"] if block else 0
@@ -1203,7 +1754,11 @@ class CapacityScheduler:
                            diagnostic="transport_retry_limit" if exhausted else "provider_rate_limit")
             return tx.put(OPERATION, operation_id, updated, expected_version=record["version"])["body"]
 
-        self.store.transact(f"capacity-429-{operation_id}-{generation}", {"owner": owner, "generation": generation, "scope": scope, "retry_after": retry_after, "source": source, "used_tokens": used_tokens}, save)
+        request = {"owner": owner, "generation": generation, "scope": scope,
+                   "retry_after": retry_after, "source": source, "used_tokens": used_tokens}
+        if used_output_tokens is not None:
+            request["used_output_tokens"] = used_output_tokens
+        self.store.transact(f"capacity-429-{operation_id}-{generation}", request, save)
         return self.get(operation_id)
 
     def observe_headers(self, scope: str, *, remaining_requests: int | None,
@@ -1363,6 +1918,50 @@ class CapacityScheduler:
             observation_id=observation_id,
         )
 
+    def observe_output_rate_limit(
+        self, scope: str, observation: Mapping[str, object], *,
+        source_operation_id: str, observation_id: str, observed_at: float,
+        retry_after: float | None = None,
+    ) -> dict:
+        """Record numeric OTPM evidence from one exact attempted model operation."""
+        if (scope not in self.policy.quotas or not source_operation_id or not observation_id
+                or type(observed_at) not in (int, float)
+                or not math.isfinite(observed_at) or observed_at < 0
+                or retry_after is not None and (
+                    type(retry_after) not in (int, float)
+                    or not math.isfinite(retry_after) or retry_after < 0)):
+            raise StateError("Output observation needs a scoped attempted call and finite time")
+        if (not isinstance(observation, Mapping)
+                or set(observation) != {"scope", "limit_tokens", "used_tokens", "requested_tokens"}
+                or observation.get("scope") != "output_tokens_per_minute"):
+            raise StateError("Output observation must contain only numeric OTPM evidence")
+        limit = observation["limit_tokens"]
+        used = observation["used_tokens"]
+        requested = observation["requested_tokens"]
+        if (type(limit) is not int or not 0 < limit <= 1_000_000_000
+                or type(requested) is not int or not 0 < requested <= 1_000_000_000
+                or used is not None and (
+                    type(used) is not int or not 0 <= used <= 1_000_000_000)):
+            raise StateError("Output observation counts must be finite nonnegative integers")
+        payload = {"scope": scope, "limit_tokens": limit, "used_tokens": used,
+                   "requested_tokens": requested, "observed_at": observed_at,
+                   "retry_after": retry_after, "source_operation_id": source_operation_id}
+
+        def save(tx):
+            operation = tx.get(OPERATION, source_operation_id)
+            if (operation is None or scope not in operation["body"]["quota_scopes"]
+                    or operation["body"].get("output_reservation_tokens") != requested
+                    or not operation["body"]["attempts"]):
+                raise StateError("Output observation differs from its attempted request")
+            current = tx.get(OUTPUT_QUOTA, scope)
+            if current and current["body"]["observed_at"] > observed_at:
+                return current["body"]
+            return tx.put(OUTPUT_QUOTA, scope, payload,
+                          expected_version=current["version"] if current else 0)["body"]
+
+        return self.store.transact(f"capacity-output-observation:{scope}:{observation_id}",
+                                   payload, save)
+
     def timeout(self, operation_id: str, owner: str, generation: int) -> dict:
         """A local timeout frees its worker slot but keeps external uncertainty."""
         now = self.store.clock()
@@ -1464,6 +2063,8 @@ class CapacityScheduler:
                     attempts[-1], charged_tokens=0, usage_known=True, cached_tokens=0,
                     status="terminal_no_effect", completed_at=now,
                 )
+                if "charged_output_tokens" in attempts[-1]:
+                    attempts[-1].update(charged_output_tokens=0, output_usage_known=True)
                 updated = dict(
                     body, phase="failed", attempts=attempts, reservation=False,
                     local_active=False, external_active=False, owner=None,
@@ -1491,6 +2092,8 @@ class CapacityScheduler:
             attempts = list(body["attempts"])
             attempts[-1] = dict(attempts[-1], charged_tokens=0, usage_known=True,
                                 cached_tokens=0, status="temporary_no_effect", completed_at=now)
+            if "charged_output_tokens" in attempts[-1]:
+                attempts[-1].update(charged_output_tokens=0, output_usage_known=True)
             retries = sum(a["status"] in {"temporary_no_effect", "rate_limited"} for a in attempts)
             exhausted = retries > body["retry_limit"]
             updated = dict(body, phase="failed" if exhausted else "waiting", attempts=attempts,
@@ -1545,6 +2148,8 @@ class CapacityScheduler:
             attempts[-1], status="terminal_no_effect", charged_tokens=0,
             usage_known=True, cached_tokens=0, completed_at=now,
         )
+        if "charged_output_tokens" in attempts[-1]:
+            attempts[-1].update(charged_output_tokens=0, output_usage_known=True)
         return tx.put(
             OPERATION, operation_id,
             {**body, "phase": "failed", "attempts": attempts,
@@ -1598,13 +2203,14 @@ class CapacityScheduler:
 
     def reconcile(self, operation_id: str, owner: str, generation: int, *, effect: str,
                   used_tokens: int | None = None, output_ref: str | None = None,
-                  cached_tokens: int = 0) -> dict:
+                  cached_tokens: int = 0, used_output_tokens: int | None = None) -> dict:
         """Confirmed completion/failure/no effect releases uncertain external capacity."""
         if effect not in {"completed", "failed", "no_effect", "known_unaccepted"}:
             raise StateError("Reconciliation needs confirmed effect and valid usage")
         if effect == "known_unaccepted" and not output_ref:
             raise StateError("Unaccepted reconciliation needs an exact observation ID")
         self._check_usage("completed", used_tokens, cached_tokens)
+        self._check_output_usage(used_output_tokens, used_tokens)
         now = self.store.clock()
 
         def save(tx):
@@ -1618,6 +2224,10 @@ class CapacityScheduler:
                                 usage_known=used_tokens is not None,
                                 cached_tokens=cached_tokens if used_tokens is not None else None,
                                 completed_at=now)
+            if effect == "no_effect" and "charged_output_tokens" in attempts[-1]:
+                attempts[-1].update(charged_output_tokens=0, output_usage_known=True)
+            else:
+                self._settle_output_attempt(attempts[-1], used_output_tokens)
             phase = "queued" if effect == "no_effect" and not body["cancel_requested"] else ("canceled" if effect == "no_effect" else effect)
             updated = dict(body, phase=phase, attempts=attempts, reservation=False,
                            local_active=False, external_active=False, output_ref=output_ref,
@@ -1625,12 +2235,18 @@ class CapacityScheduler:
                            queued_at=now if phase == "queued" else body["queued_at"])
             return tx.put(OPERATION, operation_id, updated, expected_version=record["version"])["body"]
 
-        return self.store.transact(f"capacity-reconciled-{operation_id}-{generation}", {"owner": owner, "generation": generation, "effect": effect, "used_tokens": used_tokens, "cached_tokens": cached_tokens, "output_ref": output_ref}, save)
+        request = {"owner": owner, "generation": generation, "effect": effect,
+                   "used_tokens": used_tokens, "cached_tokens": cached_tokens,
+                   "output_ref": output_ref}
+        if used_output_tokens is not None:
+            request["used_output_tokens"] = used_output_tokens
+        return self.store.transact(f"capacity-reconciled-{operation_id}-{generation}",
+                                   request, save)
 
     def settle_known_uncertain_tx(
         self, tx: Transaction, operation_id: str, owner: str, generation: int, *,
         outcome: str, output_ref: str, used_tokens: int | None = None,
-        cached_tokens: int = 0,
+        cached_tokens: int = 0, used_output_tokens: int | None = None,
     ) -> dict:
         """Settle a recovered effect alongside its accepted or unaccepted record.
 
@@ -1641,6 +2257,7 @@ class CapacityScheduler:
         if outcome not in {"completed", "known_unaccepted"} or not output_ref:
             raise StateError("Known uncertain effect needs a saved output and outcome")
         self._check_usage("completed", used_tokens, cached_tokens)
+        self._check_output_usage(used_output_tokens, used_tokens)
         now = self.store.clock()
         record = self._owned(tx, operation_id, owner, generation, now)
         body = record["body"]
@@ -1658,6 +2275,7 @@ class CapacityScheduler:
             cached_tokens=cached_tokens if used_tokens is not None else None,
             completed_at=now,
         )
+        self._settle_output_attempt(attempts[-1], used_output_tokens)
         updated = dict(
             body, phase=outcome, attempts=attempts, reservation=False,
             local_active=False, external_active=False, output_ref=output_ref,

@@ -36,9 +36,11 @@ def _old_lease(host, mission_id, task_id):
         db.close()
 
 
+@pytest.mark.parametrize("qwen", [False, True])
 def test_model_response_loss_fences_old_call_and_accepts_fresh_linked_turn(
     tmp_path,
     monkeypatch,
+    qwen,
 ):
     transport_calls = []
     behavior = {"lose": True}
@@ -56,6 +58,10 @@ def test_model_response_loss_fences_old_call_and_accepts_fresh_linked_turn(
                 request_id="model-response-lost-recovery",
                 question="Give an independent appraisal",
                 agent_ids=["agent-synthesis"],
+                agent_models=({"agent-synthesis": {
+                    "model": "qwen/qwen3.8-27b", "reasoning_effort": "medium",
+                    "max_completion_tokens": 960,
+                }} if qwen else None),
             )
         )
         run = host._run(receipt.run_id)
@@ -81,6 +87,8 @@ def test_model_response_loss_fences_old_call_and_accepts_fresh_linked_turn(
             "version": 1,
         }
         prepared = host.session.load(old_intent_ref)
+        if qwen:
+            assert prepared.request.body["reasoning_format"] == "parsed"
         assert all(item["type"] == "function" for item in prepared.request.body["tools"])
         assert prepared.request.body["parallel_tool_calls"] is False
         assert host.store.records("model_response_receipt") == []
@@ -139,6 +147,10 @@ def test_model_response_loss_fences_old_call_and_accepts_fresh_linked_turn(
             ]["status"]
             == "attempted_external_effect"
         )
+        if qwen:
+            # The Qwen branch covers parsed-packet recovery and reservation.
+            # The synthetic final answer below exercises the GPT-OSS fixture.
+            return
 
         # The service applies the accepted receipt before starting a different
         # call.  The test mirrors that handoff without editing service.py.

@@ -18,7 +18,7 @@ from typing import Literal
 from ora.state import StateError, StateStore
 from ora.state.store import canonical
 
-from .evaluation import read_evaluation_observation
+from .evaluation import combine_validation_ledgers, read_evaluation_observation
 from .export import _task_label
 from .metrics import _usage, _usage_total, build_context_metrics, read_cache_observation
 from .prefix_reuse import unavailable_local_prefix_reuse
@@ -96,8 +96,31 @@ def _budget(path: Path) -> dict:
     return budget
 
 
+def _accounting(budget: dict) -> dict:
+    attempts = budget["model_attempts"]
+    if any(_nonnegative(row.get("planned_tokens")) is None
+           or row.get("actual_tokens") is not None
+           and _nonnegative(row.get("actual_tokens")) is None for row in attempts):
+        raise StateError("Natural continuation has invalid token reservations")
+    known = sum(row["actual_tokens"] for row in attempts
+                if type(row.get("actual_tokens")) is int)
+    unknown = sum(row["planned_tokens"] for row in attempts
+                  if row.get("actual_tokens") is None)
+    if (type(budget.get("planned_tokens")) is not int
+            or budget["planned_tokens"] < 0 or known + unknown != budget["planned_tokens"]):
+        raise StateError("Natural continuation token accounting disagrees")
+    return {"model_http_attempts": len(attempts),
+            "retrieval_http_attempts": len(budget["retrieval_attempts"]),
+            "known_model_tokens": known,
+            "unknown_model_reservations": unknown,
+            "settled_or_reserved_tokens": budget["planned_tokens"],
+            "stop_reason": budget.get("stop_reason")}
+
+
 def _row(index: int, phase: str, saved: dict, usage: dict | None,
-         cache_observation: dict | None = None, response_status: str | None = None) -> dict:
+         cache_observation: dict | None = None, response_status: str | None = None,
+         *, model_id: str | None = None, actor_id: str | None = None,
+         model_evidence: str | None = None) -> dict:
     usage = usage or _usage(None, unresolved=True)
     observed = cache_observation or {"status": "unavailable"}
     return {
@@ -114,6 +137,9 @@ def _row(index: int, phase: str, saved: dict, usage: dict | None,
         "cache_observation": observed["status"],
         "usage_status": usage["total_tokens"]["status"],
         "_usage": usage,
+        **({"model_id": _label(model_id, model=True)} if model_id is not None else {}),
+        **({"actor_id": _label(actor_id)} if actor_id is not None else {}),
+        **({"model_evidence": model_evidence} if model_evidence is not None else {}),
     }
 
 
@@ -124,7 +150,8 @@ def _finalize(*, case_dir: Path, kind: str, task_label: str, profile: str,
               evaluation_elapsed: float | None = None,
               runner_total_elapsed: float | None = None,
               finalization_basis: str | None = None,
-              local_prefix_reuse: dict | None = None) -> dict:
+              local_prefix_reuse: dict | None = None,
+              segmented_controller: bool = False) -> dict:
     starts = [_time(item["started_at"]) for item in budgets]
     all_attempts = [row for budget in budgets
                     for key in ("model_attempts", "retrieval_attempts")
@@ -132,7 +159,7 @@ def _finalize(*, case_dir: Path, kind: str, task_label: str, profile: str,
     ends = [row.get("ended_at") for row in all_attempts]
     elapsed = (max(_time(value) for value in ends) - min(starts)
                if ends and all(value is not None for value in ends) else None)
-    if (evaluation_elapsed is not None and elapsed is not None
+    if (not segmented_controller and evaluation_elapsed is not None and elapsed is not None
             and evaluation_elapsed + 0.01 < elapsed):
         raise StateError("Evaluation duration is shorter than its HTTP ledger window")
     durations = [_time(row["ended_at"]) - _time(row["started_at"])
@@ -145,7 +172,8 @@ def _finalize(*, case_dir: Path, kind: str, task_label: str, profile: str,
         if all(row.get("ended_at") is not None for row in model_attempts) else None
     )
     observed_window = (evaluation_elapsed if evaluation_elapsed is not None else elapsed)
-    timing_basis = ("evaluation_observation_controller" if evaluation_elapsed is not None
+    timing_basis = ("segmented_evaluation_observation_controller" if segmented_controller
+                    else "evaluation_observation_controller" if evaluation_elapsed is not None
                     else "ledger_first_start_to_last_attempt_end")
     totals = _usage_total([{"usage": row["_usage"]} for row in rows])
     cache = totals["cache_fraction"]
@@ -201,7 +229,9 @@ def _finalize(*, case_dir: Path, kind: str, task_label: str, profile: str,
                 round(runner_total_elapsed, 3) if runner_total_elapsed is not None else None
             ),
             "runner_total_basis": (
-                "runner_observation_after_shutdown" if runner_total_elapsed is not None else None
+                ("sum_of_runner_segments_after_each_shutdown" if segmented_controller
+                 else "runner_observation_after_shutdown")
+                if runner_total_elapsed is not None else None
             ),
             "post_controller_finalization_seconds": (
                 round(runner_total_elapsed - evaluation_elapsed, 3)
@@ -219,6 +249,9 @@ def _finalize(*, case_dir: Path, kind: str, task_label: str, profile: str,
             "unmeasured_http_attempts": len(all_attempts) - len(durations),
             "between_model_attempt_gap_seconds_sum": (
                 round(between_model_gap, 3) if between_model_gap is not None else None
+            ),
+            "between_model_attempt_gap_basis": (
+                "includes_interphase_pause" if segmented_controller else "within_single_case"
             ),
         },
         "attempts": public_rows,
@@ -246,15 +279,115 @@ def _runner_timing(observation: dict, controller_elapsed: float) -> tuple[float,
     if (type(controller) not in {int, float} or not math.isfinite(controller)
             or controller != controller_elapsed
             or type(finalization) not in {int, float} or not math.isfinite(finalization)
-            or finalization < 0 or finalization != total - controller):
+            or finalization < 0
+            or abs(finalization - (total - controller)) > 1e-6):
         raise StateError("Runner timing disagrees with its saved controller stop")
     return float(total), "explicit_post_controller_to_runner_observation"
+
+
+def _validate_segments(aggregate: dict, phase_budget: dict, observation: dict,
+                       lineage: dict, phase: int) -> None:
+    segments = observation.get("controller_segments")
+    prior = lineage.get("prior_controller_segments")
+    if (not isinstance(segments, list) or len(segments) != phase
+            or not isinstance(prior, list) or segments[:-1] != prior
+            or len(prior) != phase - 1):
+        raise StateError("Natural continuation controller segments are incomplete")
+    latest = segments[-1]
+    if (not isinstance(latest, dict)
+            or latest.get("model_attempts") != len(phase_budget["model_attempts"])
+            or latest.get("retrieval_attempts") != len(phase_budget["retrieval_attempts"])
+            or latest.get("started_at") != phase_budget["started_at"]
+            or latest.get("controller_elapsed_seconds")
+            != observation.get("phase_controller_elapsed_seconds")
+            or latest.get("elapsed_seconds") != observation.get("phase_elapsed_seconds")):
+        raise StateError("Natural continuation current segment disagrees")
+    model_offset = retrieval_offset = 0
+    controller_sum = total_sum = 0.0
+    for segment in segments:
+        if (not isinstance(segment, dict)
+                or any(type(segment.get(key)) is not int or segment[key] < 0
+                       for key in ("model_attempts", "retrieval_attempts"))
+                or any(type(segment.get(key)) not in {int, float}
+                       or not math.isfinite(segment[key]) or segment[key] < 0
+                       for key in ("started_at", "controller_elapsed_seconds",
+                                   "elapsed_seconds"))
+                or segment["elapsed_seconds"] < segment["controller_elapsed_seconds"]):
+            raise StateError("Natural continuation has an invalid controller segment")
+        model_end = model_offset + segment["model_attempts"]
+        retrieval_end = retrieval_offset + segment["retrieval_attempts"]
+        attempts = [*aggregate["model_attempts"][model_offset:model_end],
+                    *aggregate["retrieval_attempts"][retrieval_offset:retrieval_end]]
+        if (len(attempts) != segment["model_attempts"] + segment["retrieval_attempts"]
+                or any(row.get("ended_at") is None
+                       or _time(row["started_at"]) + 0.01 < segment["started_at"]
+                       or _time(row["ended_at"]) - segment["started_at"]
+                       > segment["controller_elapsed_seconds"] + 0.01
+                       for row in attempts)):
+            raise StateError("Natural continuation HTTP attempt exceeds its controller segment")
+        model_offset, retrieval_offset = model_end, retrieval_end
+        controller_sum += segment["controller_elapsed_seconds"]
+        total_sum += segment["elapsed_seconds"]
+    if (model_offset != len(aggregate["model_attempts"])
+            or retrieval_offset != len(aggregate["retrieval_attempts"])
+            or abs(controller_sum - observation["controller_elapsed_seconds"]) > 1e-6
+            or abs(total_sum - observation["elapsed_seconds"]) > 1e-6):
+        raise StateError("Natural continuation segment totals disagree")
 
 
 def _natural(case_dir: Path) -> dict:
     case = _json(case_dir / "case.json")
     observation = _json(case_dir / "observation.json")
-    budget = _budget(case_dir / "budget.json")
+    phase_budget = _budget(case_dir / "budget.json")
+    phase = case.get("phase", 1)
+    if type(phase) is not int or phase < 1:
+        raise StateError("Natural case has an invalid phase")
+    prior_model_attempts = 0
+    if phase > 1:
+        lineage = case.get("resume_lineage")
+        if (not isinstance(lineage, dict) or lineage.get("next_phase") != phase
+                or not isinstance(lineage.get("prior_cumulative_budget_sha256"), str)
+                or not _SHA.fullmatch(lineage["prior_cumulative_budget_sha256"])):
+            raise StateError("Natural continuation lacks pinned prior accounting")
+        prior_path = case_dir / "prior-cumulative-budget.json"
+        prior_budget = _budget(prior_path)
+        if hashlib.sha256(prior_path.read_bytes()).hexdigest() != (
+            lineage["prior_cumulative_budget_sha256"]
+        ):
+            raise StateError("Natural continuation prior ledger digest disagrees")
+        budget = _budget(case_dir / "cumulative-budget.json")
+        if budget != combine_validation_ledgers(prior_budget, phase_budget):
+            raise StateError("Natural continuation cumulative ledger disagrees")
+        prior_model_attempts = len(prior_budget["model_attempts"])
+        prior_timing = lineage.get("prior_timing")
+        phase_accounting = observation.get("phase_accounting")
+        cumulative_accounting = observation.get("cumulative_accounting")
+        if (not isinstance(prior_timing, dict)
+                or not isinstance(phase_accounting, dict)
+                or not isinstance(cumulative_accounting, dict)
+                or observation.get("phase_model_attempts") != len(phase_budget["model_attempts"])
+                or observation.get("phase_retrieval_attempts")
+                != len(phase_budget["retrieval_attempts"])
+                or observation.get("settled_or_reserved_tokens") != budget.get("planned_tokens")
+                or phase_accounting != _accounting(phase_budget)
+                or cumulative_accounting != _accounting(budget)):
+            raise StateError("Natural continuation phase accounting disagrees")
+        for total, old, current in (
+            ("controller_elapsed_seconds", "controller_elapsed_seconds",
+             "phase_controller_elapsed_seconds"),
+            ("elapsed_seconds", "elapsed_seconds", "phase_elapsed_seconds"),
+            ("post_controller_finalization_seconds", "post_controller_finalization_seconds",
+             "phase_post_controller_finalization_seconds"),
+        ):
+            if (type(prior_timing.get(old)) not in {int, float}
+                    or type(observation.get(current)) not in {int, float}
+                    or type(observation.get(total)) not in {int, float}
+                    or not all(math.isfinite(value) and value >= 0 for value in (
+                        prior_timing[old], observation[current], observation[total]))
+                    or abs(observation[total] - prior_timing[old] - observation[current]) > 1e-6):
+                raise StateError("Natural continuation segmented timing disagrees")
+    else:
+        budget = phase_budget
     run_id = case.get("run_id")
     if not isinstance(run_id, str) or observation.get("run_id") != run_id:
         raise StateError("Natural case and observation have different runs")
@@ -274,6 +407,8 @@ def _natural(case_dir: Path) -> dict:
     runner_total_elapsed, finalization_basis = _runner_timing(
         observation, evaluation["elapsed_seconds"],
     )
+    if phase > 1:
+        _validate_segments(budget, phase_budget, observation, lineage, phase)
     metrics = build_context_metrics(store, run_id)
     if metrics["mission_id"] != run["body"].get("mission_id"):
         raise StateError("Natural metrics have another mission")
@@ -285,6 +420,27 @@ def _natural(case_dir: Path) -> dict:
             continue
         receipt = store.get("model_response_receipt", "model-response:" + call["intent_id"])
         available.append((call, receipt))
+
+    def matched_model_identity(call: dict, saved: dict) -> tuple[str | None, str | None, str | None]:
+        intent = store.get("model_request_intent", call["intent_id"])
+        pointer = intent["body"].get("call_ref") if intent else None
+        if (not isinstance(pointer, dict)
+                or set(pointer) != {"kind", "id", "version"}
+                or pointer["kind"] != "agent_call"
+                or pointer["id"] != call["call_id"]):
+            raise StateError("Matched model attempt lacks its exact saved call")
+        saved_call = store.get(**pointer)
+        if saved_call is None:
+            raise StateError("Matched model attempt call is unavailable")
+        call_model = saved_call["body"].get("model_id")
+        if (call_model is not None and saved.get("model") is not None
+                and call_model != saved["model"]):
+            raise StateError("Budget model differs from exact saved call")
+        model_id = call_model or saved.get("model")
+        actor_id = saved_call["body"].get("instance_id")
+        evidence = "saved_call_and_http_ledger" if call_model else "http_ledger_only"
+        return model_id, actor_id, evidence
+
     rows, captured = [], 0
     for index, saved in enumerate(budget["model_attempts"], 1):
         candidates = [(call, receipt) for call, receipt in available
@@ -297,23 +453,57 @@ def _natural(case_dir: Path) -> dict:
                     or len(candidates) != 1 or candidates[0][0]["status"] != "captured"):
                 raise StateError("Successful budget attempt lacks one exact response receipt")
             call, receipt = candidates[0]
+            model_id, actor_id, model_evidence = matched_model_identity(call, saved)
             usage = call["usage"]
             if (saved.get("actual_tokens") != usage["total_tokens"].get("value")
                     or receipt["body"].get("request_sha256") != saved["request_sha256"]):
                 raise StateError("Budget and response token or request lineage disagree")
             available.remove((call, receipt))
             captured += 1
-            rows.append(_row(index, "run", saved, usage, call["cache_observation"],
-                             _status(call["response_status"])))
+            rows.append(_row(index, "prior" if index <= prior_model_attempts else "run",
+                             saved, usage, call["cache_observation"],
+                             _status(call["response_status"]), model_id=model_id,
+                             actor_id=actor_id, model_evidence=model_evidence))
         else:
             if _nonnegative(saved.get("actual_tokens")) is not None:
                 raise StateError("Failed budget attempt has unsupported known usage")
-            rows.append(_row(index, "run", saved, None))
+            if len(candidates) > 1:
+                raise StateError("Failed budget attempt has ambiguous saved receipts")
+            if candidates:
+                call, receipt = candidates[0]
+                if (receipt is None
+                        or receipt["body"].get("request_sha256") != saved["request_sha256"]
+                        or receipt["body"].get("http_status") != saved["status"]
+                        or receipt["body"].get("status") != "failed"):
+                    raise StateError("Failed budget attempt disagrees with its saved receipt")
+                available.remove((call, receipt))
+                model_id, actor_id, model_evidence = matched_model_identity(call, saved)
+            elif saved.get("response_sha256") is not None:
+                raise StateError("Failed budget response lacks its exact saved receipt")
+            else:
+                model_id = saved.get("model")
+                actor_id = None
+                model_evidence = "http_ledger_only" if model_id is not None else None
+            rows.append(_row(index, "prior" if index <= prior_model_attempts else "run",
+                             saved, None, model_id=model_id, actor_id=actor_id,
+                             model_evidence=model_evidence))
     if any(call["status"] == "captured" for call, _receipt in available):
         raise StateError("Captured response is absent from the validation ledger")
+    observed_models = {row["model_id"] for row in rows if "model_id" in row}
+    if any("model_id" not in row for row in rows):
+        model_label = ("unknown" if case.get("model_selection") == "per_agent"
+                       else case.get("model"))
+    elif len(observed_models) > 1:
+        model_label = "mixed"
+    elif observed_models:
+        model_label = next(iter(observed_models))
+    elif case.get("model_selection") == "per_agent":
+        model_label = "no-model-attempt"
+    else:
+        model_label = case.get("model")
     return _finalize(
         case_dir=case_dir, kind="natural_agent", task_label=_task_label(case["question"]),
-        profile=case.get("credential_profile"), model=case.get("model"),
+        profile=case.get("credential_profile"), model=model_label,
         outcome=evaluation["outcome"], mission_status=_status(run["body"]["status"]),
         budgets=[budget], rows=rows, captured=captured,
         retrieval_recorded=metrics["retrieval"]["recorded_attempt_count"],
@@ -322,6 +512,7 @@ def _natural(case_dir: Path) -> dict:
         runner_total_elapsed=runner_total_elapsed,
         finalization_basis=finalization_basis,
         local_prefix_reuse=metrics["local_prefix_reuse"],
+        segmented_controller=phase > 1,
     )
 
 

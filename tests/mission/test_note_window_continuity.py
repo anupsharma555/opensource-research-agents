@@ -269,7 +269,7 @@ def test_shared_host_prepares_and_reloads_all_checked_note_pages_with_hard_headr
         host._update_control(
             control, phase="ready_model", sequence=3, work_id=None,
             call_ref=origin_call, response_ref=turns[-1], tool_turn_refs=turns,
-            input_budget={"observed_limit_tokens": 8000, "target_fraction": .55},
+            input_budget={"observed_limit_tokens": 10000, "target_fraction": .55},
         )
         assert host._schedule_model(host._control(run.run_id, "agent-synthesis"))
         prepared_control = host._control(run.run_id, "agent-synthesis")
@@ -286,11 +286,13 @@ def test_shared_host_prepares_and_reloads_all_checked_note_pages_with_hard_headr
         assert {page["offset"] for page in pages} == {0, 2000, 4000}
         assert {page["text"] for page in pages} == set(texts)
         budget = host.store.get("mission_call_budget", call_ref["id"])["body"]
-        assert budget["preview_admission_target_tokens"] == 8000 - 219
+        headroom = budget["rate_input_headroom_tokens"]
+        assert headroom > 0
+        assert budget["preview_admission_target_tokens"] == 10000 - 219 - headroom
         estimate = estimate_request_tokens(canonical(request).encode())
-        assert estimate.tokens > int(8000 * .55)
-        assert estimate.tokens <= 8000 - 219
-        assert estimate.tokens + 219 <= 8000
+        assert estimate.tokens > int(10000 * .55)
+        assert estimate.tokens <= budget["preview_admission_target_tokens"]
+        assert estimate.tokens + 219 + headroom <= 10000
         assert sum(item.get("kind") == "retained_working_note_window"
                    and item.get("status") == "included_exact_window"
                    for item in host.store.get("context_inclusion", f"context:{intent['id']}")["body"][

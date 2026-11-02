@@ -24,7 +24,13 @@ from typing import Callable
 
 from ora.live.provider import MODEL, URL
 from ora.mission.figure_reading import IMAGE_INPUT_TOKENS, VISION_MODEL
-from ora.models.token_estimate import estimate_context_tokens, estimate_request_tokens
+from ora.models.token_estimate import (
+    QWEN_SURROGATE_BASIS,
+    QWEN_TEMPLATE_BASIS,
+    QWEN_TEMPLATE_LOW_BASIS,
+    estimate_context_tokens,
+    estimate_request_tokens,
+)
 from ora.retrieval.providers import HTTPDispatchBlocked
 from ora.retrieval.validation_transport import _atomic_json
 
@@ -126,6 +132,8 @@ class AgentBudget:
                  token_limit: int | None = 55_000, retrieval_limit: int | None = 4,
                  accounting_only: bool = False,
                  allow_vision: bool = False,
+                 allow_qwen_text: bool = False,
+                 qwen_estimate_policy: str = "legacy_surrogate",
                  clock: Callable[[], float] = time.time):
         if type(accounting_only) is not bool:
             raise ValueError("accounting-only authorization must be explicit boolean")
@@ -148,7 +156,14 @@ class AgentBudget:
         self.accounting_only = accounting_only
         if type(allow_vision) is not bool:
             raise ValueError("vision allowance must be explicit boolean")
+        if type(allow_qwen_text) is not bool:
+            raise ValueError("Qwen text allowance must be explicit boolean")
+        if (type(qwen_estimate_policy) is not str
+                or qwen_estimate_policy not in {"legacy_surrogate", "native_when_supported"}):
+            raise ValueError("Qwen estimate policy is unsupported")
         self.allow_vision = allow_vision
+        self.allow_qwen_text = allow_qwen_text
+        self.qwen_estimate_policy = qwen_estimate_policy
         self.clock = clock
         self.data: dict = {}
         self._fd: int | None = None
@@ -195,7 +210,10 @@ class AgentBudget:
         return {"model": self.model_limit, "tokens": self.token_limit,
                 "retrieval": self.retrieval_limit,
                 **({"accounting_only": True} if self.accounting_only else {}),
-                **({"allow_vision": True} if self.allow_vision else {})}
+                **({"allow_vision": True} if self.allow_vision else {}),
+                **({"allow_qwen_text": True} if self.allow_qwen_text else {}),
+                **({"qwen_estimate_policy": self.qwen_estimate_policy}
+                   if self.qwen_estimate_policy != "legacy_surrogate" else {})}
 
     def _save(self):
         if self._fd is None:
@@ -226,7 +244,11 @@ class AgentBudget:
                 assert raw is not None
                 packet = json.loads(raw)
                 cap = packet["max_completion_tokens"]
-                vision = packet.get("model") == VISION_MODEL
+                messages = packet.get("messages")
+                vision = (packet.get("model") == VISION_MODEL
+                          and isinstance(messages, list) and len(messages) == 1
+                          and isinstance(messages[0], dict)
+                          and isinstance(messages[0].get("content"), list))
                 if vision:
                     if (not self.allow_vision or native or type(cap) is not int
                             or not 1 <= cap <= 2048 or packet.get("stream") is not False
@@ -234,7 +256,6 @@ class AgentBudget:
                         self.stop("model_request_mismatch")
                     # Count the documented image charge, never the base64 bytes
                     # as GPT-OSS text. Provider usage remains authoritative.
-                    messages = packet["messages"]
                     if len(messages) != 1 or messages[0].get("role") != "user":
                         self.stop("model_request_invalid")
                     parts = messages[0]["content"]
@@ -248,6 +269,29 @@ class AgentBudget:
                     text_packet = {**packet, "messages": [{"role": "user", "content": texts}]}
                     input_tokens = IMAGE_INPUT_TOKENS + estimate_context_tokens(json.dumps(text_packet))
                     basis = "qwen_one_image_2048_plus_o200k_text_estimate"
+                elif packet.get("model") == VISION_MODEL:
+                    if (not self.allow_qwen_text or native or type(cap) is not int
+                            or not 1 <= cap <= 16384 or packet.get("stream") is not False
+                            or packet.get("reasoning_effort") not in {"medium", "low"}
+                            or packet.get("reasoning_format") != "parsed"
+                            or "include_reasoning" in packet):
+                        self.stop("model_request_mismatch")
+                    if (not isinstance(messages, list)
+                            or any(not isinstance(message, dict)
+                                   or type(message.get("content")) not in {str, type(None)}
+                                   or "image_url" in message for message in messages)):
+                        self.stop("model_request_invalid")
+                    if self.qwen_estimate_policy == "legacy_surrogate":
+                        estimate = estimate_request_tokens(raw, basis=QWEN_SURROGATE_BASIS)
+                    else:
+                        estimate = estimate_request_tokens(raw)
+                        if (estimate.basis not in {
+                            QWEN_TEMPLATE_BASIS, QWEN_TEMPLATE_LOW_BASIS,
+                            QWEN_SURROGATE_BASIS,
+                        }
+                                or estimate.fallback_reason == "qwen_template_unsupported_shape"):
+                            self.stop("model_request_invalid")
+                    input_tokens, basis = estimate.tokens, estimate.basis
                 elif (packet.get("model") != MODEL or type(cap) is not int
                     or not 1 <= cap <= 65536 or packet.get("stream") is not False
                     or packet.get("include_reasoning") is not True

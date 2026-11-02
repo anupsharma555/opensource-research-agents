@@ -21,6 +21,7 @@ from typing import Any, Callable, Mapping
 
 from ora.agents.capabilities import content_hash
 from ora.agents.json_shapes import finite_json
+from ora.models.profiles import model_quota_scope
 from ora.state import StateConflict, StateError, StateStore
 from ora.state.source_lineage import inherited_public_source
 from ora.state.store import Transaction, canonical
@@ -60,9 +61,13 @@ class WorkSpec:
     call_version: int | None = None
     invitation_id: str | None = None
     review: bool = False
+    output_reservation_tokens: int | None = None
 
     def intent(self) -> dict:
-        return json.loads(canonical(asdict(self)))
+        body = asdict(self)
+        if self.output_reservation_tokens is None:
+            body.pop("output_reservation_tokens")
+        return json.loads(canonical(body))
 
 
 @dataclass(frozen=True)
@@ -77,6 +82,13 @@ class WorkResult:
     cached_tokens: int = 0
     retry_after: float = 0
     rate_scope: str | None = None
+    used_output_tokens: int | None = None
+
+    def intent(self) -> dict:
+        body = asdict(self)
+        if self.used_output_tokens is None:
+            body.pop("used_output_tokens")
+        return json.loads(canonical(body))
 
 
 class ConcurrentExecutor:
@@ -141,6 +153,10 @@ class ConcurrentExecutor:
             raise StateError("Work needs exact mission, actor, handler and attempt identities")
         if spec.kind != "model" and spec.estimated_tokens:
             raise StateError("Only model work reserves tokens")
+        if spec.output_reservation_tokens is not None and (
+                spec.kind != "model" or type(spec.output_reservation_tokens) is not int
+                or spec.output_reservation_tokens < 1):
+            raise StateError("Only model work reserves a positive output cap")
         actor = tx.get("agent_instance", spec.actor_id, version=1)
         if (
             actor is None
@@ -195,6 +211,54 @@ class ConcurrentExecutor:
                 raise StateConflict("Work source copies differ from the pinned call manifest")
         elif spec.call_version is not None:
             raise StateError("Call version requires a call ID")
+        if spec.handler_id == "mission-model" and spec.output_reservation_tokens is not None:
+            run = tx.get("mission_run", spec.run_id)
+            intent = tx.get("model_request_intent",
+                            f"model-intent:{spec.call_id}:{spec.call_version}")
+            saved = intent["body"] if intent else {}
+            blob = saved.get("blob")
+            model = config["body"].get("model_id")
+            settings = config["body"].get("settings")
+            try:
+                expected_scope = model_quota_scope(saved.get("quota_domain"), model)
+            except (ValueError, TypeError) as exc:
+                raise StateConflict("Output reservation lacks a supported model scope") from exc
+            if (run is None or run["body"].get("agent_model_binding_version") != 1
+                    or call is None or call["body"].get("model_id") != model
+                    or not isinstance(settings, dict)
+                    or call["body"].get("settings") != settings
+                    or not isinstance(model, str)
+                    or saved.get("schema") != "ora.model_request_intent.v1"
+                    or saved.get("call_ref") != {"kind": "agent_call", "id": spec.call_id,
+                                                   "version": spec.call_version}
+                    or saved.get("configuration_ref") != spec.configuration_ref
+                    or saved.get("configuration_sha256") !=
+                    config["body"].get("configuration_sha256")
+                    or saved.get("credential_profile") != settings.get("credential_profile")
+                    or saved.get("quota_domain") != settings.get("quota_domain")
+                    or any(saved.get(key) != value for key, value in (
+                        ("mission_id", spec.mission_id),
+                        ("task_id", spec.proposal_ref["id"]),
+                        ("instance_id", spec.actor_id),
+                        ("attempt_id", spec.attempt_id),
+                    ))
+                    or not isinstance(blob, dict)
+                    or blob.get("sha256") != saved.get("request_sha256")
+                    or type(blob.get("size")) is not int
+                    or spec.quota_scopes != (expected_scope,)):
+                raise StateConflict("Output reservation differs from pinned model request")
+            try:
+                raw = self.store.read_blob(saved["request_sha256"])
+                request = json.loads(raw)
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                raise StateConflict("Pinned model request bytes are unavailable") from exc
+            if (len(raw) != blob["size"]
+                    or hashlib.sha256(raw).hexdigest() != saved["request_sha256"]
+                    or not isinstance(request, dict)
+                    or request.get("model") != model
+                    or request.get("max_completion_tokens") !=
+                    spec.output_reservation_tokens):
+                raise StateConflict("Output reservation differs from pinned model request")
         proposal = require_ref(tx, spec.mission_id, spec.proposal_ref)
         if proposal["kind"] != ProposalBoard.KIND or proposal["body"].get("status") != "open":
             raise StateConflict("Work proposal is not open at its pinned version")
@@ -371,6 +435,7 @@ class ConcurrentExecutor:
                     call_id=spec.call_id,
                     budget_version=spec.configuration_ref["id"],
                     request_token_estimate=request_estimate,
+                    output_reservation_tokens=spec.output_reservation_tokens,
                 )
             elif capacity["phase"] not in {"queued", "waiting"}:
                 continue
@@ -448,7 +513,7 @@ class ConcurrentExecutor:
                 result = await result
         if not isinstance(result, WorkResult):
             raise StateError("Registered callback must return WorkResult")
-        finite_json(json.loads(canonical(asdict(result))))
+        finite_json(result.intent())
         return result
 
     @staticmethod
@@ -509,6 +574,55 @@ class ConcurrentExecutor:
         ) or result.used_tokens != total:
             raise StateConflict("Callback usage differs from the saved provider receipt")
         return observed
+
+    @staticmethod
+    def _output_usage_tx(
+        tx: Transaction, spec: WorkSpec, result: WorkResult | None,
+        model_receipt: dict | None = None,
+    ) -> int | None:
+        """Charge exact saved completion usage for newly output-bound model work."""
+        if spec.output_reservation_tokens is None:
+            if result is not None and result.used_output_tokens is not None:
+                raise StateConflict("Legacy work has no output reservation")
+            return None
+        receipt = model_receipt
+        if receipt is None and spec.handler_id == "mission-figure" and result is not None:
+            pointers = [pointer for pointer in result.output_refs
+                        if isinstance(pointer, dict)
+                        and pointer.get("kind") == "figure_response_receipt"]
+            if len(pointers) == 1:
+                receipt = require_ref(tx, spec.mission_id, pointers[0])
+                body = receipt["body"]
+                intent = require_ref(tx, spec.mission_id, body.get("intent_ref"))
+                if (body.get("schema") != "ora.figure_response_receipt.v1"
+                        or intent["kind"] != "figure_request_intent"
+                        or intent["body"].get("operation_id") != spec.work_id
+                        or body.get("operation_id") != spec.work_id
+                        or body.get("request_sha256") != intent["body"].get("request_sha256")
+                        or any(body.get(key) != value or intent["body"].get(key) != value
+                               for key, value in (("mission_id", spec.mission_id),
+                                                  ("run_id", spec.run_id),
+                                                  ("actor_id", spec.actor_id),
+                                                  ("task_id", spec.proposal_ref["id"])))):
+                    raise StateConflict("Figure completion usage lacks exact work lineage")
+            elif pointers:
+                raise StateConflict("Figure work needs one exact response receipt")
+        if receipt is not None:
+            usage = receipt["body"].get("usage")
+            count = usage.get("completion_tokens") if type(usage) is dict else None
+            total = usage.get("total_tokens") if type(usage) is dict else None
+            if (count is not None and (type(count) is not int or count < 0)
+                    or result is not None and result.used_tokens != total
+                    or result is not None and result.used_output_tokens is not None
+                    and result.used_output_tokens != count):
+                raise StateConflict("Completion usage differs from exact provider receipt")
+            return count
+        if result is not None and result.used_output_tokens is not None:
+            if (spec.handler_id == "mission-figure"
+                    and result.used_output_tokens == 0 and result.used_tokens == 0):
+                return 0  # A locally completed no-provider figure branch.
+            raise StateConflict("Output usage needs an exact saved response receipt")
+        return None
 
     @staticmethod
     def _saved_model_receipt_tx(tx: Transaction, spec: WorkSpec) -> dict | None:
@@ -626,6 +740,27 @@ class ConcurrentExecutor:
         call = tx.get("agent_call", spec.call_id, spec.call_version)
         if not all((intent, marker, call)):
             return None
+        binding_version = run["body"].get("agent_model_binding_version")
+        if binding_version is None and spec.output_reservation_tokens is None:
+            expected_scopes = (intent["body"].get("quota_domain"),)
+        elif binding_version == 1 and spec.output_reservation_tokens is not None:
+            config = tx.get(**spec.configuration_ref)
+            model = call["body"].get("model_id")
+            if (config is None or config["body"].get("model_id") != model
+                    or type(model) is not str):
+                return None
+            try:
+                request_body = json.loads(self.store.read_blob(
+                    intent["body"]["blob"]["sha256"]))
+                expected_scopes = (model_quota_scope(intent["body"]["quota_domain"], model),)
+            except (KeyError, TypeError, ValueError, OSError):
+                return None
+            if (request_body.get("model") != model
+                    or request_body.get("max_completion_tokens") !=
+                    spec.output_reservation_tokens):
+                return None
+        else:
+            return None
         call_ref = {"kind": "agent_call", "id": spec.call_id,
                     "version": spec.call_version}
         intent_body, marker_body, response = (
@@ -663,7 +798,7 @@ class ConcurrentExecutor:
                 ("credential_profile", intent_body.get("credential_profile")),
                 ("quota_domain", intent_body.get("quota_domain")),
             ))
-            or intent_body.get("quota_domain") not in spec.quota_scopes
+            or spec.quota_scopes != expected_scopes
             or (body.get("request_token_estimate") or {}).get("intent_ref") not in (None, ref(intent))
             or (body.get("request_token_estimate") or {}).get("request_sha256") not in (None, request_sha)
         ):
@@ -705,6 +840,9 @@ class ConcurrentExecutor:
                 if exact is None:
                     return {"reconciled": False}
                 current_work, current_cap, receipt, total = exact
+                used_output_tokens = self._output_usage_tx(
+                    tx, spec, WorkResult(used_tokens=total), receipt,
+                )
                 cap_body = current_cap["body"]
                 generation = cap_body["generation"]
                 observation_id = _id(
@@ -715,12 +853,14 @@ class ConcurrentExecutor:
                 if prior is not None:
                     observation_id = prior["id"]
                     observation_body = {**prior["body"], "capacity_reconciled": True}
+                    if used_output_tokens is not None:
+                        observation_body["used_output_tokens"] = used_output_tokens
                     observation = tx.put(
                         "executor_unaccepted_result", observation_id, observation_body,
                         expected_version=prior["version"],
                     )
                 else:
-                    observation = tx.put("executor_unaccepted_result", observation_id, {
+                    observation_body = {
                         "mission_id": spec.mission_id, "work_id": spec.work_id,
                         "proposal_ref": spec.proposal_ref,
                         "configuration_ref": spec.configuration_ref,
@@ -735,7 +875,11 @@ class ConcurrentExecutor:
                         "external_effect": "known", "used_tokens": total,
                         "cached_tokens": 0, "capacity_reconciled": True,
                         "created_at": self.store.clock(),
-                    })
+                    }
+                    if used_output_tokens is not None:
+                        observation_body["used_output_tokens"] = used_output_tokens
+                    observation = tx.put("executor_unaccepted_result", observation_id,
+                                         observation_body)
                 now = self.store.clock()
                 claimed = tx.put("capacity_operation", current_cap["id"], {
                     **cap_body, "phase": "uncertain", "owner": self.owner,
@@ -747,6 +891,7 @@ class ConcurrentExecutor:
                     tx, self._capacity_id(spec), self.owner,
                     claimed["body"]["generation"], outcome="known_unaccepted",
                     output_ref=observation_id, used_tokens=total,
+                    used_output_tokens=used_output_tokens,
                 )
                 tx.put(self.KIND, current_work["id"], {
                     **current_work["body"], "phase": "result_unaccepted",
@@ -1009,7 +1154,7 @@ class ConcurrentExecutor:
         Only the current capacity owner may release its reservation. An old
         callback can still preserve its observation for later reconciliation.
         """
-        result_data = json.loads(canonical(asdict(result))) if result else None
+        result_data = result.intent() if result else None
         observation_id = _id("executor-unaccepted:", [spec.mission_id, spec.work_id, generation])
         request = {
             "spec": spec.intent(),
@@ -1087,6 +1232,10 @@ class ConcurrentExecutor:
                 or (used_tokens is not None and cached_tokens > used_tokens)
             ):
                 cached_tokens = 0
+            try:
+                used_output_tokens = self._output_usage_tx(tx, spec, result, receipt)
+            except (StateConflict, StateError, KeyError, TypeError):
+                used_output_tokens = None  # Preserve the output reservation.
             cap_record = tx.get("capacity_operation", self._capacity_id(spec))
             cap_body = cap_record["body"] if cap_record else {}
             current_owner = (
@@ -1096,10 +1245,7 @@ class ConcurrentExecutor:
                 and cap_body.get("lease_until", 0) > self.store.clock()
             )
             reconciled = bool(known and current_owner)
-            observation = tx.put(
-                "executor_unaccepted_result",
-                observation_id,
-                {
+            observation_body = {
                     "mission_id": spec.mission_id,
                     "work_id": spec.work_id,
                     "proposal_ref": spec.proposal_ref,
@@ -1120,7 +1266,13 @@ class ConcurrentExecutor:
                     "cached_tokens": cached_tokens,
                     "capacity_reconciled": reconciled,
                     "created_at": self.store.clock(),
-                },
+                }
+            if used_output_tokens is not None:
+                observation_body["used_output_tokens"] = used_output_tokens
+            observation = tx.put(
+                "executor_unaccepted_result",
+                observation_id,
+                observation_body,
             )
             observation_ref = ref(observation)
             self.traces.append_tx(
@@ -1151,11 +1303,13 @@ class ConcurrentExecutor:
                         tx, self._capacity_id(spec), self.owner, generation,
                         outcome="known_unaccepted", output_ref=observation_id,
                         used_tokens=used_tokens, cached_tokens=cached_tokens,
+                        used_output_tokens=used_output_tokens,
                     )
                 else:
                     self.capacity.record_unaccepted_tx(
                         tx, self._capacity_id(spec), self.owner, generation,
                         used_tokens=used_tokens, cached_tokens=cached_tokens,
+                        used_output_tokens=used_output_tokens,
                         output_ref=observation_id,
                     )
             updated_work = tx.put(
@@ -1267,7 +1421,7 @@ class ConcurrentExecutor:
         accounted_observation_ref: dict | None = None,
         validate_current_tx: Callable[[Transaction], None] | None = None,
     ) -> dict:
-        result_data = json.loads(canonical(asdict(result)))
+        result_data = result.intent()
         result_hash = hashlib.sha256(canonical(result_data).encode()).hexdigest()
         artifact_id = _id("executor-artifact:", [spec.mission_id, spec.work_id])
         receipt_id = _id("executor-receipt:", [spec.mission_id, spec.work_id])
@@ -1312,6 +1466,7 @@ class ConcurrentExecutor:
                 or self._model_receipt_effect(model_receipt) != "known"
             ):
                 raise StateConflict("Callback completion differs from saved model outcome")
+            used_output_tokens = self._output_usage_tx(tx, spec, result, model_receipt)
             capacity_record = tx.get("capacity_operation", self._capacity_id(spec))
             capacity_body = capacity_record["body"]
             now = self.store.clock()
@@ -1350,10 +1505,7 @@ class ConcurrentExecutor:
             for pointer in result.output_refs:
                 source = require_ref(tx, spec.mission_id, pointer)
                 tx.link(artifact, source, "derived_from")
-            receipt = tx.put(
-                "executor_receipt",
-                receipt_id,
-                {
+            receipt_body = {
                     "mission_id": spec.mission_id,
                     "work_id": spec.work_id,
                     "artifact_ref": ref(artifact),
@@ -1363,7 +1515,13 @@ class ConcurrentExecutor:
                     "result_sha256": result_hash,
                     "handler_version": spec.handler_version,
                     "timing": timing,
-                },
+                }
+            if used_output_tokens is not None:
+                receipt_body["used_output_tokens"] = used_output_tokens
+            receipt = tx.put(
+                "executor_receipt",
+                receipt_id,
+                receipt_body,
             )
             pointers = [ref(artifact), ref(receipt)]
             for index, message in enumerate(result.messages):
@@ -1424,6 +1582,7 @@ class ConcurrentExecutor:
                     tx, self._capacity_id(spec), self.owner, cap["generation"],
                     outcome="completed", output_ref=artifact_id,
                     used_tokens=result.used_tokens, cached_tokens=result.cached_tokens,
+                    used_output_tokens=used_output_tokens,
                 )
             else:
                 self.capacity.settle_tx(
@@ -1433,6 +1592,7 @@ class ConcurrentExecutor:
                     cap["generation"],
                     used_tokens=result.used_tokens,
                     cached_tokens=result.cached_tokens,
+                    used_output_tokens=used_output_tokens,
                     outcome="completed",
                     output_ref=artifact_id,
                 )

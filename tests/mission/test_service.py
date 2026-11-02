@@ -25,7 +25,8 @@ from ora.mission.service import (
     _visible_title_identity,
 )
 from ora.models import GroqSelectedAdapter, ModelSession
-from ora.models.token_estimate import TOKENIZER_BASIS, estimate_request_tokens
+from ora.models.profiles import model_quota_scope
+from ora.models.token_estimate import LEGACY_BASIS, TOKENIZER_BASIS, estimate_request_tokens
 from ora.retrieval.providers import HTTPResult
 from ora.state import StateStore
 
@@ -99,10 +100,21 @@ def tool(name: str, arguments: dict, index: int) -> Response:
 def service(tmp_path: Path, monkeypatch, transport) -> MissionService:
     monkeypatch.setenv("GROQ_API_KEY", "synthetic-token")
     store = StateStore(tmp_path)
-    session = ModelSession(store, ROOT, adapter=GroqSelectedAdapter(ROOT, transport=transport))
-    return MissionService(
+    fixture_errors = []
+
+    def checked_transport(*args, **kwargs):
+        try:
+            return transport(*args, **kwargs)
+        except (AssertionError, KeyError, pytest.fail.Exception) as exc:
+            fixture_errors.append(exc)
+            raise
+
+    session = ModelSession(store, ROOT, adapter=GroqSelectedAdapter(ROOT, transport=checked_transport))
+    host = MissionService(
         ROOT, tmp_path, model_session=session, execution_mode="offline_test", start_supervisor=False
     )
+    host._fixture_transport_errors = fixture_errors
+    return host
 
 
 def serialized_peer_name(packet: dict, names=("Sage", "Mxra")) -> str:
@@ -118,7 +130,11 @@ def serialized_peer_name(packet: dict, names=("Sage", "Mxra")) -> str:
 
 def drain(host: MissionService, run_id: str, limit: int = 12) -> None:
     for _ in range(limit * 20):
+        if errors := getattr(host, "_fixture_transport_errors", []):
+            raise errors[0]
         changed, wake = host._drive_run(host._run(run_id))
+        if errors := getattr(host, "_fixture_transport_errors", []):
+            raise errors[0]
         if host._run(run_id)["body"]["status"] == "completed":
             return
         if not changed:
@@ -567,13 +583,14 @@ def test_verified_distinct_quota_domains_do_not_share_headers_or_reservations(
             for item in host.store.records("capacity_operation")
             if item["body"].get("kind") == "model"
         }
-        assert scopes == {("groq-primary-test",), ("groq-backup-test",)}
+        assert scopes == {(model_quota_scope("groq-primary-test", MODEL),),
+                          (model_quota_scope("groq-backup-test", MODEL),)}
         receipts = host.store.records("model_response_receipt")
         assert {item["body"]["quota_domain"] for item in receipts} == {
             "groq-primary-test", "groq-backup-test",
         }
-        assert host.store.get("capacity_quota", "groq-primary-test")
-        assert host.store.get("capacity_quota", "groq-backup-test")
+        assert host.store.get("capacity_quota", model_quota_scope("groq-primary-test", MODEL))
+        assert host.store.get("capacity_quota", model_quota_scope("groq-backup-test", MODEL))
     finally:
         host.close()
 
@@ -807,7 +824,7 @@ def test_next_model_turn_waits_for_observed_token_reset_without_a_429(tmp_path, 
         if item["body"]["rate_headers"].get("x-ratelimit-remaining-tokens") == "1"
     ]
     assert len(rate_receipts) == 1
-    assert host.store.get("capacity_quota", "groq-selected")["body"]["tokens_reset_at"] > 0
+    assert host.store.get("capacity_quota", model_quota_scope("groq-selected", MODEL))["body"]["tokens_reset_at"] > 0
     model_reservations = [
         item["body"]["estimated_tokens"]
         for item in host.store.records("capacity_operation")
@@ -848,7 +865,7 @@ def test_fast_peer_next_model_turn_proceeds_while_sibling_call_is_held(tmp_path,
     )
     try:
         host.capacity.observe_headers(
-            "groq-selected", remaining_requests=100, remaining_tokens=50000,
+            model_quota_scope("groq-selected", MODEL), remaining_requests=100, remaining_tokens=50000,
             token_limit=50000, reset_after=60,
             observation_id="known-parallel-headroom",
         )
@@ -2415,7 +2432,7 @@ def test_explicit_peer_wait_resumes_for_answer_review(tmp_path, monkeypatch):
 
     host = service(tmp_path, monkeypatch, transport)
     host.capacity.observe_headers(
-        "groq-selected", remaining_requests=100, remaining_tokens=50000,
+        model_quota_scope("groq-selected", MODEL), remaining_requests=100, remaining_tokens=50000,
         token_limit=50000, reset_after=60,
         observation_id="peer-wait-parallel-headroom",
     )
@@ -2751,8 +2768,19 @@ def test_late_peer_request_reopens_recipient_and_requester_reviews_answer(tmp_pa
             )
         if role == "Sage" and index == 3:
             context = json.loads(body["messages"][-1]["content"])
-            request_ref = context["request_dispositions"][0]["ref"]
-            answer_ref = context["request_dispositions"][0]["answer_refs"][0]
+            request = host.store.records("mail_request")[0]
+            answer_ref = request["body"]["answer_refs"][-1]
+            preview = next(card for card in context["peer_answer_previews"]
+                           if card["request_ref"] == ref(request)
+                           and card["answer_ref"] == answer_ref)
+            request_ref = preview["request_ref"]
+            assert preview["by"] == host._control(receipt.run_id, "agent-critique")[
+                "body"
+            ]["actor_id"]
+            assert preview["report_ref"] == host.store.get(**answer_ref)["body"][
+                "artifact_ref"
+            ]
+            assert preview["report"]["body"] == "A limitation remains."
             inspected.append((request_ref, answer_ref))
             return tool(
                 "review_peer_answer",
@@ -2774,6 +2802,19 @@ def test_late_peer_request_reopens_recipient_and_requester_reviews_answer(tmp_pa
             agent_ids=["agent-synthesis", "agent-critique"],
         )
     )
+    sage = host._control(receipt.run_id, "agent-synthesis")
+    host._update_control(sage, phase="retry_at", retry_at=time.time() + 3600,
+                         waiting_reason="Fixture waits for the earlier peer contribution")
+    deadline = time.monotonic() + 10
+    while host._control(receipt.run_id, "agent-critique")["body"].get("report_ref") is None:
+        host._drive_run(host._run(receipt.run_id))
+        if errors := host._fixture_transport_errors:
+            raise errors[0]
+        if time.monotonic() >= deadline:
+            raise AssertionError("Earlier peer contribution was not saved")
+        time.sleep(.01)
+    host._update_control(host._control(receipt.run_id, "agent-synthesis"),
+                         phase="ready_model", retry_at=None, waiting_reason=None)
     drain(host, receipt.run_id, limit=24)
     request = host.store.records("mail_request")[0]
     assert request["body"]["status"] == "answered"
@@ -2815,12 +2856,16 @@ def test_partly_answered_peer_request_gets_second_answer_and_review(tmp_path, mo
             )
         if role == "Sage" and index in {3, 5}:
             context = json.loads(body["messages"][-1]["content"])
-            request = context["request_dispositions"][0]
+            request = host.store.records("mail_request")[0]
+            answer_ref = request["body"]["answer_refs"][-1]
+            preview = next(card for card in context["peer_answer_previews"]
+                           if card["answer_ref"] == answer_ref)
+            assert preview["request_ref"] == ref(request)
             return tool(
                 "review_peer_answer",
                 {
-                    "request_id": request["ref"]["id"],
-                    "answer_id": request["answer_refs"][-1]["id"],
+                    "request_id": preview["request_ref"]["id"],
+                    "answer_id": preview["answer_ref"]["id"],
                     "disposition": "partly_answered" if index == 3 else "answered",
                     "reason": "Comparator still needed" if index == 3 else "Comparator resolved",
                 },
@@ -2869,14 +2914,18 @@ def test_continued_optional_request_wakes_completed_peer_without_reopening_root(
                     },
                     2,
                 )
-            dispositions = context.get("request_dispositions", [])
-            if dispositions and dispositions[0]["status"] == "awaiting_review":
-                pending = dispositions[0]
+            requests = host.store.records("mail_request")
+            if requests and requests[0]["body"]["status"] == "awaiting_review":
+                pending = next(card for card in [
+                    *context.get("peer_answer_previews", []),
+                    *context.get("peer_answer_review_cues", []),
+                ] if card["request_ref"] == ref(requests[0])
+                    and card["answer_ref"] == requests[0]["body"]["answer_refs"][-1])
                 return tool(
                     "review_peer_answer",
                     {
-                        "request_id": pending["ref"]["id"],
-                        "answer_id": pending["answer_refs"][-1]["id"],
+                        "request_id": pending["request_ref"]["id"],
+                        "answer_id": pending["answer_ref"]["id"],
                         "disposition": "answered",
                         "reason": "Comparison addressed",
                     },
@@ -3281,14 +3330,14 @@ def test_429_without_provider_timing_waits_route_window_instead_of_busy_retry(
         )
     )
     deadline = time.monotonic() + 3
-    while time.monotonic() < deadline and host.store.get("capacity_quota", "groq-selected") is None:
+    while time.monotonic() < deadline and host.store.get("capacity_quota", model_quota_scope("groq-selected", MODEL)) is None:
         host._drive_run(host._run(receipt.run_id))
         time.sleep(0.01)
     assert len(invocations) == 1
-    quota = host.store.get("capacity_quota", "groq-selected")
+    quota = host.store.get("capacity_quota", model_quota_scope("groq-selected", MODEL))
     assert quota is not None
     assert quota["body"]["blocked_until"] - time.time() > 50
-    assert host.capacity.policy.quotas["groq-selected"].window_seconds == 60
+    assert host.capacity.policy.quotas[model_quota_scope("groq-selected", MODEL)].window_seconds == 60
 
 
 def test_restart_corrects_historical_8192_reservation_without_model_dispatch(
@@ -3317,6 +3366,9 @@ def test_restart_corrects_historical_8192_reservation_without_model_dispatch(
         attempt_id=spec.attempt_id, call_id=spec.call_id,
         budget_version=spec.configuration_ref["id"],
     )
+    intent = host.store.get("model_request_intent", f"model-intent:{spec.call_id}:{spec.call_version}")
+    saved_request = host.store.read_blob(intent["body"]["blob"]["sha256"])
+    exact_legacy_estimate = estimate_request_tokens(saved_request, basis=LEGACY_BASIS).tokens
 
     def historical(tx):
         current = tx.get("capacity_operation", cap_id)
@@ -3333,7 +3385,11 @@ def test_restart_corrects_historical_8192_reservation_without_model_dispatch(
     )
     corrected = resumed.capacity.get(cap_id)
     assert corrected["estimated_tokens_original"] == 8192
-    assert 0 < corrected["estimated_tokens"] < 8192
+    assert corrected["estimated_tokens"] == exact_legacy_estimate > 0
+    assert corrected["estimate_basis"] == "recovered_from_exact_saved_intent_bytes_v1"
+    assert corrected["estimate_intent_ref"] == ref(intent)
+    assert resumed.store.get("model_request_intent", intent["id"]) == intent
+    assert resumed.store.read_blob(intent["body"]["blob"]["sha256"]) == saved_request
     assert corrected["attempts"] == []
     assert resumed.store.records("model_response_receipt") == []
 
@@ -3855,29 +3911,55 @@ def test_model_can_page_its_exact_context_omissions(tmp_path, monkeypatch):
         requests.append(body)
         if len(requests) == 1:
             context = json.loads(body["messages"][-1]["content"])
+            assert context["omitted"]["count"] == 1
+            assert context["older_records"]["tool"] == "read_context_page"
+            assert "Synthetic archived observation." not in json.dumps(body["messages"])
             return tool(
                 "read_context_page",
                 {"inclusion_id": context["older_records"]["inclusion_id"], "cursor": 0, "limit": 5},
                 1,
             )
+        delivered = next(
+            json.loads(message["content"])
+            for message in body["messages"]
+            if message["role"] == "tool" and message.get("name") == "read_context_page"
+        )
+        assert delivered["items"][0]["ref"] == note
         return answer("The paged context was available by exact receipt.", 2)
 
     host = service(tmp_path, monkeypatch, transport)
-    receipt = host.start(
-        LiveStartRequest(
-            request_id="mission-context-page",
-            question="Review saved context",
-            agent_ids=["agent-synthesis"],
+    try:
+        monkeypatch.setattr(host, "_effective_input_budget", lambda _control: {
+            "observed_limit_tokens": 8000, "target_fraction": 0.70,
+            "basis": "qualification_imposed_limit",
+        })
+        receipt = host.start(
+            LiveStartRequest(
+                request_id="mission-context-page",
+                question="Review saved context",
+                agent_ids=["agent-synthesis"],
+            )
         )
-    )
-    drain(host, receipt.run_id)
-    assert len(requests) == 2
-    tool_result = host.store.records("context_tool_result")[0]
-    message = json.loads(host.store.read_blob(tool_result["body"]["blob"]["sha256"]))
-    result = json.loads(message["content"])
-    assert result["schema"] == "ora.context_omission_page.v2"
-    assert result["total"] == 0
-    assert host.state(receipt.run_id).snapshot.mission.status == "completed"
+        control = host._control(receipt.run_id, "agent-synthesis")
+        note = host.notes.write(
+            "context-page-note", mission_id=control["body"]["mission_id"],
+            actor_id=control["body"]["actor_id"],
+            task_ref=control["body"]["proposal_ref"], note_id="context-page-note",
+            category="hypothesis", text="Synthetic archived observation. " * 1000,
+        )
+        drain(host, receipt.run_id)
+        assert len(requests) == 2
+        tool_result = host.store.records("context_tool_result")[0]
+        message = json.loads(host.store.read_blob(tool_result["body"]["blob"]["sha256"]))
+        result = json.loads(message["content"])
+        assert result["schema"] == "ora.context_omission_page.v2"
+        assert result["total"] == 1
+        assert result["returned_count"] == 1
+        assert result["items"][0]["ref"] == note
+        assert result["items"][0]["summary"]["kind"] == "working_note"
+        assert host.state(receipt.run_id).snapshot.mission.status == "completed"
+    finally:
+        host.close()
 
 
 def test_agent_optional_branch_and_explicit_scope_disposition(tmp_path, monkeypatch):
@@ -4678,25 +4760,50 @@ def test_context_page_large_limit_uses_existing_inclusion_and_reports_effective_
         calls.append(body)
         if len(calls) == 1:
             context = json.loads(body["messages"][-1]["content"])
+            assert context["omitted"]["count"] == 1
+            assert context["older_records"]["tool"] == "read_context_page"
             return tool("read_context_page", {
                 "inclusion_id": context["older_records"]["inclusion_id"],
                 "cursor": 0, "limit": requested,
             }, 1)
+        delivered = next(
+            json.loads(message["content"])
+            for message in body["messages"]
+            if message["role"] == "tool" and message.get("name") == "read_context_page"
+        )
+        assert delivered["items"][0]["ref"] == note
         return answer("The exact context page was returned.", 2)
 
     host = service(tmp_path, monkeypatch, transport)
-    run = host.start(LiveStartRequest(
-        request_id=f"context-large-{requested}", question="Review saved context",
-        agent_ids=["agent-synthesis"],
-    ))
-    drain(host, run.run_id)
-    message = json.loads(host.store.read_blob(
-        host.store.records("context_tool_result")[0]["body"]["blob"]["sha256"]
-    ))
-    result = json.loads(message["content"])
-    assert result["requested_limit"] == requested
-    assert result["effective_limit"] == 20
-    assert result["next_cursor"] is None
+    try:
+        monkeypatch.setattr(host, "_effective_input_budget", lambda _control: {
+            "observed_limit_tokens": 8000, "target_fraction": 0.70,
+            "basis": "qualification_imposed_limit",
+        })
+        run = host.start(LiveStartRequest(
+            request_id=f"context-large-{requested}", question="Review saved context",
+            agent_ids=["agent-synthesis"],
+        ))
+        control = host._control(run.run_id, "agent-synthesis")
+        note = host.notes.write(
+            f"context-large-note-{requested}", mission_id=control["body"]["mission_id"],
+            actor_id=control["body"]["actor_id"],
+            task_ref=control["body"]["proposal_ref"],
+            note_id=f"context-large-note-{requested}", category="hypothesis",
+            text="Synthetic archived observation. " * 1000,
+        )
+        drain(host, run.run_id)
+        message = json.loads(host.store.read_blob(
+            host.store.records("context_tool_result")[0]["body"]["blob"]["sha256"]
+        ))
+        result = json.loads(message["content"])
+        assert result["requested_limit"] == requested
+        assert result["effective_limit"] == 20
+        assert result["total"] == result["returned_count"] == 1
+        assert result["items"][0]["ref"] == note
+        assert result["next_cursor"] is None
+    finally:
+        host.close()
 
 
 @pytest.mark.parametrize("policy_order", [(1, 2), (2, 1)])
@@ -4711,8 +4818,11 @@ def test_prepared_publish_schema_tracks_saved_participation_policy(
         ))
         if policy == 1:
             current = host._run(run.run_id)
+            legacy_body = {**current["body"], "participation_policy_version": 1}
+            legacy_body.pop("parallel_research_version")
+            legacy_body.pop("reader_action_purpose_tool_version")
             host._save("mission_run", run.run_id,
-                       {**current["body"], "participation_policy_version": 1},
+                       legacy_body,
                        mission_id=current["body"]["mission_id"])
         assert host._schedule_model(host._control(run.run_id, "agent-synthesis"))
         call = host.store.get(**host._control(run.run_id, "agent-synthesis")["body"]["call_ref"])
@@ -5001,8 +5111,11 @@ def test_legacy_policy_publishes_valid_contribution_without_inline_scope_upgrade
         agent_ids=["agent-synthesis"],
     ))
     current = host._run(run.run_id)
+    legacy_body = {**current["body"], "participation_policy_version": 1}
+    legacy_body.pop("parallel_research_version")
+    legacy_body.pop("reader_action_purpose_tool_version")
     host._save("mission_run", run.run_id,
-               {**current["body"], "participation_policy_version": 1},
+               legacy_body,
                mission_id=current["body"]["mission_id"])
     drain(host, run.run_id)
     assert host.store.records("report")[0]["body"]["body"] == "A bounded synthetic conclusion."

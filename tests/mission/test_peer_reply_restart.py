@@ -20,9 +20,11 @@ SOURCE_TEXT = "Synthetic source: the comparison has an unresolved measurement li
 SCOPE = "Use only the supplied synthetic observation and disclose its limits."
 
 
-def _drive_until(host, run_id: str, predicate) -> None:
+def _drive_until(host, run_id: str, predicate, *, transport_errors=None) -> None:
     for _ in range(500):
         host._drive_run(host._run(run_id))
+        if transport_errors:
+            raise AssertionError(f"Injected transport assertion: {transport_errors[0]}")
         if predicate():
             return
         time.sleep(.005)
@@ -38,7 +40,15 @@ def _last_tool(request: dict) -> tuple[str, dict]:
 
 def _disposition(request: dict) -> dict:
     index = json.loads(request["messages"][-1]["content"])
-    return index["request_dispositions"][0]
+    if index.get("request_dispositions"):
+        return index["request_dispositions"][0]
+    cues = index.get("peer_answer_review_cues", [])
+    assert len(cues) == 1 and cues[0]["action"] == "review_peer_answer"
+    cue = cues[0]
+    return {
+        "ref": cue["request_ref"], "status": "awaiting_review",
+        "answer_refs": [cue["answer_ref"]], "accepted_answer_ref": None,
+    }
 
 
 def _saved_tool_names(host) -> list[str]:
@@ -63,12 +73,13 @@ def test_unread_peer_reply_survives_clean_host_reopen_and_is_accepted(
     assert Path(ora.__file__).resolve().is_relative_to(ROOT / "src")
 
     turns = {"Sage": 0, "Mxra": 0}
+    transport_errors: list[str] = []
     captured: list[tuple[str, dict]] = []
     saved: dict = {}
     read_parts = []
     active_host = None
 
-    def transport(request, *, timeout):
+    def scripted_transport(request, *, timeout):
         body = json.loads(request.data)
         role = serialized_peer_name(body)
         turns[role] += 1
@@ -144,7 +155,14 @@ def test_unread_peer_reply_survives_clean_host_reopen_and_is_accepted(
             assert current["status"] in {"awaiting_review", "partial_awaiting_review"}
             assert current["answer_refs"] == [saved["answer_ref"]]
             index = json.loads(body["messages"][-1]["content"])
-            assert saved["answer_ref"] in index["request_answer_refs"]
+            if "request_answer_refs" in index:
+                assert saved["answer_ref"] in index["request_answer_refs"]
+            else:
+                cues = index["peer_answer_review_cues"]
+                assert len(cues) == 1
+                assert cues[0]["request_ref"] == current["ref"]
+                assert cues[0]["answer_ref"] == saved["answer_ref"]
+                assert cues[0]["read_request"]["id"] == saved["peer_report_ref"]["id"]
             assert any(
                 detail["type"] == "request_answer"
                 and detail["ref"] == saved["answer_ref"]
@@ -193,6 +211,13 @@ def test_unread_peer_reply_survives_clean_host_reopen_and_is_accepted(
             "the synthetic source cannot support a broader conclusion.", step,
         )
 
+    def transport(request, *, timeout):
+        try:
+            return scripted_transport(request, timeout=timeout)
+        except AssertionError as exc:
+            transport_errors.append(str(exc))
+            raise
+
     host = service(tmp_path, monkeypatch, transport)
     active_host = host
     try:
@@ -231,7 +256,7 @@ def test_unread_peer_reply_survives_clean_host_reopen_and_is_accepted(
         _drive_until(host, run.run_id, lambda: (
             turns["Sage"] == 3
             and bool(host._control(run.run_id, "agent-synthesis")["body"].get("wait_for"))
-        ))
+        ), transport_errors=transport_errors)
         requester = host._control(run.run_id, "agent-synthesis")
         assert requester["body"]["phase"] == "waiting"
         assert requester["body"]["wait_for"][0]["request_ref"]["id"] == saved["request_id"]
@@ -240,7 +265,7 @@ def test_unread_peer_reply_survives_clean_host_reopen_and_is_accepted(
         host._update_control(recipient, phase="ready_model", waiting_reason=None, retry_at=None)
         _drive_until(host, run.run_id, lambda: bool(
             host.store.get("mail_request", saved["request_id"])["body"]["answer_refs"]
-        ))
+        ), transport_errors=transport_errors)
         peer_answer = host.store.get("mail_request", saved["request_id"])["body"][
             "answer_refs"
         ][0]
@@ -323,7 +348,7 @@ def test_unread_peer_reply_survives_clean_host_reopen_and_is_accepted(
         assert len(resumed.store.records("report")) == 1
         _drive_until(resumed, saved["run_id"], lambda: (
             resumed._run(saved["run_id"])["body"]["status"] == "completed"
-        ))
+        ), transport_errors=transport_errors)
         requester = resumed._control(saved["run_id"], "agent-synthesis")
         assert requester["body"]["phase"] == "done"
         reviewed = resumed.store.get("mail_request", saved["request_id"])

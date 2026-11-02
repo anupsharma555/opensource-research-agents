@@ -38,7 +38,7 @@ def test_ordinary_action_explanation_is_saved_with_one_tool_execution(
         assert "consequential skill choices and actions" in instructions
         assert "skill activation/release" in instructions
         assert "Skip repetitive explanations" in instructions
-        communication_guidance = "Answer unanswered incoming requests when able"
+        communication_guidance = "Answer incoming requests when able"
         assert communication_guidance in instructions
         assert all(communication_guidance not in json.dumps(message)
                    for message in packet["messages"][1:])

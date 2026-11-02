@@ -30,8 +30,9 @@ def no_network(monkeypatch):
     assert attempts == []
 
 
+@pytest.mark.parametrize("search_path", ["shared", "legacy"])
 @pytest.mark.parametrize("held_stage", ["before_child_proposal", "before_child_work"])
-def test_search_child_cannot_escape_parent_cancel(tmp_path, monkeypatch, held_stage):
+def test_search_child_cannot_escape_parent_cancel(tmp_path, monkeypatch, held_stage, search_path):
     host = service(tmp_path, monkeypatch,
                    lambda *_args, **_kwargs: pytest.fail("No model request is expected"))
     release = threading.Event()
@@ -41,9 +42,21 @@ def test_search_child_cannot_escape_parent_cancel(tmp_path, monkeypatch, held_st
     thread = None
     try:
         run = host.start(LiveStartRequest(
-            request_id=f"search-child-{held_stage}", question="Synthetic search scope",
+            request_id=f"search-child-{search_path}-{held_stage}",
+            question="Synthetic search scope",
             agent_ids=["agent-synthesis"],
         ))
+        if search_path == "legacy":
+            saved_run = host._run(run.run_id)
+            historical = dict(saved_run["body"])
+            historical.pop("parallel_research_version")
+            historical.pop("reader_action_purpose_tool_version")
+            host.store.transact(
+                f"fixture:legacy-search:{held_stage}", {"run_id": run.run_id},
+                lambda tx: tx.put("mission_run", run.run_id, historical,
+                                  expected_version=saved_run["version"]),
+                mission_id=historical["mission_id"],
+            )
         control = host._control(run.run_id, "agent-synthesis")
         task = host.store.get("board_proposal", control["body"]["task_id"])
         config = host._configuration(control)
@@ -56,13 +69,15 @@ def test_search_child_cannot_escape_parent_cancel(tmp_path, monkeypatch, held_st
             lane=control["body"]["actor_id"], attempt_id=f"parent-search-{held_stage}",
         )
         operation_id = identity("web-search-", spec.mission_id, spec.work_id)
-        child_id = identity("web-query-", operation_id, 0, "exa")
+        if search_path == "legacy":
+            child_id = identity("web-query-", operation_id, 0, "exa")
 
         if held_stage == "before_child_proposal":
             original = host.board.propose
 
             def gate(operation_id, **kwargs):
-                if operation_id.startswith("web-propose:"):
+                prefix = "web-shared-propose:" if search_path == "shared" else "web-propose:"
+                if operation_id.startswith(prefix):
                     entered.set()
                     assert release.wait(10), "Held child proposal was not released"
                 return original(operation_id, **kwargs)
@@ -72,7 +87,8 @@ def test_search_child_cannot_escape_parent_cancel(tmp_path, monkeypatch, held_st
             original = host.executor.submit
 
             def gate(child):
-                if child.handler_id == "web-query":
+                handler = "web-shared-query" if search_path == "shared" else "web-query"
+                if child.handler_id == handler:
                     entered.set()
                     assert release.wait(10), "Held child work was not released"
                 return original(child)
@@ -92,13 +108,17 @@ def test_search_child_cannot_escape_parent_cancel(tmp_path, monkeypatch, held_st
         thread = threading.Thread(target=start_search, daemon=True)
         thread.start()
         assert entered.wait(10), "Search child did not reach controlled interleaving"
+        operation = host.store.get("web_search_operation", operation_id)
+        assert operation is not None
+        if search_path == "shared":
+            child_id = operation["body"]["items"][0]
         if held_stage == "before_child_work":
             assert host.store.get("board_proposal", child_id)["body"]["status"] == "open"
         else:
             assert host.store.get("board_proposal", child_id) is None
 
         receipt = host.cancel_branch(LiveBranchCancelRequest(
-            request_id=f"cancel-search-{held_stage}", run_id=run.run_id,
+            request_id=f"cancel-search-{search_path}-{held_stage}", run_id=run.run_id,
             task_id=task["id"], expected_task_version=task["version"],
             reason="Stop this exact synthetic search task",
         ))
@@ -118,18 +138,25 @@ def test_search_child_cannot_escape_parent_cancel(tmp_path, monkeypatch, held_st
                        lambda *_args, **_kwargs: pytest.fail("No model request is expected"))
     try:
         child = reopened.store.get("board_proposal", child_id)
-        if child is not None:
+        if search_path == "legacy" and child is not None:
             assert child["body"]["status"] == "cancelled"
-        assert not any(
-            work["body"]["spec"].get("work_id") == child_id
-            and work["body"].get("phase") == "pending"
-            for work in reopened.store.records("executor_work")
-        )
+        if search_path == "shared":
+            assert child is not None and child["body"]["status"] == "open"
+            assert child["body"]["branch_of"] is None
+        else:
+            assert not any(
+                work["body"]["spec"].get("work_id") == child_id
+                and work["body"].get("phase") == "pending"
+                for work in reopened.store.records("executor_work")
+            )
         before = [
             (item["id"], item["version"])
             for item in reopened.store.records("web_search_operation")
         ]
         asyncio.run(reopened.executor.run_ready(spec.mission_id))
+        if search_path == "shared":
+            assert reopened.store.get("web_shared_query_job", child_id)["body"][
+                "phase"] == "known_no_dispatch"
         for _ in range(3):
             reopened._drive_run(reopened._run(run.run_id))
         assert [

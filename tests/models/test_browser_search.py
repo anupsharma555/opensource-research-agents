@@ -67,6 +67,10 @@ def test_native_failed_generation_400_uses_descriptor_not_generated_arguments(
     assert outcome.response_sha256 == hashlib.sha256(raw).hexdigest()
     assert outcome.provider_error is not None
     assert set(outcome.provider_error) == {"type", "code", "message"}
+    assert outcome.failed_generation_status == "returned"
+    assert outcome.failed_generation == json.loads(raw)["error"]["failed_generation"]
+    assert outcome.executable_tool_calls == ()
+    assert outcome.failed_generation not in repr(outcome)
 
 
 def prepare(adapter: GroqSelectedAdapter, tools=(SEARCH, LOCAL), **kwargs):

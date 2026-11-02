@@ -164,7 +164,7 @@ describe('live review', () => {
     service.update(updated);
     expect((await screen.findAllByText('Mira returned a critique of the initial answer.', {}, { timeout: 3000 })).length).toBeGreaterThan(0);
     expect(replace).toHaveBeenCalledTimes(replacementsAfterNavigation);
-    expect(push).not.toHaveBeenCalled();
+    expect(push).toHaveBeenCalledTimes(1); // User navigation creates history; polling must not.
     expect(service.requests).toHaveLength(0);
   });
 
@@ -309,14 +309,14 @@ describe('live review', () => {
     updated.artifacts[0].body = 'Newly saved answer from the command.';
     let stateReads = 0;
     let resolveOldPoll: ((response: Response) => void) | null = null;
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path.startsWith('/api/live/state')) {
         stateReads += 1;
         if (stateReads === 2) return new Promise<Response>(resolve => { resolveOldPoll = resolve; });
         return Response.json(liveState(stateReads === 1 ? original : updated));
       }
-      if (path === '/api/live/start') return Response.json({ requestId: 'request-reused', runId: 'run-1', taskId: 'task-live', status: 'queued', reused: true }, { status: 202 });
+      if (path === '/api/live/start') return Response.json({ requestId: JSON.parse(String(init?.body)).requestId, runId: 'run-1', taskId: 'task-live', status: 'queued', reused: true }, { status: 202 });
       throw new Error(`Unexpected request ${path}`);
     }));
     const user = userEvent.setup();
@@ -475,6 +475,45 @@ describe('live review', () => {
     });
   });
 
+  it('starts an independent review with two available peers required', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn(async (_request: LiveStartRequest | LiveFollowupRequest) => {});
+    render(<LiveRequestForm agents={agents} snapshot={null} runId={null} retrievalRoutes={['publication-search']} receipt={null} receiptAgentIds={[]} submitting={false} error={null} onSubmit={onSubmit} />);
+    await user.click(screen.getByRole('button', { name: 'Independent review (2+)' }));
+    expect(screen.getByRole('checkbox', { name: /Sage.*Evidence synthesis/ })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /Mira.*Independent critique/ })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: "Wait for Sage's contribution before completing this request" })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: "Wait for Mira's contribution before completing this request" })).toBeChecked();
+    await user.type(screen.getByLabelText('Research question or follow-up'), 'Compare two synthetic interpretations.');
+    await user.click(screen.getByRole('button', { name: 'Start research' }));
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      agentIds: ['agent-synthesis', 'agent-critique'],
+      requiredAgentIds: ['agent-synthesis', 'agent-critique'],
+    });
+  });
+
+  it('keeps a requested review blocked when an earlier peer becomes unavailable', async () => {
+    const user = userEvent.setup();
+    const roster = [agents[0], { ...agents[1], availability: 'unavailable', unavailableReason: 'No current grant' }];
+    const onSubmit = vi.fn(async (_request: LiveStartRequest | LiveFollowupRequest) => {});
+    render(<LiveRequestForm agents={roster} snapshot={snapshot(1)} runId="run-1" parentAgentIds={agents.map(agent => agent.id)} parentRequiredAgentIds={agents.map(agent => agent.id)} receipt={null} receiptAgentIds={[]} submitting={false} error={null} onSubmit={onSubmit} />);
+    await user.click(screen.getByRole('button', { name: 'Follow up on saved work' }));
+    await user.type(screen.getByLabelText('Research question or follow-up'), 'Review the saved result.');
+    await user.selectOptions(screen.getByLabelText('Work to continue'), 'report-live-v1:1');
+    expect(screen.getByRole('button', { name: 'Independent review (2+)' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Independent review (2+)' })).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: /Mira.*Independent critique/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Submit follow-up' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Remove unavailable Mira from this request' }));
+    expect(screen.getByText(/Independent review needs at least two selected agents/)).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Submit follow-up' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Solo' }));
+    expect(screen.getByRole('button', { name: 'Submit follow-up' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Submit follow-up' }));
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ agentIds: ['agent-synthesis'] });
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty('requiredAgentIds');
+  });
+
   it('shows roster model and saved configuration without selecting an unavailable peer', async () => {
     const user = userEvent.setup();
     const roster = [
@@ -521,6 +560,31 @@ describe('live review', () => {
     expect(screen.getByRole('button', { name: 'Submit follow-up' })).toBeEnabled();
     expect(onSubmit).not.toHaveBeenCalled();
     window.sessionStorage.removeItem('atlas-live-draft:test-draft-workspace');
+  });
+
+  it('restores a review draft and replays its frozen request when a peer later becomes unavailable', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn(async (_request: LiveStartRequest | LiveFollowupRequest) => {});
+    const workspaceId = 'review-draft-workspace';
+    const props = { agents, snapshot: null, runId: null, workspaceId, retrievalRoutes: ['publication-search'], receipt: null, receiptAgentIds: [], submitting: false, error: null, onSubmit };
+    window.sessionStorage.removeItem(`atlas-live-draft:${workspaceId}`);
+    const view = render(<LiveRequestForm {...props} />);
+    await user.click(screen.getByRole('button', { name: 'Independent review (2+)' }));
+    await user.type(screen.getByLabelText('Research question or follow-up'), 'Review synthetic evidence independently.');
+    view.unmount();
+    const restored = render(<LiveRequestForm {...props} />);
+    expect(screen.getByRole('button', { name: 'Independent review (2+)' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('checkbox', { name: "Wait for Mira's contribution before completing this request" })).toBeChecked();
+    await user.click(screen.getByRole('button', { name: 'Start research' }));
+    const first = onSubmit.mock.calls[0][0];
+    expect(first).toMatchObject({ agentIds: ['agent-synthesis', 'agent-critique'], requiredAgentIds: ['agent-synthesis', 'agent-critique'] });
+    expect(JSON.parse(window.sessionStorage.getItem(`atlas-live-draft:${workspaceId}`)!).pendingRequest).toEqual(first);
+    restored.unmount();
+    render(<LiveRequestForm {...props} agents={[agents[0], { ...agents[1], availability: 'unavailable' }]} error="Synthetic response lost" />);
+    expect(screen.getByRole('button', { name: 'Retry same request' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Retry same request' }));
+    expect(onSubmit.mock.calls[1][0]).toEqual(first);
+    window.sessionStorage.removeItem(`atlas-live-draft:${workspaceId}`);
   });
 
   it('exchanges the launch token once before state reads, including in Strict Mode', async () => {
@@ -675,5 +739,10 @@ describe('live review', () => {
     expect(screen.queryByText('Request response unconfirmed')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Retry same request' })).not.toBeInTheDocument();
     expect(requests).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: 'Research review' }));
+    await user.click(await screen.findByText('Technical run details', { exact: true }));
+    const commandCounts = screen.getByText('Viewer commands / response errors').parentElement!;
+    expect(commandCounts).toHaveTextContent('1 / 0');
+    expect(screen.getByText(/acceptance response, not research completion/)).toBeVisible();
   });
 });

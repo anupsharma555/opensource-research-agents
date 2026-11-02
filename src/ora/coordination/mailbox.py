@@ -344,8 +344,13 @@ class PeerMailbox:
         reviewer_id: str, answer_id: str, disposition: str,
         reason: str, requester_offline: bool = False,
         availability_ref: dict | None = None,
+        expected_request_version: int | None = None,
+        expected_answer_version: int | None = None,
     ) -> dict:
-        request = {key: value for key, value in locals().items() if key != "self"}
+        request = {key: value for key, value in locals().items()
+                   if key != "self" and (key not in {
+                       "expected_request_version", "expected_answer_version"
+                   } or value is not None)}
 
         def action(tx: Transaction) -> dict:
             reviewer = require_actor(tx, mission_id, reviewer_id)
@@ -353,6 +358,14 @@ class PeerMailbox:
             answer = tx.get("mail_answer", answer_id)
             if pending is None or answer is None or pending["body"]["mission_id"] != mission_id:
                 raise MailError("Request or answer is unavailable")
+            if (expected_request_version is not None
+                    and (type(expected_request_version) is not int
+                         or pending["version"] != expected_request_version)):
+                raise StateConflict("Request version changed before peer review")
+            if (expected_answer_version is not None
+                    and (type(expected_answer_version) is not int
+                         or answer["version"] != expected_answer_version)):
+                raise StateConflict("Answer version changed before peer review")
             if answer["body"]["request_id"] != request_id:
                 raise MailError("Answer belongs to another request")
             if ref(answer) not in pending["body"]["answer_refs"]:

@@ -3206,7 +3206,7 @@ def test_source_fit_recovery_separates_saved_read_from_current_delivery(tmp_path
     }
     assert delivered["returned_chars"] == 800
     assert "selection_mode=replace" in delivered["next_action"]
-    assert "source-linked notes" in delivered["next_action"]
+    assert "read_context_page is archive-only" in delivered["next_action"]
     assert "A" * 100 not in canonical(pack.messages)
     assert pack.messages[-3]["tool_calls"][0]["id"] == pack.messages[-2]["tool_call_id"]
     assert store.read_blob(store.get(**result_ref)["body"]["blob"]["sha256"]) == original

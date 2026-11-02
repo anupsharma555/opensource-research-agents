@@ -13,7 +13,7 @@ from ora.state import StateConflict
 from tests.mission.test_service import service
 
 
-def test_old_source_free_preparation_reuses_call_with_fresh_inventory_operation(
+def test_old_source_free_preparation_keeps_old_call_and_fresh_inventory_operation(
     tmp_path, monkeypatch
 ):
     def no_provider_call(_request, *, timeout):
@@ -54,6 +54,7 @@ def test_old_source_free_preparation_reuses_call_with_fresh_inventory_operation(
         with pytest.raises(ContextOverflow, match="Synthetic pre-intent"):
             host._schedule_model(control)
         budget = host.store.get("mission_call_budget", call_id)
+        old_call = host.store.get("agent_call", call_id)
         assert budget["body"]["source_turn_mode"] == "source_free_recovery"
         assert budget["body"]["packer_version"] == "ora.working_context.packer.v21"
         assert host.store.get("agent_attempt", attempt_id)["body"]["status"] == "running"
@@ -84,9 +85,24 @@ def test_old_source_free_preparation_reuses_call_with_fresh_inventory_operation(
         assert resumed._schedule_model(recovered)
         pending = resumed._control(run.run_id, "agent-synthesis")
         assert pending["body"]["phase"] == "pending_model"
-        assert pending["body"]["call_ref"]["id"] == call_id
-        assert resumed.store.get("model_request_intent", f"model-intent:{call_id}:1")
-        latest_budget = resumed.store.get("mission_call_budget", call_id)
+        next_call_id = pending["body"]["call_ref"]["id"]
+        assert next_call_id != call_id  # A new exact preview does not overwrite the old call.
+        assert resumed.store.get("agent_call", call_id) == old_call
+        new_call = resumed.store.get("agent_call", next_call_id)
+        assert pending["body"]["call_ref"] == ref(new_call)
+        # This fixture happens to retain the same attached IDs; a fresh call
+        # still keeps the old pre-intent budget and operation lineage immutable.
+        assert new_call["body"]["exposed_tools"] == old_call["body"]["exposed_tools"]
+        assert resumed.store.get("model_request_intent", f"model-intent:{call_id}:1") is None
+        new_intent = resumed.store.get("model_request_intent", f"model-intent:{next_call_id}:1")
+        assert new_intent
+        assert len(resumed.store.records("model_request_intent")) == 1
+        latest_budget = resumed.store.get("mission_call_budget", next_call_id)
+        assert latest_budget["body"]["exposed_tool_ids"] == new_call["body"]["exposed_tools"]
+        assert latest_budget["body"]["exact_complete_request_sha256"] == (
+            new_intent["body"]["request_sha256"]
+        )
+        assert resumed.store.get("mission_call_budget", call_id) == budget
         assert latest_budget["body"]["packer_version"] == old_packer
         assert latest_budget["body"]["source_turn_mode"] == "source_free_recovery"
         current_inventory = resumed.store.get(**latest_budget["body"]["source_inventory_ref"])

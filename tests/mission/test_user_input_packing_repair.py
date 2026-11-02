@@ -22,9 +22,28 @@ def _until(host, run_id, predicate, *, seconds=4):
     raise AssertionError("Synthetic run did not reach its expected saved boundary")
 
 
+def _analysis_policy(host, run_id, version):
+    if version == 1:
+        saved = host._run(run_id)
+        host.store.transact("synthetic-historical-analysis-policy", {}, lambda tx: tx.put(
+            saved["kind"], saved["id"], {**saved["body"], "analysis_tool_version": 1},
+            expected_version=saved["version"],
+        ))
+    assert host._run(run_id)["body"]["analysis_tool_version"] == version
+
+
+def _assert_input_fits(host, intent):
+    tokens = intent["body"]["request_token_estimate"]["tokens"]
+    budget = host.store.get("mission_call_budget", intent["body"]["call_ref"]["id"])["body"]
+    stage = budget["request_stage_token_estimate"]
+    assert tokens <= stage["admission_target_tokens"]
+    assert tokens + budget["prior_completion_reservation"] + budget["rate_input_headroom_tokens"] <= 8000
+
+
+@pytest.mark.parametrize("analysis_version", [1, 2])
 @pytest.mark.parametrize("draft_chars", [40, 400, 1000])
 def test_short_direction_precedes_optional_details_after_stale_publish(
-    tmp_path, monkeypatch, draft_chars,
+    tmp_path, monkeypatch, draft_chars, analysis_version,
 ):
     packets, saved = [], {}
     prior_text = ("The three-copy total is 9 GB. " + "Earlier draft detail. " * 60)[:draft_chars]
@@ -68,6 +87,7 @@ def test_short_direction_precedes_optional_details_after_stale_publish(
             "3 complete copies of every file. What is the total storage in decimal GB?",
             agent_ids=["agent-synthesis"],
         ))
+        _analysis_policy(host, run.run_id, analysis_version)
         _until(host, run.run_id, lambda: (
             "input" in saved
             and host._control(run.run_id, "agent-synthesis")["body"]["phase"] == "ready_model"
@@ -84,7 +104,7 @@ def test_short_direction_precedes_optional_details_after_stale_publish(
         second = max(host.store.records("model_request_intent"), key=lambda x: x["created_at"])
         call = host.store.get(**second["body"]["call_ref"])
         inclusion = host.store.get("context_inclusion", f"context:{second['id']}")
-        assert second["body"]["request_token_estimate"]["tokens"] <= 5600
+        _assert_input_fits(host, second)
         assert saved["input"].input_ref.model_dump() in inclusion["body"]["included_refs"]
         assert call["body"]["task_id"] == saved["input"].task_id
         accepted = host._control(run.run_id, "agent-synthesis")["body"]["report_ref"]
@@ -165,7 +185,10 @@ def test_new_short_direction_replaces_old_current_card(tmp_path, monkeypatch):
         host.close()
 
 
-def test_observed_small_context_allowance_keeps_current_direction(tmp_path, monkeypatch):
+@pytest.mark.parametrize("analysis_version", [1, 2])
+def test_observed_small_context_allowance_keeps_current_direction(
+    tmp_path, monkeypatch, analysis_version,
+):
     """A saved stale publication fits with the direction under a 1,461-token cap."""
     question = (
         "A local project has 12 audio files, each 250 MB. It needs three complete "
@@ -216,6 +239,7 @@ def test_observed_small_context_allowance_keeps_current_direction(tmp_path, monk
             request_id="saved-first-publication-replay", question=question,
             agent_ids=["agent-synthesis"],
         ))
+        _analysis_policy(host, run.run_id, analysis_version)
         _until(host, run.run_id, lambda: (
             "input" in saved and host._control(run.run_id, "agent-synthesis")["body"]["phase"] == "ready_model"
         ))
@@ -237,6 +261,6 @@ def test_observed_small_context_allowance_keeps_current_direction(tmp_path, monk
         assert saved.get("seen") and len(packets) == 2
         assert effective_allowances and all(0 < value <= 1461 for value in effective_allowances)
         second = max(host.store.records("model_request_intent"), key=lambda x: x["created_at"])
-        assert second["body"]["request_token_estimate"]["tokens"] <= 5600
+        _assert_input_fits(host, second)
     finally:
         host.close()

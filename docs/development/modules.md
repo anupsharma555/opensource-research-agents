@@ -1,8 +1,27 @@
 # Modules, entry points and ownership
 
+Atlas's query cache, update notifications, generated response validation and
+browser/native test entry points are described in [interface verification](atlas-testing.md).
+Read it before changing viewer state ownership or interpreting frontend timings.
+
+The [bounded analysis tools](agent-analysis.md) use canonical Pydantic inputs,
+SciPy/Pint only when selected, and the existing saved tool-result path. The
+`ora.contracts.tool_schema` projection generates the model-facing schema subset
+without replacing canonical execution validation. Version-2 calculations live in
+`ora.mission.analysis_extended`; original contracts remain pinned for saved runs.
+Offline FTS5 and isolated statsmodels comparisons are described in
+[package evaluations](package-evaluations.md); neither replaces production storage
+or becomes an agent tool automatically.
+`ora.retrieval.http_transport` supplies the optional host-owned HTTPX pool;
+[discovery HTTP](discovery-http.md) owns selection, shutdown and proxy boundaries.
+
 The backend owns model credentials, accepted state and execution. The renderer
 consumes a read projection. The shell packages the renderer. A command wrapper
 does not become a second scheduler or a new configuration source.
+
+Read [evaluation continuation](evaluation-continuation.md) before continuing a
+closed validation case. It owns exact request identity, captured rejection
+eligibility, copied-state integrity, phase/cumulative accounting and timing.
 
 | Module or helper | Owner / caller | Input → output | Dependencies, state and effects | Proof / availability |
 | --- | --- | --- | --- | --- |

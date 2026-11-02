@@ -432,3 +432,91 @@ def test_main_backfills_seven_days_from_selected_saved_calls(tmp_path, monkeypat
     repeated = json.loads(capsys.readouterr().out)
     assert json.loads(Path(repeated["receipt"]).read_text())["daily_log"]["update_status"] == (
         "unchanged_older_or_repeat_observation")
+
+
+def test_main_reports_two_models_and_profiles_without_combining_budget_lanes(
+        tmp_path, monkeypatch, capsys):
+    qwen = "qwen/qwen3.8-27b"
+
+    def saved(identity, at, profile, model, usage_body):
+        return {"observed_at": at, "credential_profile": profile, "model": model,
+                "response_id": identity, "http_status": 200, "usage": usage_body}
+
+    known = {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}
+    main_calls = [
+        saved("gpt-primary", "2026-01-13T15:00:00Z", "primary", MODEL, known),
+        saved("gpt-backup-unknown", "2026-01-15T15:00:00Z", "backup", MODEL, {}),
+        saved("qwen-primary", "2026-01-15T15:00:00Z", "primary", qwen,
+              {"prompt_tokens": 200, "completion_tokens": 40, "total_tokens": 240}),
+        saved("qwen-backup", "2026-01-14T15:00:00Z", "backup", qwen,
+              {"prompt_tokens": 80, "completion_tokens": 10, "total_tokens": 90}),
+    ]
+    original = tmp_path / "original.json"
+    copied = tmp_path / "copied.json"
+    original.write_text(json.dumps({"schema": "ora.groq.usage.calls.v1", "calls": main_calls}))
+    copied.write_text(json.dumps({"schema": "ora.groq.usage.calls.v1",
+                                  "calls": [main_calls[0], main_calls[3]]}))
+    monkeypatch.setattr(usage, "ROOT", tmp_path)
+    monkeypatch.setattr(sys, "argv", [
+        "usage.py", "--supplement", str(original), "--supplement", str(copied),
+        "--model", MODEL, "--model", qwen, "--daily-limit", "1000",
+        "--as-of", "2026-01-15T17:00:00Z"])
+    usage.main()
+    output = json.loads(capsys.readouterr().out)
+    combined = json.loads(Path(output["receipt"]).read_text())
+    gpt = json.loads(Path(output["model_reports"][MODEL]["receipt"]).read_text())
+    vision = json.loads(Path(output["model_reports"][qwen]["receipt"]).read_text())
+    assert combined["deduplication"]["repeated_receipts_removed"] == 2
+    assert set(combined["models"]) == {MODEL, qwen}
+    assert "token_totals" not in combined and "planning_daily_allowance" not in combined
+    assert gpt["rolling_seven_days"]["observed_days"] == 7
+    assert vision["rolling_seven_days"]["observed_days"] == 7
+    assert gpt["daily_log"]["scope"]["model"] == MODEL
+    assert vision["daily_log"]["scope"]["model"] == qwen
+    assert gpt["rolling_seven_days"]["profiles"]["primary"]["token_totals"][
+        "total_tokens"]["known_sum"] == 120
+    assert gpt["rolling_seven_days"]["profiles"]["backup"][
+        "calls_with_incomplete_usage"] == 1
+    assert gpt["rolling_seven_days"]["profiles"]["backup"]["token_totals"][
+        "total_tokens"]["known_sum"] is None
+    assert vision["rolling_seven_days"]["profiles"]["primary"]["token_totals"][
+        "total_tokens"]["known_sum"] == 240
+    assert vision["rolling_seven_days"]["profiles"]["backup"]["token_totals"][
+        "total_tokens"]["known_sum"] == 90
+    assert gpt["periods"]["calendar_day"]["profiles"]["backup"][
+        "local_planning_headroom_ignoring_cache_and_unobserved_usage"] is None
+    assert vision["periods"]["calendar_day"]["profiles"]["primary"][
+        "local_planning_headroom_ignoring_cache_and_unobserved_usage"] == 760
+    assert len(json.loads(Path(gpt["daily_log"]["path"]).read_text())["entries"]) == 14
+    summary = Path(output["summary"]).read_text()
+    assert f"| {MODEL} | backup | 1 | unknown | unknown | unknown | 1 | unknown |" in summary
+    assert f"| {qwen} | primary | 1 | 200 | 40 | 240 | 0 | 760 |" in summary
+
+
+def test_combined_quota_and_reset_evidence_stays_in_its_model_profile_lane():
+    qwen = "qwen/qwen3.8-27b"
+    gpt_call = call("gpt", profile="primary")
+    qwen_call = call("qwen", profile="backup", returned_model=qwen)
+    for item, used in ((gpt_call, 195), (qwen_call, 180)):
+        item["quota_observation"] = {
+            "observed_at": item["observed_at"], "limit": 200, "used": used,
+            "requested": 30, "headroom_at_observation": 200 - used,
+            "full_reset_at": None, "retry_not_before": None,
+        }
+    reports = {model: usage.build_report([gpt_call, qwen_call],
+               as_of=usage.stamp("2026-01-15T17:00:00Z"), day=date(2026, 1, 15),
+               zone="America/Los_Angeles", model=model, daily_limit=None)
+               for model in (MODEL, qwen)}
+    assert reports[MODEL]["assumed_full_reset_estimates"]["primary"] is not None
+    assert reports[MODEL]["latest_provider_daily_quota_observations"]["backup"] is None
+    assert reports[qwen]["assumed_full_reset_estimates"]["backup"] is None
+    assert reports[qwen]["latest_provider_daily_quota_observations"]["primary"] is None
+    for report in reports.values():
+        report["rolling_seven_days"] = {"days": []}
+    summary = usage.combined_markdown(reports)
+    assert "Times shown in America/Los_Angeles" in summary
+    assert (f"| {MODEL} | primary | Jan 15, 2026 07:00:00 AM PST | 195 / 200 | "
+            "Unknown | Jan 16, 2026 07:00:00 AM PST (assumed) |") in summary
+    assert (f"| {qwen} | backup | Jan 15, 2026 07:00:00 AM PST | 180 / 200 | "
+            "Unknown | Unknown |") in summary
+    assert "not a shared, per-call, or currently available balance" in summary

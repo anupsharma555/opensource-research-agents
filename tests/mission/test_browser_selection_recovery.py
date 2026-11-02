@@ -105,7 +105,8 @@ def test_saved_rejected_choice_recovery_respects_grant_and_restart(
         assert failed and cap["phase"] == "failed"
         if not grant_available:
             # Current availability no longer matches the pinned descriptor.
-            monkeypatch.delitem(host.catalog.tools, "browser_search")
+            active_catalog, _ = host._tool_registry(host._control(run.run_id, "agent-synthesis"))
+            monkeypatch.delitem(active_catalog.tools, "browser_search")
         control = host._control(run.run_id, "agent-synthesis")
         if interrupted:
             original_update = host._update_control

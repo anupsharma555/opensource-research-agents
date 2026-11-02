@@ -312,6 +312,11 @@ def _nonnegative_int(value: object) -> int | None:
     return value if type(value) is int and value >= 0 else None
 
 
+def _signed_stage_int(value: object) -> int | None:
+    # Partial-template framing and BPE boundaries can reduce a marginal count.
+    return value if type(value) is int and -(1 << 63) <= value < (1 << 63) else None
+
+
 def _nonnegative_number(value: object) -> float | None:
     if type(value) not in {int, float} or not math.isfinite(value) or value < 0:
         return None
@@ -601,31 +606,33 @@ def _tool_output(attributes: Mapping[str, object]) -> str:
     next_loop = attributes.get("osra.tool.next_loop_index")
     next_label = f"loop {next_loop}" if next_loop is not None else "none captured"
     next_status = attributes["osra.tool.next_delivery_status"].replace("_", " ")
-    lines.append(f"Next recorded model attempt: {next_label}; tool-message status: {next_status}.")
+    lines.append(f"Next model attempt: {next_label}; tool-message status: {next_status}.")
     if (attributes["osra.tool.result_in_next_prepared_request"] is True
             and attributes["osra.tool.result_in_next_captured_request"] is False):
-        lines.append("Tool message was serialized for that attempt; model receipt did not confirm delivery.")
-    lines.append(f"Any later tool-message delivery: {delivery}.")
+        lines.append("Tool message in next prepared request; no receipt confirms model input.")
+    lines.append(f"Later delivery: {delivery}.")
     if attributes["osra.tool.delivery_form"] == "host_projected_or_restricted":
-        lines.append("A host-projected tool message reached a later request; full source text is unproven.")
+        lines.append("Later message host-projected/restricted; full source text unproven.")
     elif attributes["osra.tool.delivery_form"] == "exact_saved_message":
-        lines.append("The exact saved tool message reached a later request.")
+        lines.append("Later request received exact saved tool message.")
     selected = attributes.get("osra.tool.selected_capability_name")
     if selected is not None:
         lines.append(f"Requested capability: {selected}.")
     active = attributes.get("osra.tool.active_seconds")
     if active is not None:
-        lines.append(f"Executor active time: {active:.3f}s (receipt reported; excludes model time).")
+        lines.append(f"Tool active time: {active:.3f}s (receipt; excludes model time).")
     else:
-        lines.append("Executor active time: unavailable.")
+        lines.append("Tool active time unavailable.")
     if attributes.get("osra.tool.interval_status") == "single_attempt_measured":
-        lines.append("Span duration: one validated tool attempt; not model-call latency.")
+        lines.append("Span covers one validated tool attempt, not model-call latency.")
     else:
-        lines.append("Span timestamp marks tool selection; execution interval unavailable.")
-    lines.append("Source/context packet inclusion is assessed separately.")
+        lines.append("Span marks selection; execution interval unavailable.")
+    lines.append("Source/context input inclusion assessed separately.")
     revision = attributes["osra.tool.projection_revision"]
     if revision > 1:
-        lines.append(f"Status update {revision} for the same selected tool.")
+        update = f"Status update {revision} for the same selected tool."
+        if len("\n".join([*lines, update])) <= 600:
+            lines.append(update)  # The revision remains in structured attributes.
     return "\n".join(lines)
 
 
@@ -1156,6 +1163,8 @@ def _safe_export_body(body: dict) -> bool:
     for key, value in attributes.items():
         if key in _HASH_ATTRIBUTES:
             valid = isinstance(value, str) and re.fullmatch(r"[a-f0-9]{64}", value)
+        elif key in _TOKEN_ATTRIBUTES and key.startswith("osra.estimated.stage."):
+            valid = _signed_stage_int(value) is not None
         elif key in _TOKEN_ATTRIBUTES or key == "osra.http_status":
             valid = _nonnegative_int(value) is not None
         elif key == "gen_ai.tool.name":
@@ -1484,7 +1493,7 @@ def _stage_attributes(store: StateStore, receipt: dict) -> dict[str, int]:
     for row in rows:
         if not isinstance(row, dict) or row.get("kind") not in _STAGE_KINDS:
             continue
-        marginal = _nonnegative_int(row.get("marginal_tokens"))
+        marginal = _signed_stage_int(row.get("marginal_tokens"))
         if marginal is not None:
             kind = row["kind"]
             totals[kind] = totals.get(kind, 0) + marginal

@@ -8,6 +8,7 @@ import pytest
 
 from ora.contracts.models import LiveStartRequest
 from ora.mission.context import ContextError
+from tests.mission.availability_assertions import request_first_names
 from tests.mission.test_service import answer, service
 from tests.mission.test_user_input_delivery import _command, _until
 
@@ -53,8 +54,12 @@ def test_successive_directions_and_contradictory_paste_survive_reopen_and_read(
                 and json.loads(message["content"]).get("authority")
                 == "trusted_host_attached_tool_availability"
             )
-            assert availability["request_first_local_functions"]
             tools = {item["function"]["name"] for item in packet["tools"]}
+            assert set(availability["call_now_local_functions"]) == tools
+            # Exact current directions take priority without losing the
+            # catalog-backed route to deferred capabilities.
+            assert request_first_names(packet, availability)
+            assert {"discover_capabilities", "request_capability"} <= tools
             assert "read_context_page" in tools
             if cue := index.get("current_user_inputs"):
                 assert cue["origin"] == "authenticated_local_user"

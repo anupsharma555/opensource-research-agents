@@ -100,11 +100,6 @@ def _child_at_boundary(state_dir: str, boundary: str, sender) -> None:
                 request_id="process-quota-wait", question="Wait for synthetic token reset",
                 agent_ids=["agent-synthesis"], required_agent_ids=["agent-synthesis"],
             ))
-            host.capacity.observe_headers(
-                "groq-selected", remaining_requests=100, remaining_tokens=0,
-                token_limit=50000, reset_after_tokens=3,
-                observation_id="synthetic-process-token-reset",
-            )
             control = host._control(run.run_id, "agent-synthesis")
             original_update = host._update_control
 
@@ -134,6 +129,13 @@ def _child_at_boundary(state_dir: str, boundary: str, sender) -> None:
             assert host._schedule_model(control)
             work = host._work_for(host._control(run.run_id, "agent-synthesis"))
             spec = host.executor._spec_from(work)
+            model_scopes = [scope for scope in spec.quota_scopes if scope.startswith("model:")]
+            assert model_scopes
+            host.capacity.observe_headers(
+                model_scopes[0], remaining_requests=100, remaining_tokens=0,
+                token_limit=50000, reset_after_tokens=3,
+                observation_id="synthetic-process-token-reset",
+            )
             cap_id = host.executor._capacity_id(spec)
             assert cap_id in host.executor._prepare(spec.mission_id)
             assert host.capacity.admit(

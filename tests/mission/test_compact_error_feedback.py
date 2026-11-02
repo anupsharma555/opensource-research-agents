@@ -8,10 +8,13 @@ import urllib.error
 from io import BytesIO
 from types import SimpleNamespace
 
+import pytest
+
 from ora.contracts.models import LiveStartRequest
 from ora.coordination.board import ref
 from ora.mission import service as service_module
 from ora.models.groq import rejected_unregistered_local_tool_name
+from ora.state.store import StateError
 from tests.mission.test_service import service
 
 
@@ -122,7 +125,10 @@ def test_exact_captured_400_projects_short_notice_and_survives_preparation_retry
             "host_feedback": full_feedback,
         }
         foreign = {**repaired, "body": {**repaired["body"], "actor_id": "other-actor"}}
-        assert json.loads(host._model_base_history(foreign, [])[0]["content"]) == full_notice
+        # A forged actor has no matching saved peer task. Activity scoping must
+        # reject it before any host history can be assembled for that identity.
+        with pytest.raises(StateError, match="outside this peer task"):
+            host._model_base_history(foreign, [])
         intent = host.store.get(**failed["body"]["intent_ref"])
         request_digest = intent["body"]["blob"]["sha256"]
         original_read = host.store.read_blob

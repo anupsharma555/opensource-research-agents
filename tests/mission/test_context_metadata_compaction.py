@@ -171,8 +171,10 @@ def test_pressure_pages_exact_parent_details_without_losing_child_scope(tmp_path
     assert index["run_scope"]["scope_preview"] == child_scope
     assert target["target_ref"] == saved["report"]
     assert target["parent_run_ref"] == saved["parent"]
-    assert target["parent_details_page"] == "older_records"
-    assert "fetch_exact_parent_target" not in target
+    reader = target["fetch_exact_parent_target"]
+    assert reader["tool"] == "read_context_record"
+    assert {key: reader[key] for key in ("kind", "id", "version")} == saved["report"]
+    assert reader["offset"] == 0 and reader["limit"] == 2000
     assert "fetch_full_parent_scope" not in target
     assert index["source_read_delivery"]["source_text_in_this_call"] is False
     assert {(item["type"], item["fetch"]["id"]) for item in pack.omitted
@@ -181,6 +183,7 @@ def test_pressure_pages_exact_parent_details_without_losing_child_scope(tmp_path
         ("parent_scope_detail", saved["parent"]["id"]),
     }
     inclusion = bind_no_source_pack(store, context, pack, "tight-parent-metadata")
+    assert reader["inclusion_id"] == inclusion["id"]
     seen = []
     cursor = 0
     while True:
@@ -232,6 +235,10 @@ def test_selected_window_pressure_pages_only_duplicate_navigation(tmp_path):
     assert last == {
         "window_ref": window["window_ref"],
         "next_cursor": window["next_cursor"],
+        "next_request": {
+            "source_id": copy_ref["id"], "source_version": copy_ref["version"],
+            "block_offset": 0, "char_offset": 2400, "char_limit": 800,
+        },
         "source_text_status": "checked_window_passages_in_selected_source_packet",
         "read_event_page": "older_records",
     }

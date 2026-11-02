@@ -323,9 +323,13 @@ def test_reading_existing_same_mission_report_does_not_complete_task(
         body = json.loads(request.data)
         requests.append(body)
         if len(requests) == 1:
-            index = json.loads(body["messages"][-1]["content"])
+            # This fixture isolates the executor's read effect. The synthetic
+            # caller already knows this report ID, so take its exact saved
+            # inclusion from the host instead of assuming an empty page cue.
+            intents = host.store.records("model_request_intent")
+            assert len(intents) == 1
             return tool("read_context_record", {
-                "inclusion_id": index["older_records"]["inclusion_id"],
+                "inclusion_id": f"context:{intents[0]['id']}",
                 "kind": "report", "id": saved_report["id"],
                 "version": saved_report["version"], "offset": 0, "limit": 600,
             }, 1)

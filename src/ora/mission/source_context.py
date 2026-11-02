@@ -68,6 +68,22 @@ def _selection_id(control: dict) -> str:
     return _id("mission-working-sources:", [body["mission_id"], body["actor_id"], body["task_id"]])
 
 
+def working_source_selection_state(store: StateStore, control_ref: dict) -> dict:
+    """Read this task's selection version, distinct from copy/inventory versions."""
+    control = _control(store, control_ref)
+    selection = store.get("mission_working_sources", _selection_id(control))
+    if selection and any(
+        selection["body"].get(key) != control["body"].get(key)
+        for key in ("mission_id", "actor_id", "task_id")
+    ):
+        raise SourceContextError("Working-source record belongs to another task")
+    return {
+        "expected_version": selection["version"] if selection else 0,
+        "selection_ref": ref(selection) if selection else None,
+        "selected_source_refs": selection["body"]["selected_source_refs"] if selection else [],
+    }
+
+
 def _input_status(store: StateStore, copy: dict, context: WorkingContext) -> str:
     status = context._source_status(copy)["model_input_status"]
     if status != "unknown":
@@ -429,8 +445,13 @@ def source_inventory_page(
     cursor: int = 0,
     limit: int = 20,
     reply_char_limit: int = MAX_CONTEXT_PAGE_CHARS,
+    include_saved_reading: bool = True,
 ) -> dict:
-    """Return a bounded page of exact copies and authorized fetch routes."""
+    """Return bounded exact identities, optionally with saved reading positions.
+
+    The initial model overview omits reading detail before applying the page
+    bound. Explicit inventory reads retain that detail by default.
+    """
     if (
         type(cursor) is not int
         or cursor < 0
@@ -438,6 +459,7 @@ def source_inventory_page(
         or not 1 <= limit <= 20
         or type(reply_char_limit) is not int
         or reply_char_limit < 500
+        or type(include_saved_reading) is not bool
     ):
         raise SourceContextError("Inventory page needs a bounded cursor, count and reply size")
     if (
@@ -508,7 +530,7 @@ def source_inventory_page(
                 # Retain exact navigation even in a source-free recovery turn,
                 # where the original fetch tool reply may not be replayed.
                 item["ordinary_document_ref"] = document_ref
-        if status == "permitted":
+        if status == "permitted" and include_saved_reading:
             progress = context._source_progress(control, [copy], body["mission_id"])[0]
             navigation = context._source_free_navigation_item(control, progress)
             # The item already carries its exact copy ref and fetch route.
@@ -518,6 +540,8 @@ def source_inventory_page(
                 key: value for key, value in navigation.items()
                 if key not in {"copy_ref", "fetch_first_uncovered"}
             }
+        elif status == "permitted":
+            item["saved_reading_fetch"] = "read_source_inventory"
         def candidate_page() -> dict:
             return {
                 "schema": "ora.source_inventory_page.v1",
@@ -587,6 +611,9 @@ def source_inventory_page(
             if len(canonical(candidate)) > reply_char_limit and "source_url" in item:
                 item.pop("source_url")
                 item["source_url_omitted_for_page_budget"] = True
+                candidate = candidate_page()
+            if len(canonical(candidate)) > reply_char_limit:
+                item.pop("saved_reading_fetch", None)
                 candidate = candidate_page()
             if len(canonical(candidate)) > reply_char_limit:
                 raise SourceContextError(

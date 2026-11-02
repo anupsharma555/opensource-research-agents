@@ -1,0 +1,25 @@
+{
+  "title": "Understanding the Structure of OSRA Agents",
+  "saved_at": "2026-10-18T10:49:34-04:00",
+  "timezone": "America/New_York",
+  "analysis_commit": "e6af569070d5d107c47582799d17cc3dc322f4ef",
+  "image": "osra-structure_2026-10-18_10-49-34_EDT.png",
+  "image_sha256": "47b6b343154f73be3da73f53139754f309a4904adb1c3b99abec3ac35561cfa3",
+  "width": 2160,
+  "height": 2700,
+  "scope": "Python runtime in src/ora; tests, scripts, UI, generated files and non-ORA imports excluded",
+  "metrics": {
+    "files": 137,
+    "source_lines": 59927,
+    "exported_groups": 17,
+    "file_links": 436,
+    "cross_display_group_links": 219,
+    "within_display_group_links": 217
+  },
+  "source_graph_sha256": "51f3437001d8ccf5093728267cce56edab61d9421313f37ed988551d6cdc9d66",
+  "notes": [
+    "Timestamp is the archive time of this existing image; analysis was not rerun.",
+    "Group names are inferred; community counts use the actual GraphML labels.",
+    "Static source dependencies do not represent live execution."
+  ]
+}

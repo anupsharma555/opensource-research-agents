@@ -14,6 +14,7 @@ from ora.mission.context import ContextError, WorkingContext
 from ora.models.token_estimate import estimate_context_tokens
 from ora.state import StateStore
 from ora.state.store import canonical
+from tests.mission.availability_assertions import request_first_names
 from tests.mission.test_context import bind_no_source_pack, fixture
 from tests.mission.test_service import service
 
@@ -72,6 +73,7 @@ def test_exact_duplicate_peer_messages_page_but_full_questions_remain(tmp_path):
     view = json.loads(pack.messages[-1]["content"])
     assert view["incoming_request"]["ref"] == ref(incoming)
     assert view["incoming_request"]["question"] == incoming_question
+    assert view["incoming_request"]["question_delivery"] == "full_saved_text"
     assert any(
         detail["type"] == "request" and detail["ref"] == ref(outgoing)
         and detail["body"]["question"] == outgoing_question
@@ -118,6 +120,91 @@ def test_exact_duplicate_peer_messages_page_but_full_questions_remain(tmp_path):
             inclusion_ref=inclusion, pointer=ref(incoming_message), offset=0,
             limit=2000,
         )
+
+
+@pytest.mark.parametrize("reader_mode", ("attached", "unavailable", "legacy_no_tool_fields"))
+def test_peer_question_pressure_preserves_exact_messages_without_a_reader(
+    tmp_path, reader_mode,
+):
+    store = StateStore(tmp_path)
+    call, task = fixture(store)
+    mailbox = PeerMailbox(store)
+    question = ("Check this synthetic comparison and explain limitations. " + "Q" * 600)[:548]
+    for number in range(8):
+        sender, recipient = (("sender", "peer") if number % 2 == 0
+                             else ("peer", "sender"))
+        text = question if number == 0 else (
+            f"Synthetic question {number} " + "X" * (100 + number * 30)
+        )
+        sent = mailbox.send_request(
+            f"pressure-ask-{number}", mission_id="m", request_id=f"pressure-req-{number}",
+            message_id=f"pressure-msg-{number}", requester_id=sender,
+            recipient_id=recipient, question=text, expected_artifact="Synthetic note",
+            cause_ref=task, payload={}, task_ref=task,
+        )
+        assert sent["status"] == "accepted"
+        assert mailbox.mark_delivered(
+            f"pressure-deliver-{number}", mission_id="m",
+            message_id=f"pressure-msg-{number}",
+        )["status"] == "accepted"
+
+    if reader_mode != "legacy_no_tool_fields":
+        original = store.get(**call)["body"]
+        exposed = (["request_capability", "read_context_page", "read_context_record"]
+                   if reader_mode == "attached" else ["request_capability"])
+        call = ref(store.transact(
+            f"pressure-call-{reader_mode}", {},
+            lambda tx: tx.put("agent_call", f"pressure-call-{reader_mode}", {
+                **original, "exposed_tools": exposed, "permitted_tools": exposed,
+            }), mission_id="m",
+        ))
+
+    context = WorkingContext(store)
+    pack = context.assemble(
+        call, task, allowance=500, estimate_tokens=estimate_context_tokens,
+    )
+    index = json.loads(pack.messages[-1]["content"])
+    incoming = index["incoming_request"]
+    assert incoming["ref"] == ref(store.get("mail_request", "pressure-req-0"))
+    assert pack.estimated_tokens <= 500
+    redundant = [
+        ref(store.get("mail_message", f"pressure-msg-{number}"))
+        for number in (4, 6)
+    ]
+    # These two full message records are omitted from the packet in every mode.
+    assert all(pointer in [item["ref"] for item in pack.omitted] for pointer in redundant)
+    if reader_mode == "attached":
+        assert incoming["question"] == question
+        assert incoming["question_delivery"] == "full_saved_text"
+        assert all(pointer not in index.get("message_refs", []) for pointer in redundant)
+        inclusion = bind_no_source_pack(store, context, pack, "pressure-attached")
+        reopened = WorkingContext(StateStore(tmp_path))
+        listed = []
+        cursor = 0
+        while True:
+            page = reopened.read_omitted_page(
+                mission_id="m", actor_id="peer", task_id=task["id"],
+                inclusion_ref=inclusion, cursor=cursor, limit=30,
+            )
+            listed.extend(item["ref"] for item in page["items"])
+            if page["next_cursor"] is None:
+                break
+            assert page["next_cursor"] > cursor
+            cursor = page["next_cursor"]
+        assert all(pointer in listed for pointer in redundant)
+        message = reopened.read_omitted_record(
+            mission_id="m", actor_id="peer", task_id=task["id"],
+            inclusion_ref=inclusion,
+            pointer=ref(store.get("mail_message", "pressure-msg-6")),
+            offset=0, limit=2000,
+        )
+        assert json.loads(message["text"])["request_id"] == "pressure-req-6"
+    else:
+        assert incoming["question_status"] == "prefix_window_only"
+        assert incoming["question_delivery"] == "prefix_only"
+        assert question.startswith(incoming["question_window"])
+        assert len(incoming["question_window"]) < len(question)
+        assert all(pointer in index["message_refs"] for pointer in redundant)
 
 
 @pytest.mark.parametrize("reason", [
@@ -369,7 +456,8 @@ def test_older_delivered_incoming_question_survives_real_token_pressure_and_reop
     assert incoming["recipient_id"] == "peer"
     assert incoming["status"] == "unanswered"
     assert incoming["question_status"] == "prefix_window_only"
-    assert 120 <= len(incoming["question_window"]) <= 300
+    assert incoming["question_delivery"] == "prefix_only"
+    assert 120 <= len(incoming["question_window"]) <= 600
     assert questions[first["id"]].startswith(incoming["question_window"])
     assert incoming["question_chars"] == len(questions[first["id"]])
     assert "read_context_record" in incoming["read_full_question"]
@@ -532,7 +620,14 @@ def test_prepared_model_packet_carries_incoming_question_and_callable_answer(
         assert "site alpha score 7" in packet["messages"][1]["content"]
         functions = {item["function"]["name"]: item["function"]
                      for item in packet["tools"]}
-        assert {"peer_request", "publish_result", "read_context_page"} <= functions.keys()
+        assert {"publish_result", "read_context_page", "request_capability"} <= functions.keys()
+        if "peer_request" not in functions:
+            availability = next(
+                json.loads(message["content"])
+                for message in packet["messages"]
+                if "trusted_host_attached_tool_availability" in message.get("content", "")
+            )
+            assert "peer_request" in request_first_names(packet, availability)
         assert "answer_request_id" in functions["publish_result"]["parameters"]["properties"]
         if first_length > 600:
             assert "read_context_record" in incoming["read_full_question"]

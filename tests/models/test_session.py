@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import threading
+import urllib.error
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
@@ -22,10 +24,19 @@ from ora.models import (
     SessionError,
     SourceSelection,
 )
-from ora.observability.export import EXPORT_KIND, project_run, project_run_summary
+from ora.models.profiles import QWEN_MODEL
+from ora.models.token_estimate import QWEN_TEMPLATE_BASIS, estimate_request_tokens
+from ora.observability.export import (
+    EXPORT_KIND,
+    _receipt_attributes,
+    project_run,
+    project_run_summary,
+)
 from ora.observability.metrics import build_context_metrics
 from ora.retrieval.agent_validation_budget import AgentBudget, BudgetAdmissionStop, BudgetStop
 from ora.state import StateConflict, StateStore
+from ora.state.store import canonical
+from ora.state.view_policy import project_record
 
 ROOT = Path(__file__).resolve().parents[2]
 MODEL = "openai/gpt-oss-120b"
@@ -89,7 +100,7 @@ def source_copy(store: StateStore) -> dict:
 def setup(tmp_path: Path, *, raw: bytes | None = None,
           source_ref: dict | None = None, unknown_policy: str = "reject",
           tool_description: str = "", credential_settings: dict | None = None,
-          reasoning_effort: str = "high"):
+          reasoning_effort: str = "high", model_id: str = MODEL):
     store = StateStore(tmp_path)
     copy_ref = source_ref or source_copy(store)
     copy_record = store.get(**copy_ref)
@@ -105,7 +116,7 @@ def setup(tmp_path: Path, *, raw: bytes | None = None,
     registry = ConfigurationRegistry(store, ROOT, catalog)
     config = registry.save_configuration(
         "config", instance_id=actor["id"], mission_id="mission",
-        task_scope="source-comparison", provider="groq", endpoint=URL, model_id=MODEL,
+        task_scope="source-comparison", provider="groq", endpoint=URL, model_id=model_id,
         settings={"max_completion_tokens": 8192, "stream": False,
                   **(credential_settings or {}),
                   "unknown_source_policy": unknown_policy,
@@ -113,7 +124,8 @@ def setup(tmp_path: Path, *, raw: bytes | None = None,
                       "name": "answer", "strict": True, "schema": SCHEMA,
                   }}},
         reasoning_settings={"reasoning_effort": reasoning_effort,
-                            "include_reasoning": True},
+                            **({"reasoning_format": "parsed"} if model_id == QWEN_MODEL
+                               else {"include_reasoning": True})},
         instructions="Use only saved synthetic evidence.", skill_choices={},
         grants={f"common:{name}" for name in COMMON_TOOL_IDS},
         input_refs=[{"kind": "source_copy", "id": copy_ref["id"],
@@ -139,6 +151,177 @@ def setup(tmp_path: Path, *, raw: bytes | None = None,
 
 def select(copy_ref: dict, route: str = "direct") -> tuple[SourceSelection, ...]:
     return (SourceSelection(copy_ref, "permitted", True, route),)
+
+
+def test_saved_qwen_selection_replays_exact_bytes_and_receipt(tmp_path: Path) -> None:
+    store, _registry, bridge, call, _config, copy_ref, _captured = setup(
+        tmp_path, model_id=QWEN_MODEL, reasoning_effort="medium",
+    )
+    messages = [{"role": "user", "content": "Review the synthetic abstract"}]
+    preview = bridge.preview_request(call=call, phase="collect", messages=messages,
+                                     sources=select(copy_ref))
+    estimate = estimate_request_tokens(canonical(preview.body).encode())
+    saved_estimate = {
+        "tokens": estimate.tokens, "basis": estimate.basis,
+        "asset_sha256": estimate.asset_sha256,
+        "fallback_reason": estimate.fallback_reason,
+    }
+    prepared = bridge.prepare(
+        call_id=call["id"], call_version=1, phase="collect", messages=messages,
+        sources=select(copy_ref), request_token_estimate=saved_estimate,
+    )
+    assert prepared.request.body["model"] == QWEN_MODEL
+    assert prepared.request.body["reasoning_format"] == "parsed"
+    assert "include_reasoning" not in prepared.request.body
+    assert prepared.request.manifest()["model_id"] == QWEN_MODEL
+    assert estimate.basis == QWEN_TEMPLATE_BASIS
+    assert store.get(**prepared.intent_ref)["body"]["request_token_estimate"] == saved_estimate
+    reopened = ModelSession(StateStore(tmp_path), ROOT, adapter=bridge.adapter)
+    assert reopened.load(prepared.intent_ref, for_dispatch=True).request.body == prepared.request.body
+    payload = json.loads(response(reasoning="private qwen trace"))
+    payload["model"] = QWEN_MODEL
+    outcome = reopened.adapter.decode(prepared.request, payload)
+    assert outcome.status == "tool_requested"
+    with pytest.raises(SessionError, match="selected model"):
+        reopened.capture(prepared.intent_ref, replace(outcome, returned_model=MODEL))
+    receipt_ref = reopened.capture(prepared.intent_ref, outcome)
+    receipt = reopened.store.get(**receipt_ref)["body"]
+    assert receipt["returned_model"] == QWEN_MODEL
+    assert receipt["reasoning_status"] == "returned"
+    assert receipt["effective_reasoning_effort"] == "medium"
+
+
+@pytest.mark.parametrize(("status", "matched"), [(429, True), (400, False)])
+def test_output_minute_observation_is_numeric_only_and_replayable(
+    tmp_path: Path, status: int, matched: bool,
+) -> None:
+    store, _registry, bridge, call, _config, copy_ref, _captured = setup(
+        tmp_path, model_id=QWEN_MODEL, reasoning_effort="medium",
+    )
+    prepared = bridge.prepare(
+        call_id=call["id"], call_version=1, phase="collect",
+        messages=[{"role": "user", "content": "Review synthetic abstract"}],
+        sources=select(copy_ref),
+    )
+    private_error = {"type": "tokens", "code": "rate_limit_exceeded",
+                     "message": ("Rate limit reached for model `qwen/qwen3.8-27b` "
+                                 "in organization PRIVATE_ORG on output tokens per minute "
+                                 "(OTPM): Limit 1000, Used 120, Requested 1024.")}
+    outcome = replace(bridge.adapter._failed(prepared.request, "http_error", None, status),
+                      provider_error=private_error)
+    receipt_ref = bridge.capture(prepared.intent_ref, outcome)
+    receipt = store.get(**receipt_ref)["body"]
+    if matched:
+        assert receipt["output_rate_limit_observation"] == {
+            "scope": "output_tokens_per_minute", "limit_tokens": 1000,
+            "used_tokens": 120, "requested_tokens": 1024,
+        }
+    else:
+        assert "output_rate_limit_observation" not in receipt
+    assert "PRIVATE_ORG" not in json.dumps(receipt)
+    assert bridge.capture(prepared.intent_ref, outcome) == receipt_ref
+
+
+@pytest.mark.parametrize(
+    ("capture_status", "generated"),
+    [
+        ("returned", '{"name":"publish_result","arguments":"Bearer synthetic-secret"}'),
+        ("absent", None),
+        ("non_string", None),
+        ("invalid_unicode", None),
+    ],
+)
+def test_provider_rejected_generation_is_private_and_never_an_executable_tool(
+    tmp_path: Path, capture_status: str, generated: str | None,
+) -> None:
+    store, _registry, bridge, call, _config, copy_ref, _captured = setup(tmp_path)
+    prepared = bridge.prepare(
+        call_id=call["id"], call_version=1, phase="collect",
+        messages=[{"role": "user", "content": "Review synthetic evidence"}],
+        sources=select(copy_ref),
+    )
+    error = {"type": "invalid_request_error", "code": "tool_use_failed",
+             "message": "Tool call validation failed"}
+    outcome = replace(
+        bridge.adapter._failed(prepared.request, "http_error", None, 400),
+        response_sha256="a" * 64, provider_error=error,
+        failed_generation_status=capture_status, failed_generation=generated,
+    )
+    assert outcome.executable_tool_calls == ()
+    receipt_ref = bridge.capture(prepared.intent_ref, outcome)
+    receipt = store.get(**receipt_ref)
+    body = receipt["body"]
+    assert body["failed_generation_status"] == capture_status
+    rejected = store.get(**body["failed_generation_ref"])
+    assert rejected["body"]["status"] == capture_status
+    assert rejected["body"]["access"] == "restricted_diagnostics"
+    assert rejected["body"]["accepted_as_answer_or_tool"] is False
+    if generated is not None:
+        raw = generated.encode()
+        assert store.read_blob(rejected["body"]["blob"]["sha256"]) == raw
+        assert rejected["body"]["text_sha256"] == hashlib.sha256(raw).hexdigest()
+        assert rejected["body"]["text_bytes"] == len(raw)
+    else:
+        assert rejected["body"]["blob"] is None
+        assert rejected["body"]["text_sha256"] is None
+        assert rejected["body"]["text_bytes"] is None
+    assert generated is None or generated not in store.read_blob(body["blob"]["sha256"]).decode()
+    assert "synthetic-secret" not in json.dumps(body)
+    assert "synthetic-secret" not in json.dumps(project_record(rejected))
+    assert "synthetic-secret" not in json.dumps(_receipt_attributes(store, receipt, "run"))
+    assert bridge.capture(prepared.intent_ref, outcome) == receipt_ref
+    assert len(store.records("restricted_failed_generation")) == 1
+
+
+def test_http_400_failed_generation_flows_from_adapter_to_private_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GROQ_API_KEY", "synthetic-token")
+    store, _registry, bridge, call, _config, copy_ref, _captured = setup(tmp_path)
+    prepared = bridge.prepare(
+        call_id=call["id"], call_version=1, phase="collect",
+        messages=[{"role": "user", "content": "Review synthetic evidence"}],
+        sources=select(copy_ref),
+    )
+    generated = '{"name":"publish_result","arguments":{"citations":"[]"}}'
+    raw = json.dumps({"error": {
+        "type": "invalid_request_error", "code": "tool_use_failed",
+        "message": "citations expected array", "failed_generation": generated,
+    }}).encode()
+
+    def rejected(_request, timeout):
+        raise urllib.error.HTTPError(URL, 400, "tool rejected", {}, io.BytesIO(raw))
+
+    bridge.adapter.transport = rejected
+    receipt = store.get(**bridge.invoke_capture(prepared.intent_ref))
+    assert receipt["body"]["http_status"] == 400
+    assert receipt["body"]["failed_generation_status"] == "returned"
+    saved = store.get(**receipt["body"]["failed_generation_ref"])
+    assert store.read_blob(saved["body"]["blob"]["sha256"]).decode() == generated
+    assert store.read_blob(receipt["body"]["blob"]["sha256"]) != raw
+    assert receipt["body"]["response_sha256"] == hashlib.sha256(raw).hexdigest()
+    assert store.records("model_response_receipt") == [receipt]
+
+
+def test_auth_error_does_not_capture_provider_failed_generation(
+    tmp_path: Path,
+) -> None:
+    store, _registry, bridge, call, _config, copy_ref, _captured = setup(tmp_path)
+    prepared = bridge.prepare(
+        call_id=call["id"], call_version=1, phase="collect",
+        messages=[{"role": "user", "content": "Review synthetic evidence"}],
+        sources=select(copy_ref),
+    )
+    outcome = replace(
+        bridge.adapter._failed(prepared.request, "http_error", None, 401),
+        response_sha256="b" * 64,
+        provider_error={"type": "authentication_error", "code": "invalid_api_key",
+                        "message": "Invalid key"},
+    )
+    receipt = store.get(**bridge.capture(prepared.intent_ref, outcome))["body"]
+    assert "failed_generation_ref" not in receipt
+    assert "failed_generation_status" not in receipt
+    assert store.records("restricted_failed_generation") == []
 
 
 def test_saved_medium_selection_survives_reopen_and_capture(tmp_path: Path) -> None:

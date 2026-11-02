@@ -94,7 +94,8 @@ def test_wrong_outgoing_reply_id_rejects_before_report_then_correct_id_answers(
             assert sent["status"] == "accepted"
             host.mailbox.mark_delivered(f"deliver-{request_id}", mission_id=mission_id,
                                         message_id=f"message-{request_id}")
-        host._update_control(mxra, phase="waiting", waiting_reason="Fixture holds peer")
+        host._update_control(mxra, phase="retry_at", retry_at=time.time() + 3600,
+                             waiting_reason="Fixture holds peer")
         _drive_until(host, run.run_id, lambda: seen["feedback"])
         _drive_until(host, run.run_id, lambda: bool(host.store.get(
             "mail_request", incoming_id,
@@ -193,7 +194,8 @@ def test_answered_outgoing_id_guides_requester_to_review_without_publishing(
             artifact_ref=ref(fixture_report),
         )
         assert saved["status"] == "accepted"
-        host._update_control(mxra, phase="waiting", waiting_reason="Fixture holds peer")
+        host._update_control(mxra, phase="retry_at", retry_at=time.time() + 3600,
+                             waiting_reason="Fixture holds peer")
         _drive_until(host, run.run_id, lambda: seen["feedback"])
         _drive_until(host, run.run_id, lambda: host.store.get(
             "mail_request", request_id,
@@ -323,7 +325,8 @@ def test_noncurrent_reply_target_rejects_without_new_report(
         assert host.store.get("mail_request", invalid_id)["body"]["status"] == (
             "awaiting_review" if invalid_target == "foreign_mission" else "answered"
         )
-        host._update_control(mxra, phase="waiting", waiting_reason="Fixture holds peer")
+        host._update_control(mxra, phase="retry_at", retry_at=time.time() + 3600,
+                             waiting_reason="Fixture holds peer")
         _drive_until(host, run.run_id, lambda: seen["feedback"])
         assert len(host.store.records("report")) == report_count
     finally:

@@ -31,8 +31,16 @@ def _last_tool(request: dict) -> tuple[str, dict]:
 
 
 def _disposition(request: dict) -> dict:
-    index = json.loads(request["messages"][-1]["content"])
-    return index["request_dispositions"][0]
+    for message in reversed(request["messages"]):
+        if message.get("role") != "user":
+            continue
+        try:
+            content = json.loads(message["content"])
+        except (TypeError, ValueError):
+            continue
+        if isinstance(content, dict) and content.get("request_dispositions"):
+            return content["request_dispositions"][0]
+    raise AssertionError("Current request disposition was not delivered")
 
 
 def test_peer_handoff_does_not_claim_one_control_when_recipient_has_two_tasks(
@@ -174,7 +182,8 @@ def test_accepted_peer_request_can_wait_then_review_with_exact_current_refs(
                 "reason": "Await the independent review after other useful work.",
             }, 3)
         if step == 4:
-            current = _disposition(body)
+            saved_request = host.store.get("mail_request", accepted["request_id"])
+            current = {"ref": ref(saved_request), **saved_request["body"]}
             assert current["status"] in {"awaiting_review", "partial_awaiting_review"}
             assert len(current["answer_refs"]) == 1
             answer_ref = current["answer_refs"][0]
@@ -193,9 +202,9 @@ def test_accepted_peer_request_can_wait_then_review_with_exact_current_refs(
             ] == "exact_passage_in_producing_call"
             assert peer_report["body"]["producer_attempt_ref"]["kind"] == "agent_attempt"
             context = json.loads(body["messages"][-1]["content"])
-            assert answer_ref in context["request_answer_refs"]
             preview = context["peer_answer_previews"][0]
-            assert preview["request_ref"]["id"] == accepted["request_id"]
+            assert preview["request_ref"] == ref(saved_request)
+            assert preview["request_status"] == current["status"]
             assert preview["answer_ref"] == answer_ref
             assert preview["report_ref"] == ref(peer_report)
             assert preview["report"] == {
@@ -237,7 +246,8 @@ def test_accepted_peer_request_can_wait_then_review_with_exact_current_refs(
         if step == 5:
             name, result = _last_tool(body)
             assert name == "review_peer_answer" and result["status"] == "review_saved"
-            current = _disposition(body)
+            saved_request = host.store.get("mail_request", accepted["request_id"])
+            current = saved_request["body"]
             assert current["status"] == "answered"
             assert current["accepted_answer_ref"] == reviewed_input["answer_ref"]
             return answer(

@@ -37,6 +37,16 @@ not physical key identity across rotations. Key rotations need a dated local rec
 Repeated database inputs and copied receipts are deduplicated by response ID,
 provider request ID, or receipt identity. Conflicting duplicates are excluded and
 reported for investigation. Repeated prompts are separate calls, not duplicates.
+For a repeated `--model` invocation, source receipts are read and deduplicated
+once, then filtered into independent model reports. Each model has its own
+seven-day daily-log scope and latest quota/reset observations. The combined
+summary displays profile-by-model rows without adding model totals, allowances,
+headroom, or reset times. Qwen text and figure calls using
+`qwen/qwen3.8-27b` occupy the same model lane.
+An explicitly labelled nominal sum of model allowances can support planning
+when the organization, model-limit scope and assumptions are established; it
+does not represent a shared, per-call or current available balance. Profile
+headroom sums additionally require verified independent organization scopes.
 Prepared requests, dispatch markers and captured responses are different facts;
 only captured provider usage is added to token totals. A failed response with no
 usage is unknown consumption, not a zero-token call. Uncaptured dispatches need
@@ -117,3 +127,19 @@ balance does not establish request/minute capacity. Current account-wide usage m
 require the user's Groq Console usage/limits view or a supported provider export;
 record its organization/model, period, observation time and coverage privately.
 Do not issue deliberate inference probes or provoke 429 errors to refresh a balance.
+
+## Model, credential, and cache boundaries
+
+An agent keeps its selected model for its lifetime. If its model reaches a quota,
+wait or explicitly hand off at a saved checkpoint to a new, differently bound
+agent after qualification. Do not switch models inside the same agent or enable
+automatic model fallback. A same-model credential route is valid only with
+explicit authorization and a recorded, verified organization scope. Another key
+or profile alone does not prove independent capacity or reset the budget.
+
+Local reuse of saved context or source material is distinct from a provider
+prompt-cache hit. Count provider cached input only when an exact response reports
+it; omitted cache usage is unknown, not zero. [Groq's current prompt-caching
+documentation](https://console.groq.com/docs/prompt-caching) lists GPT-OSS
+models, but does not list `qwen/qwen3.8-27b` as supported (checked 31 October
+2026). Do not project GPT-OSS cache savings onto Qwen.

@@ -55,13 +55,22 @@ def test_saved_v1_board_read_pin_keeps_its_serialized_schema(tmp_path, monkeypat
 
     host = service(tmp_path, monkeypatch, transport)
     try:
-        current = host.catalog, host.configurations
-        host.catalog = host.board_read_v1_catalogs[0]
-        host.configurations = host.board_read_v1_configurations[0]
         run = host.start(LiveStartRequest(
             request_id="board-read-saved-v1", question="Review a synthetic claim.",
             agent_ids=["agent-synthesis"],
         ))
+        # A saved run predating these pins selects its historical tool registry.
+        saved_run = host._run(run.run_id)
+        historical = dict(saved_run["body"])
+        historical.pop("parallel_research_version")
+        historical.pop("reader_action_purpose_tool_version")
+        historical.pop("board_read_tool_version")
+        host.store.transact(
+            "fixture:board-read-v1-run", {"run_id": run.run_id},
+            lambda tx: tx.put("mission_run", run.run_id, historical,
+                              expected_version=saved_run["version"]),
+            mission_id=historical["mission_id"],
+        )
         drain(host, run.run_id)
         assert packets
         old_tool = _board_tool(packets[0])
@@ -72,11 +81,19 @@ def test_saved_v1_board_read_pin_keeps_its_serialized_schema(tmp_path, monkeypat
         call = host.store.get(**control["body"]["call_ref"])
         pinned = call["body"]["permitted_tools"]["board_read"]
         assert pinned["version"] == "1"
-        host.catalog, host.configurations = current
         catalog, configurations = host._tool_registry(control)
         assert catalog.tools["board_read"].descriptor() == pinned
         assert configurations.catalog is catalog
         assert host._configuration(control)["id"] == call["body"]["configuration_id"]
         assert _board_tool(packets[0]) == old_tool
+        reopened = service(tmp_path, monkeypatch, transport)
+        try:
+            saved_control = reopened._control(run.run_id, "agent-synthesis")
+            saved_catalog, _ = reopened._tool_registry(saved_control)
+            assert saved_catalog.tools["board_read"].descriptor() == pinned
+            assert reopened._configuration(saved_control)["id"] == call["body"][
+                "configuration_id"]
+        finally:
+            reopened.close()
     finally:
         host.close()

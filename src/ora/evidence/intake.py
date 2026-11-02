@@ -1967,8 +1967,33 @@ def checked_model_text(
         or quality["body"].get("source_sha256") != original_hash
     ):
         raise EvidenceError("Source copy, quality and use hashes disagree")
+    # A read window may cover the original pasted passage exactly. Keep both
+    # checked citation identities and locators, but place the same bytes in the
+    # model input once. Never coalesce merely because text matches: two source
+    # locations can independently contain the same words.
+    groups: list[list[dict[str, Any]]] = []
+    by_location: dict[tuple[str, str], int] = {}
+    for entry in entries:
+        passage = store.get(**entry["passage_ref"])
+        locator = entry["locator"]
+        key = (locator, entry["text"])
+        if prepared.submitted_text == entry["text"]:
+            if _is_exact_submitted_passage(passage, copy, prepared.submitted_text):
+                key = ("exact_whole_submission", entry["text"])
+            else:
+                prefix, _, bounds = locator.rpartition("; chars=")
+                blocks = prepared.blocks_by_locator.get(prefix, [])
+                if (bounds == f"0:{len(entry['text'])}"
+                        and len(blocks) == 1 and blocks[0] == entry["text"]):
+                    key = ("exact_whole_submission", entry["text"])
+        if key not in by_location:
+            by_location[key] = len(groups)
+            groups.append([])
+        groups[by_location[key]].append(entry)
     text = "\n\n".join(
-        f"[{entry['passage_ref']['id']} | {entry['locator']}]\n{entry['text']}" for entry in entries
+        "\n".join(f"[{entry['passage_ref']['id']} | {entry['locator']}]"
+                  for entry in group) + "\n" + group[0]["text"]
+        for group in groups
     )
     needs = []
     after_id = ""

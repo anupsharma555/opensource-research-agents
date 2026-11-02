@@ -67,9 +67,11 @@ def test_restart_with_removed_requested_tool_keeps_core_peer_turn(tmp_path, monk
         lambda request, *, timeout: answer("The peer can choose another method.", 2),
     )
     try:
-        # Simulate a compatible deployment in which this optional tool was removed.
-        restarted.catalog.tools.pop("write_note")
         control = restarted._control(receipt.run_id, "agent-synthesis")
+        # Remove the tool from this saved run's selected catalog. A parallel
+        # run does not consult the default catalog during model preparation.
+        catalog, _ = restarted._tool_registry(control)
+        catalog.tools.pop("write_note")
         assert restarted._schedule_model(control)
         intent = restarted.store.records("model_request_intent")[0]
         call = restarted.store.get(**intent["body"]["call_ref"])

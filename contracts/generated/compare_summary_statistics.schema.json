@@ -1,0 +1,74 @@
+{
+  "$defs": {
+    "SummaryStatisticsGroup": {
+      "additionalProperties": false,
+      "properties": {
+        "mean": {
+          "maximum": 1000000000000.0,
+          "minimum": -1000000000000.0,
+          "title": "Mean",
+          "type": "number"
+        },
+        "n": {
+          "maximum": 1000000,
+          "minimum": 2,
+          "title": "N",
+          "type": "integer"
+        },
+        "sampleSd": {
+          "maximum": 1000000000000.0,
+          "minimum": 0,
+          "title": "Samplesd",
+          "type": "number"
+        }
+      },
+      "required": [
+        "n",
+        "mean",
+        "sampleSd"
+      ],
+      "title": "SummaryStatisticsGroup",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "alternative": {
+      "enum": [
+        "two-sided",
+        "less",
+        "greater"
+      ],
+      "title": "Alternative",
+      "type": "string"
+    },
+    "groupA": {
+      "$ref": "#/$defs/SummaryStatisticsGroup"
+    },
+    "groupB": {
+      "$ref": "#/$defs/SummaryStatisticsGroup"
+    },
+    "units": {
+      "anyOf": [
+        {
+          "maxLength": 40,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Units"
+    }
+  },
+  "required": [
+    "groupA",
+    "groupB",
+    "alternative"
+  ],
+  "title": "CompareSummaryStatisticsInput",
+  "type": "object"
+}

@@ -11,9 +11,10 @@ import pytest
 
 from ora.contracts.models import LiveStartRequest
 from ora.coordination.board import ref
-from ora.mission.context import ContextError
+from ora.mission.context import ContextError, WorkingContext
 from ora.mission.report_lineage import report_text_access
 from ora.retrieval.providers import HTTPResult
+from ora.state import StateStore
 from tests.mission.test_service import _search_spec, serialized_peer_name, service, tool
 
 
@@ -63,10 +64,13 @@ def test_continuing_peer_answer_is_previewed_and_read_only_by_its_requester(
             assert card["question"] == "Mxra asks for an independent synthetic check."
             assert card["report_ref"] == report_ref
             assert card["report"]["body"] == text
-            seen.update(inclusion_id=card["read_request"]["inclusion_id"],
+            assert card["report_delivery"] == "complete_in_input"
+            inclusion_id = index["older_records"]["inclusion_id"]
+            seen.update(inclusion_id=inclusion_id,
                         report_ref=report_ref, answer_ref=answer)
-            read = dict(card["read_request"])
-            return tool(read.pop("tool"), read, 102)
+            return tool("read_context_record", {
+                "inclusion_id": inclusion_id, **report_ref, "offset": 0, "limit": 2000,
+            }, 102)
         if role == "Mxra" and step == 3:
             result = next(json.loads(message["content"])
                           for message in reversed(packet["messages"])
@@ -165,6 +169,54 @@ def test_continuing_peer_answer_is_previewed_and_read_only_by_its_requester(
         )
         assert window["report_text_status"] == "available"
         assert json.loads(window["text"])["body"] == text
+        assert not any(item.get("fetch") == seen["report_ref"]
+                       for item in inclusion["body"]["omitted"])
+        shared_ref = ref(host.store.transact(
+            "reactivated-shared-answer-route", {}, lambda tx: tx.put(
+                "context_inclusion", f"{inclusion['id']}:reactivated-shared", {
+                    **inclusion["body"],
+                    "omitted": [*inclusion["body"]["omitted"], {
+                        "type": "shared_material", "ref": seen["report_ref"],
+                        "fetch": seen["report_ref"],
+                    }],
+                }), mission_id=mission_id,
+        ))
+        shared_scope = {**scope, "inclusion_ref": shared_ref}
+        # This report was accepted, then its producer's current control woke
+        # and cleared report_ref. The exact mailbox answer still authorizes
+        # this requester's saved read, including after a read-only reopen.
+        reopened = WorkingContext(StateStore(tmp_path, read_only=True))
+        shared_cursor = len(inclusion["body"]["omitted"])
+        shared_page_scope = {key: shared_scope[key] for key in (
+            "mission_id", "actor_id", "task_id", "inclusion_ref",
+        )}
+        shared_card = reopened.read_omitted_page(
+            **shared_page_scope, cursor=shared_cursor, limit=1,
+        )["items"][0]["summary"]
+        assert shared_card["status"] == "peer_answer_text_available"
+        assert shared_card["read_request"]["id"] == seen["report_ref"]["id"]
+        first_shared = reopened.read_omitted_record(
+            **shared_scope, pointer=seen["report_ref"],
+        )
+        assert first_shared["report_text_status"] == "available"
+        assert json.loads(first_shared["text"])["body"] == text
+        assert reopened.read_omitted_record(
+            **shared_scope, pointer=seen["report_ref"],
+        ) == first_shared
+        with pytest.raises(ContextError):
+            reopened.read_omitted_record(
+                **{**shared_scope, "actor_id": sage["body"]["actor_id"]},
+                pointer=seen["report_ref"],
+            )
+        with pytest.raises(ContextError):
+            reopened.read_omitted_record(
+                **{**shared_scope, "task_id": sage["body"]["task_id"]},
+                pointer=seen["report_ref"],
+            )
+        with pytest.raises(ContextError):
+            reopened.read_omitted_record(
+                **shared_scope, pointer={**seen["report_ref"], "version": 2},
+            )
         with pytest.raises(ContextError, match="another peer or task"):
             host.context.read_omitted_record(
                 **{**scope, "actor_id": sage["body"]["actor_id"]},
@@ -179,12 +231,38 @@ def test_continuing_peer_answer_is_previewed_and_read_only_by_its_requester(
             "answer_refs"
         ][0]
         other_report_ref = host.store.get(**other_answer_ref)["body"]["artifact_ref"]
+        assert host.context.read_omitted_record(
+            **scope, pointer=other_report_ref,
+        )["report_text_status"] == "available"
+        unlinked_report = host.store.transact(
+            "unlinked-provisional-report", {}, lambda tx: tx.put(
+                "report", "unlinked-provisional-report", {
+                    "mission_id": mission_id, "title": "Unlinked synthetic report",
+                    "body": "This record has no route through the saved inclusion.",
+                    "citations": [], "limitations": [],
+                }), mission_id=mission_id,
+        )
         with pytest.raises(ContextError, match="not omitted"):
-            host.context.read_omitted_record(**scope, pointer=other_report_ref)
+            host.context.read_omitted_record(**scope, pointer=ref(unlinked_report))
         with pytest.raises(ContextError, match="exact omitted record reference"):
             host.context.read_omitted_record(
                 **scope, pointer={**seen["report_ref"], "version": "1"},
             )
+        use = host.store.resolve("source_use.copy", f"{source_ref['id']}:{source_ref['version']}")
+        host.store.transact("unknown-provisional-source", {}, lambda tx: tx.put(
+            "source_use", use["id"], {
+                **use["body"], "policy_status": "unknown",
+            }, expected_version=use["version"]), mission_id=mission_id)
+        unknown_shared = reopened.read_omitted_record(
+            **shared_scope, pointer=seen["report_ref"],
+        )
+        assert unknown_shared["report_text_status"] == "data_unavailable_due_source_use"
+        assert text not in unknown_shared["text"]
+        unknown_card = reopened.read_omitted_page(
+            **shared_page_scope, cursor=shared_cursor, limit=1,
+        )["items"][0]["summary"]
+        assert unknown_card["status"] == "peer_answer_text_withheld"
+        assert unknown_card.get("title") is None
         use = host.store.resolve("source_use.copy", f"{source_ref['id']}:{source_ref['version']}")
         host.store.transact("revoke-provisional-source", {}, lambda tx: tx.put(
             "source_use", use["id"], {
@@ -195,6 +273,16 @@ def test_continuing_peer_answer_is_previewed_and_read_only_by_its_requester(
         )
         assert revoked_window["report_text_status"] == "data_unavailable_due_source_use"
         assert text not in revoked_window["text"]
+        revoked_shared = reopened.read_omitted_record(
+            **shared_scope, pointer=seen["report_ref"],
+        )
+        assert revoked_shared["report_text_status"] == "data_unavailable_due_source_use"
+        assert text not in revoked_shared["text"]
+        revoked_card = reopened.read_omitted_page(
+            **shared_page_scope, cursor=shared_cursor, limit=1,
+        )["items"][0]["summary"]
+        assert revoked_card["status"] == "peer_answer_text_withheld"
+        assert revoked_card.get("title") is None
         request = host.store.get("mail_request", "to-sage")
         answer = host.store.get(**seen["answer_ref"])
         assert host.context._peer_answer_preview(
@@ -209,5 +297,13 @@ def test_continuing_peer_answer_is_previewed_and_read_only_by_its_requester(
             }, expected_version=current["version"]), mission_id=mission_id)
         with pytest.raises(ContextError, match="not omitted"):
             host.context.read_omitted_record(**scope, pointer=seen["report_ref"])
+        with pytest.raises(ContextError, match="Shared material is no longer available"):
+            reopened.read_omitted_record(
+                **shared_scope, pointer=seen["report_ref"],
+            )
+        unlinked_card = reopened.read_omitted_page(
+            **shared_page_scope, cursor=shared_cursor, limit=1,
+        )["items"][0]["summary"]
+        assert unlinked_card == {"kind": "report", "status": "shared_material_unavailable"}
     finally:
         host.close()

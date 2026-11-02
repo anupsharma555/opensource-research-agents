@@ -14,6 +14,7 @@ from ora.mission.context import ContextError
 from ora.mission.report_lineage import report_text_access
 from ora.models.session import SessionError
 from ora.retrieval.providers import HTTPResult
+from tests.mission.availability_assertions import request_first_names
 from tests.mission.test_service import _search_spec, answer, serialized_peer_name, service, tool
 
 
@@ -605,15 +606,15 @@ def test_attached_tool_notice_matches_local_and_native_manifests(tmp_path, monke
             assert attached_native is native
             if native:
                 assert attached_local == set()
-                assert notices[0]["request_first_local_functions"] == []
+                assert request_first_names(packet, notices[0]) == set()
                 assert notices[0]["local_functions_resume_after_native_turn"] is True
             else:
                 assert "board_read" in attached_local
-                assert "write_note" in notices[0]["request_first_local_functions"]
+                assert "write_note" in request_first_names(packet, notices[0])
                 assert not {"activate_skill", "release_skill", "release_capability"} & set(
-                    notices[0]["request_first_local_functions"]
+                    request_first_names(packet, notices[0])
                 )
-                assert "inspect_hit" not in notices[0]["request_first_local_functions"]
+                assert "inspect_hit" not in request_first_names(packet, notices[0])
                 assert notices[0]["not_ready_local_functions"] == {
                     "inspect_hit": "Get an eligible saved search result first.",
                     "modify_plan": "Create a plan with save_plan before modifying it.",
@@ -621,7 +622,7 @@ def test_attached_tool_notice_matches_local_and_native_manifests(tmp_path, monke
                     "a new run can explicitly set allowVision=true.",
                 }
                 assert not ({"claim_work", "subscribe"} & set(
-                    notices[0]["request_first_local_functions"]
+                    request_first_names(packet, notices[0])
                 ))
     finally:
         host.close()

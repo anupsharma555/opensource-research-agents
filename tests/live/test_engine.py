@@ -992,3 +992,24 @@ def test_legacy_host_rejects_backup_before_saving_or_calling(tmp_path, followup)
         assert provider.sage_calls == provider.mira_calls == 0
     finally:
         host.close()
+
+
+@pytest.mark.parametrize("choices", [{}, {
+    "agent-synthesis": {"model": "qwen/qwen3.8-27b"},
+}])
+def test_legacy_host_rejects_model_choices_before_saving_or_calling(tmp_path, choices):
+    provider = FakeProvider()
+    host = ResearchHost(ROOT, tmp_path, provider)
+    try:
+        request = LiveStartRequest(
+            request_id="model-choice-fixture", question="Inspect the fixture",
+            agent_ids=["agent-synthesis"], evidence_text="Fixture text",
+            agent_models=choices,
+        )
+        with pytest.raises(LiveError, match="Agent model choices"):
+            host.start(request)
+        with host._connect() as db:
+            assert db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
+        assert provider.sage_calls == provider.mira_calls == 0
+    finally:
+        host.close()

@@ -1,0 +1,399 @@
+{
+  "schema": "ora.evidence_fts_eval.v1",
+  "entries": [
+    {
+      "entry_id": "e01",
+      "version": 1,
+      "head_version": 1,
+      "source_key": "s01:v1",
+      "title": "Bright light therapy and sleep timing",
+      "relevance_note": "Synthetic randomized comparison of morning bright light therapy for delayed sleep timing.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "permitted"
+    },
+    {
+      "entry_id": "e02",
+      "version": 1,
+      "head_version": 1,
+      "source_key": "s02:v1",
+      "title": "Light exposure after therapy sessions",
+      "relevance_note": "Synthetic observations of sleep timing after unrelated behavioral therapy and incidental room light.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "permitted"
+    },
+    {
+      "entry_id": "e03",
+      "version": 1,
+      "head_version": 1,
+      "source_key": "s03:v1",
+      "title": "No evidence of mortality benefit",
+      "relevance_note": "Synthetic trial summary states no evidence of mortality benefit despite a surrogate change.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "permitted"
+    },
+    {
+      "entry_id": "e04",
+      "version": 1,
+      "head_version": 1,
+      "source_key": "s04:v1",
+      "title": "Evidence of mortality benefit with no event counts",
+      "relevance_note": "Synthetic summary asserts mortality benefit but supplies no event counts for checking it.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "permitted"
+    },
+    {
+      "entry_id": "e05",
+      "version": 1,
+      "head_version": 1,
+      "source_key": "s05:v1",
+      "title": "PTSD and sleep symptoms",
+      "relevance_note": "Synthetic study of trauma-related sleep symptoms using the abbreviation PTSD.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "permitted"
+    },
+    {
+      "entry_id": "e06",
+      "version": 1,
+      "head_version": 1,
+      "source_key": "s06:v1",
+      "title": "Posttraumatic stress disorder and sleep symptoms",
+      "relevance_note": "Synthetic study of sleep symptoms in posttraumatic stress disorder.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "permitted"
+    },
+    {
+      "entry_id": "e07",
+      "version": 1,
+      "head_version": 1,
+      "source_key": "s07:v1",
+      "title": "Dose comparison: 0.5 mg each day",
+      "relevance_note": "Synthetic measurement sheet for a half-milligram daily quantity; no treatment advice.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "permitted"
+    },
+    {
+      "entry_id": "e08",
+      "version": 1,
+      "head_version": 1,
+      "source_key": "s08:v1",
+      "title": "Dose comparison: 0.05 mg each day",
+      "relevance_note": "Synthetic measurement sheet for a twentieth-milligram daily quantity; no treatment advice.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "permitted"
+    },
+    {
+      "entry_id": "e09",
+      "version": 1,
+      "head_version": 1,
+      "source_key": "s09:v1",
+      "title": "Follow-up completeness after six months",
+      "relevance_note": "Synthetic study of missing follow-up measurements at six months.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "permitted"
+    },
+    {
+      "entry_id": "e10",
+      "version": 1,
+      "head_version": 1,
+      "source_key": "s10:v1",
+      "title": "Sleep restriction and attention",
+      "relevance_note": "Synthetic study evaluates attention after experimentally restricted sleep.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "permitted"
+    },
+    {
+      "entry_id": "e11",
+      "version": 1,
+      "head_version": 1,
+      "source_key": "s11:v1",
+      "title": "Attention training and dietary restriction",
+      "relevance_note": "Synthetic attention training study with dietary restriction; sleep is only a recorded covariate.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "permitted"
+    },
+    {
+      "entry_id": "e12",
+      "version": 1,
+      "head_version": 1,
+      "source_key": "s12:v1",
+      "title": "Attention OR sleep as literal labels",
+      "relevance_note": "Synthetic codebook defines the literal label Attention OR sleep; no Boolean query is implied.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "permitted"
+    },
+    {
+      "entry_id": "e13",
+      "version": 1,
+      "head_version": 1,
+      "source_key": "s13:v1",
+      "title": "Peer-reviewed evidence synthesis protocol",
+      "relevance_note": "Synthetic protocol for extracting outcomes and identifying duplicate trial reports.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "permitted"
+    },
+    {
+      "entry_id": "e14",
+      "version": 1,
+      "head_version": 1,
+      "source_key": "s14:v1",
+      "title": "Exploratory cortisol association",
+      "relevance_note": "Synthetic exploratory biomarker association without a prespecified hypothesis.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "permitted"
+    },
+    {
+      "entry_id": "e15",
+      "version": 1,
+      "head_version": 1,
+      "source_key": "s15:v1",
+      "title": "Prespecified cortisol association",
+      "relevance_note": "Synthetic registered biomarker association with a prespecified hypothesis.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "permitted"
+    },
+    {
+      "entry_id": "e16",
+      "version": 2,
+      "head_version": 2,
+      "source_key": "s16:v2",
+      "title": "Updated signal after correction",
+      "relevance_note": "Synthetic corrected record replaces the obsolete old signal statement.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "permitted"
+    },
+    {
+      "entry_id": "e17",
+      "version": 1,
+      "head_version": 1,
+      "source_key": "s17:v1",
+      "title": "Retired marker trial",
+      "relevance_note": "Synthetic record has revoked permission and must not appear in results.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "revoked"
+    },
+    {
+      "entry_id": "e18",
+      "version": 1,
+      "head_version": 1,
+      "source_key": "s18:v1",
+      "title": "Foreign-only marker trial",
+      "relevance_note": "Synthetic record belongs to an inaccessible peer task and must not appear.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "foreign"
+    },
+    {
+      "entry_id": "e19",
+      "version": 1,
+      "head_version": 1,
+      "source_key": "s01:v1",
+      "title": "Bright light therapy and sleep timing",
+      "relevance_note": "Duplicate curated entry for the same synthetic source as e01.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "permitted"
+    },
+    {
+      "entry_id": "e20",
+      "version": 1,
+      "head_version": 1,
+      "source_key": "s20:v1",
+      "title": "Physical activity and mood",
+      "relevance_note": "Synthetic observational study; unrelated to the targeted sleep queries.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "permitted"
+    },
+    {
+      "entry_id": "e21",
+      "version": 1,
+      "head_version": 1,
+      "source_key": "s21:v1",
+      "title": "Mortality benefit uncertainty",
+      "relevance_note": "Synthetic discussion of imprecision; it does not report evidence of no benefit.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "permitted"
+    },
+    {
+      "entry_id": "e22",
+      "version": 1,
+      "head_version": 1,
+      "source_key": "s22:v1",
+      "title": "Sleep timing in children",
+      "relevance_note": "Synthetic childhood observations, with no light intervention or therapy.",
+      "curated_at": "2026-01-01T00:00:00Z",
+      "permission": "permitted"
+    },
+    {
+      "entry_id": "e16",
+      "version": 1,
+      "head_version": 2,
+      "source_key": "s16:v1",
+      "title": "Obsolete old signal statement",
+      "relevance_note": "Synthetic superseded claim only.",
+      "curated_at": "2025-01-01T00:00:00Z",
+      "permission": "permitted"
+    }
+  ],
+  "queries": [
+    {
+      "query_id": "q01",
+      "text": "bright light therapy",
+      "relevant_source_keys": [
+        "s01:v1"
+      ],
+      "tags": [
+        "phrase",
+        "deduplicate"
+      ]
+    },
+    {
+      "query_id": "q02",
+      "text": "no evidence of mortality benefit",
+      "relevant_source_keys": [
+        "s03:v1"
+      ],
+      "tags": [
+        "negation",
+        "phrase"
+      ]
+    },
+    {
+      "query_id": "q03",
+      "text": "posttraumatic stress disorder sleep",
+      "relevant_source_keys": [
+        "s05:v1",
+        "s06:v1"
+      ],
+      "tags": [
+        "abbreviation",
+        "semantic_gap"
+      ]
+    },
+    {
+      "query_id": "q04",
+      "text": "PTSD sleep",
+      "relevant_source_keys": [
+        "s05:v1",
+        "s06:v1"
+      ],
+      "tags": [
+        "abbreviation",
+        "semantic_gap"
+      ]
+    },
+    {
+      "query_id": "q05",
+      "text": "0.5 mg",
+      "relevant_source_keys": [
+        "s07:v1"
+      ],
+      "tags": [
+        "numeric",
+        "punctuation"
+      ]
+    },
+    {
+      "query_id": "q06",
+      "text": "0.05 mg",
+      "relevant_source_keys": [
+        "s08:v1"
+      ],
+      "tags": [
+        "numeric",
+        "punctuation"
+      ]
+    },
+    {
+      "query_id": "q07",
+      "text": "follow-up completeness",
+      "relevant_source_keys": [
+        "s09:v1"
+      ],
+      "tags": [
+        "punctuation"
+      ]
+    },
+    {
+      "query_id": "q08",
+      "text": "sleep restriction",
+      "relevant_source_keys": [
+        "s10:v1"
+      ],
+      "tags": [
+        "phrase",
+        "scope"
+      ]
+    },
+    {
+      "query_id": "q09",
+      "text": "Attention OR sleep",
+      "relevant_source_keys": [
+        "s12:v1"
+      ],
+      "tags": [
+        "literal_operator"
+      ]
+    },
+    {
+      "query_id": "q10",
+      "text": "duplicate trial reports",
+      "relevant_source_keys": [
+        "s13:v1"
+      ],
+      "tags": [
+        "metadata"
+      ]
+    },
+    {
+      "query_id": "q11",
+      "text": "prespecified cortisol association",
+      "relevant_source_keys": [
+        "s15:v1"
+      ],
+      "tags": [
+        "negation",
+        "scope"
+      ]
+    },
+    {
+      "query_id": "q12",
+      "text": "obsolete old signal",
+      "relevant_source_keys": [],
+      "tags": [
+        "stale_version"
+      ]
+    },
+    {
+      "query_id": "q13",
+      "text": "updated signal",
+      "relevant_source_keys": [
+        "s16:v2"
+      ],
+      "tags": [
+        "current_version"
+      ]
+    },
+    {
+      "query_id": "q14",
+      "text": "retired marker",
+      "relevant_source_keys": [],
+      "tags": [
+        "revoked"
+      ]
+    },
+    {
+      "query_id": "q15",
+      "text": "foreign-only marker",
+      "relevant_source_keys": [],
+      "tags": [
+        "foreign"
+      ]
+    },
+    {
+      "query_id": "q16",
+      "text": "unrepresented zebrafish pathway",
+      "relevant_source_keys": [],
+      "tags": [
+        "absent"
+      ]
+    }
+  ]
+}

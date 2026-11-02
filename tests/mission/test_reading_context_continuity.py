@@ -1,6 +1,7 @@
 """Current scope and saved reading choices survive a normal model handoff."""
 
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -8,7 +9,9 @@ from ora.contracts.models import LiveStartRequest
 from ora.coordination.board import ref
 from ora.evidence.intake import IntakeService
 from ora.evidence.library import EvidenceLibrary
+from ora.mission.context import ContextError
 from ora.models.session import SessionError
+from ora.state.store import canonical
 from tests.evidence import test_document_ocr as document_fixture
 from tests.mission.test_service import answer, drain, service, tool
 
@@ -95,6 +98,10 @@ def test_saved_text_search_navigation_and_full_saved_page(tmp_path, monkeypatch)
             navigation = index["latest_saved_passage_navigation"]
             assert navigation["query"] == "Table 1"
             assert navigation["status"] == "saved_lexical_navigation_not_checked_claim_evidence"
+            assert navigation["read_choices_status"] == (
+                "Suggested next reads, not executed-read records or evidence "
+                "of completed coverage."
+            )
             assert navigation["coverage"] == "complete_retained_extracted_text"
             assert navigation["read_choices_from_saved_result"]
             action = navigation["read_choices_from_saved_result"][0]["read"]
@@ -188,6 +195,23 @@ def test_saved_text_search_navigation_and_full_saved_page(tmp_path, monkeypatch)
             archived_tool_turn_refs=[search_response])
         dependencies = host.context.context_source_dependency_refs(pack)
         assert second_ref in dependencies
+        old_messages = [dict(message) for message in pack.messages]
+        old_index = json.loads(old_messages[-1]["content"])
+        old_index["latest_saved_passage_navigation"].pop("read_choices_status")
+        old_messages[-1]["content"] = canonical(old_index)
+        assert host.context.context_source_dependency_refs(
+            replace(pack, messages=old_messages)
+        ) == dependencies
+        altered_messages = [dict(message) for message in pack.messages]
+        altered_index = json.loads(altered_messages[-1]["content"])
+        altered_index["latest_saved_passage_navigation"]["read_choices_status"] = (
+            "Executed and complete"
+        )
+        altered_messages[-1]["content"] = canonical(altered_index)
+        with pytest.raises(ContextError, match="Saved-passage navigation changed"):
+            host.context.context_source_dependency_refs(
+                replace(pack, messages=altered_messages)
+            )
         producing_intent = host.store.transact("synthetic-producing-only-intent", {},
             lambda tx: ref(tx.put("model_request_intent", "synthetic-producing-only-intent",
                 {**nav_intent["body"], "context_source_dependency_refs": list(dependencies)})),

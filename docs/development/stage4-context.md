@@ -15,6 +15,21 @@ An incoming request remains visible to its named recipient even when its task
 reference names the sender's different proposal. The recipient sees the exact
 originating message and current request state; requester-side task scoping stays
 with the sender's proposal.
+The incoming card marks an unanswered or partly answered request with
+`response_needed: true` beside its text when the input allowance permits. A fully included question carries the
+exact `publish_result(answer_request_id=...)` reply route when callable, or a
+`reply_setup` action to request that permitted tool first. A prefix-only question
+keeps its full-question reader instead of a premature reply route. Answered,
+awaiting-review and cancelled requests do not keep an incoming response cue.
+If the complete current question is already in a verified tool-reading result,
+the compact card can carry the exact reply action without duplicating that text.
+This presentation does not raise the peer text's authority or prescribe its
+scientific answer; source scope, tool grants and accepted request state still
+govern execution. Packer v94 records this input change without rewriting saved
+requests or changing the mailbox/tool schemas. Added response cues are fitted
+after text packing, so they cannot shorten a previously fitting question or
+source; current status and standing reply instructions still identify the work
+when there is no room for the added cue.
 The run question, scope and settings, source copies, working notes, reports,
 exact `model_request_intent` bytes and `context_inclusion` omissions share the
 same `StateStore` and immutable object store. A saved input is not automatically
@@ -76,6 +91,37 @@ peer can distinguish tools it can call now from tools it must request first.
 The catalog preserves source-use checks and leaves scientific choices and
 whether to request critique with the agents. Access, actual delivery, reading,
 peer review and useful contribution remain separate evaluation outcomes.
+
+New runs pin the optional `peer_turn` contract. It lets a peer submit a report,
+review an exact answer, and ask an independent follow-up in one model response.
+`ora.mission.peer_turn` records each operation separately: an invalid review does
+not discard a valid reply, while a final revision depends on that turn's saved
+review. Reply reports keep the producer's task open. The recipient can read the
+linked reply under the existing ownership and current source-use checks; it is
+not a final shared result. Version checks also apply inside the review and reply
+transactions, including replay after restart.
+
+The bundle remains optional and may be deferred when its schema competes with
+source or peer text. Existing single-action tools and older pinned runs keep
+their contracts. Inspect the exact prepared tools and included question, answer
+or reader cue before claiming that bundling saves a model call. Offline combined
+actions establish routing and acceptance behavior, not natural model uptake or
+a completed reciprocal scientific exchange.
+
+When the complete selected-source request cannot fit, packer v85 also tries the
+latest requested checked window together with all checked selections from other
+previously read copies. This is one transient group, not a relevance ranking or
+a change to the saved source selection. Saved read history, current permissions
+and the complete serialized request determine whether it is usable. Source-window
+candidates must preserve pending peer material or an exact usable reading route;
+otherwise preparation keeps the established recovery path. Coverage remains
+explicitly partial when other passages are omitted.
+
+Navigation choices may be paged when their exact requested ranges and checked
+passage references already appear in those source packets. The versioned
+projection retains uncovered choices and a reader for the original saved list,
+and is recomputed during input validation. A matching source ID alone is
+insufficient. Older prepared requests retain their original bytes.
 
 Call `assemble(call_ref, task_ref, ...)` before `ModelSession.prepare`. Pass the
 returned `pack.messages` to the model bridge and the same exact source-copy
@@ -140,6 +186,12 @@ forecast exceeds the limit; its receipt records zero applied headroom. An actual
 413 still requires a smaller request. Qualification-imposed input limits keep
 their explicit experimental meaning. Raw tokenizer counts, this packing reserve,
 and successful-response usage are recorded separately.
+
+Fresh live runs can reuse verified, project-scoped provider-limit observations
+before their first request. Before a permissive forecast probe, an additional
+input-only packing pass preserves selected source text while reducing context
+metadata. Read [provider input sizing](provider-input-sizing.md) for the scoped
+cache, expiry, offline isolation, final count fields and proof limits.
 
 Packer v7 preserves the current assistant tool call, its exact call ID and
 arguments, and the matched tool result. It does not resend provider-returned
@@ -537,6 +589,15 @@ The original-source reader is attached automatically when source evidence is
 selected or source recovery needs it. Source-free tasks keep it requestable;
 explicit selection also attaches it. This avoids repeating its full schema in
 memo-only turns while retaining the same permission and source-use checks.
+
+Packer v75 keeps the exact `read_context_record` action for the accepted parent **report** in a tightly packed source-free follow-up, shortening a duplicate preview first. A report ID is not a source-copy ID: `read_source_window` needs an inspected source copy and cannot supply invented citation spans for a prior answer. If the peer passes the exact accepted parent report ID to that source reader, the local rejection supplies `read_parent_report.arguments` for the current inclusion and explains the correct reader. Other IDs get no parent-report hint. The report reader still checks the same task, exact parent lineage and current source-use permission before returning text. Very tight selected-source turns can page parent detail through `older_records`; the saved parent, child scope and source restrictions are not rewritten. Saved request blobs are not rewritten; this is a new preparation projection and a narrower correction after a rejected local action, not evidence that a live model will choose it.
+
+Packer v76 removes a duplicate parent preview only after the exact complete,
+currently permitted source-free report is present in the current tool result.
+It labels that material as prior agent output and explains that it cannot supply
+original-source citation spans. A final page alone is insufficient: offset zero,
+matching returned/total/text lengths and complete source-free lineage are required.
+Partial and source-dependent reads retain their existing navigation and checks.
 
 Native browser turns expose only the provider's browser descriptor. Their notice
 states that local functions return on the next ordinary turn. Historical error

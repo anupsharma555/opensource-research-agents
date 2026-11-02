@@ -260,9 +260,7 @@ def test_service_serializes_cue_under_observed_input_pressure(
     try:
         run = host.start(LiveStartRequest(
             request_id="cue-service-start",
-            question=("Prepare a brief methods note for internal research operations review. "
-                      "Compare two synthetic sites using counts and a colleague audit. "
-                      "State observations and qualifications."),
+            question="Compare the synthetic site counts and colleague audit; report limits.",
             evidence_text=("Synthetic count sheet. Site A: 82 observed responses among "
                            "100 invited. Site B: 86 observed responses among 100 invited. "
                            "These counts are unadjusted and lack an identity audit."),
@@ -297,7 +295,7 @@ def test_service_serializes_cue_under_observed_input_pressure(
         host._update_control(host._control(run.run_id, "agent-synthesis"),
                              input_budget={
                                  "observed_limit_tokens": 8000,
-                                 "target_fraction": .70,
+                                 "target_fraction": .75,
                                  "basis": "qualification_imposed_limit",
                                  "actual_provider_observation": False,
                              })
@@ -349,6 +347,9 @@ def test_service_serializes_cue_under_observed_input_pressure(
         counterfactual["messages"][-1]["content"] = canonical(without)
         before = estimate_request_tokens(canonical(counterfactual).encode()).tokens
         after = estimate_request_tokens(raw).tokens
+        budget = host.store.get("mission_call_budget", call["id"])["body"]
+        target = budget["request_stage_token_estimate"]["admission_target_tokens"]
+        assert after <= target <= 8000
         assert after - before <= 101
         (tmp_path / "packet.json").write_bytes(raw)
         (tmp_path / "proof.json").write_text(json.dumps({

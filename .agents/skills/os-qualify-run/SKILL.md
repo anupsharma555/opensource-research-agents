@@ -2,7 +2,7 @@
 name: os-qualify-run
 description: Evaluate research runs across project stages using saved execution, context, API usage, evidence, collaboration, recovery, storage and presentation records. Use for run diagnostics, an explicit parallel test batch or deciding the next development test; distinguish live work from replay or fixtures. Do not use for the offline foundation alone.
 metadata:
-  version: 0.3.2
+  version: 0.3.3
 ---
 
 # Qualify a saved research run
@@ -50,3 +50,17 @@ Follow applicable evidence in order: request and selected run → saved task/att
 Live qualification needs the user's explicit prior authorization for provider calls; existing authorization remains valid within its stated scope. Use only the selected runtime's verified activation and overlap controls. Do not start, resume, cancel or submit live work merely to make a receipt. Never silently switch provider, account, model, reasoning settings or auth mode. Keep raw prompts, source bodies, private returned reasoning, credentials and personal identifiers out of summaries and tracked files.
 
 Report offline checks, saved-record evidence, live calls actually authorized and observed, UI evidence, and continuing or unknown work as separate proof layers. Give exact run IDs only in the private receipt or appropriately private handoff. The receipt is a diagnostic aid, not a scientific acceptance score or billing statement.
+
+## Close the loop in Linear
+
+After each concluded run or observation window, reconcile the reviewed evidence
+with the linked issue's current checklist before choosing the next test. When
+tracker updates are authorized, fresh-read the issue, check only fully satisfied
+items, and save a succinct update for meaningful progress, failures or blockers:
+what was demonstrated, the supporting evidence and proof limits, and the next
+remaining check. Keep partial or unexercised items open; a stopped observation
+is not mission completion. Preserve unrelated criteria and issue state, avoid
+duplicate/no-change comments, and read back the saved changes. Use
+`codex-general-linear-update` when available for writing and verification.
+Keep raw traces private. If writes are prohibited or unavailable, save a private
+pending update and state that Linear is unchanged; do not silently omit the step.

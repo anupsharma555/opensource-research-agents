@@ -6,7 +6,7 @@ import json
 import pytest
 
 from ora.contracts.models import LiveStartRequest
-from ora.models.token_estimate import estimate_request_tokens
+from ora.models.token_estimate import estimate_context_tokens, estimate_request_tokens
 from ora.retrieval.providers import HTTPResult
 from tests.mission.test_service import answer, drain, service, tool
 
@@ -114,7 +114,20 @@ def test_repeated_html_read_and_fetch_report_no_new_work(
         ))
         drain(host, run.run_id, limit=30)
         assert len(packets) == 8
-        assert max(request_tokens) < 8000
+        source_tool_names = {"fetch_source", "read_source_window"}
+        assert all(sum(message.get("role") == "tool"
+                       and message.get("name") in source_tool_names
+                       for message in packet["messages"]) == 1
+                   for packet in packets[5:])
+        assert packets[5]["tools"] == packets[6]["tools"] == packets[7]["tools"]
+        repeated_reply = next(message for message in packets[6]["messages"]
+                              if message.get("role") == "tool"
+                              and message.get("name") == "read_source_window")
+        # Repeating the same window adds less context than replaying its full reply.
+        assert request_tokens[6] - request_tokens[5] < estimate_context_tokens(
+            repeated_reply["content"]
+        )
+        assert request_tokens[7] <= request_tokens[6]
         assert fetched_urls == ["https://example.org/synthetic"]
         replies = []
         for record in host.store.records("context_tool_result"):

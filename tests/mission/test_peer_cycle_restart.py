@@ -27,6 +27,16 @@ def _deny_sockets(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect_ex", forbidden)
 
 
+def _allow_offline_fixture_profile(monkeypatch, state_dir: Path) -> None:
+    # This process-loss test uses a synthetic adapter, independent of the
+    # operator's current selection for real provider credentials.
+    path = state_dir / "offline-credential-profiles.json"
+    path.write_text(json.dumps({
+        "version": 1, "profiles": {"primary": {"enabled": True}},
+    }), encoding="utf-8")
+    monkeypatch.setattr("ora.credentials.PROFILE_CONFIG_PATH", str(path))
+
+
 def _last_tool(body: dict) -> tuple[str, dict]:
     for message in reversed(body["messages"]):
         if message["role"] == "tool":
@@ -43,6 +53,7 @@ def _cycle_child(state_dir: str, sender) -> None:
     assert helper.ROOT == ROOT
     patch = pytest.MonkeyPatch()
     _deny_sockets(patch)
+    _allow_offline_fixture_profile(patch, Path(state_dir))
     turns = {"Sage": 0, "Mxra": 0}
     requests = {}
     host = None
@@ -201,18 +212,19 @@ def test_three_peer_cycle_restart_keeps_independent_branch_and_exact_reviews(
 ):
     checkpoint = _kill_after_wait_checkpoint(tmp_path)
     _deny_sockets(monkeypatch)
+    _allow_offline_fixture_profile(monkeypatch, tmp_path)
     requests = checkpoint["requests"]
     host = None
     observed = {"feedback": set(), "cycle_fingerprints": set(),
-                "read": set(), "reviewed": set(), "independent": 0,
-                "independent_while_unresolved": False, "calls": []}
+                "delivered": set(), "reviewed": set(), "independent": 0,
+                "independent_while_unresolved": False, "calls": [], "errors": []}
     report_text = {
         "Sage": "Sage's synthetic limited response.",
         "Mxra": "Mxra's synthetic limited response.",
     }
     revised_sage_text = "Sage's revised limited response after reviewing Mxra's saved report."
 
-    def transport(request, *, timeout):
+    def scripted_transport(request, *, timeout):
         body = json.loads(request.data)
         role = serialized_peer_name(body, ("Sage", "Mxra", "Remy"))
         if role == "Remy":
@@ -240,22 +252,22 @@ def test_three_peer_cycle_restart_keeps_independent_branch_and_exact_reviews(
                 cycle["fingerprint"] for feedback in feedback_messages
                 for cycle in feedback["cycles"]
             )
-        if (outgoing["body"]["answer_refs"] and role not in observed["read"]
-                and name != "read_context_record"):
+        if outgoing["body"]["answer_refs"] and role not in observed["delivered"]:
             context = json.loads(body["messages"][-1]["content"])
             answer_ref = outgoing["body"]["answer_refs"][0]
             peer_report_ref = host.store.get(**answer_ref)["body"]["artifact_ref"]
-            assert answer_ref in context["request_answer_refs"]
-            material = next(item for item in context["shared_materials"]["entries"]
-                            if item["ref"] == peer_report_ref)
-            return tool("read_context_record", {
-                key: value for key, value in material["read_request"].items()
-                if key != "tool"
-            }, 400 if role == "Sage" else 500)
-        if name == "read_context_record":
-            assert result["report_text_status"] == "available"
-            assert json.loads(result["text"])["body"] == report_text[other]
-            observed["read"].add(role)
+            preview = next(item for item in context["peer_answer_previews"]
+                           if item["answer_ref"] == answer_ref)
+            assert preview["request_ref"]["id"] == outgoing["id"]
+            assert preview["request_status"] in {"awaiting_review", "partial_awaiting_review"}
+            assert preview["question"] == f"Check {role}'s synthetic limitation independently."
+            assert preview["report_ref"] == peer_report_ref
+            assert preview["report"]["body"] == report_text[other]
+            assert preview["report_delivery"] == "complete_in_input"
+            assert "review_peer_answer" in {
+                item["function"]["name"] for item in body["tools"]
+            }
+            observed["delivered"].add(role)
             return tool("review_peer_answer", {
                 "request_id": outgoing["id"],
                 "answer_id": outgoing["body"]["answer_refs"][0]["id"],
@@ -295,6 +307,13 @@ def test_three_peer_cycle_restart_keeps_independent_branch_and_exact_reviews(
             }], "reason": "Await the saved partial peer answer."}, 503)
         raise AssertionError(f"Unexpected {role} continuation after {name}")
 
+    def transport(request, *, timeout):
+        try:
+            return scripted_transport(request, timeout=timeout)
+        except Exception as exc:
+            observed["errors"].append(f"{type(exc).__name__}: {exc}")
+            raise
+
     host = service(tmp_path, monkeypatch, transport)
     receipt_ids = set()
     report_refs = []
@@ -320,13 +339,15 @@ def test_three_peer_cycle_restart_keeps_independent_branch_and_exact_reviews(
             if any(item["body"]["phase"] == "model_response_lost"
                    for item in host.store.records("executor_work")):
                 break
+            if observed["errors"]:
+                break
             time.sleep(0.01)
         assert host._run(checkpoint["run_id"])["body"]["status"] == "completed", observed
         assert observed["independent"] == 1
         assert observed["independent_while_unresolved"] is True
         assert observed["feedback"]
         assert observed["cycle_fingerprints"] == {checkpoint["cycle_fingerprint"]}
-        assert observed["read"] == {"Sage", "Mxra"}
+        assert observed["delivered"] == {"Sage", "Mxra"}
         assert observed["reviewed"] == {"Sage", "Mxra"}
         assert len(host.store.records("mail_request")) == 2
         assert len(host.store.records("mail_answer")) == 2

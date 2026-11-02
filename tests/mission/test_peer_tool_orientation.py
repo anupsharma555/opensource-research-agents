@@ -12,6 +12,8 @@ from ora.contracts.models import LiveStartRequest
 from ora.mission.context import ContextError, WorkingContext
 from ora.models.token_estimate import estimate_request_tokens
 from ora.state.store import canonical
+from tests.mission.availability_assertions import request_first_names
+from tests.mission.test_peer_queued_freshness import _spec
 from tests.mission.test_service import service
 from tests.mission.test_tool_result_paging import save_result
 
@@ -76,17 +78,15 @@ def test_actual_peer_request_names_registered_alias_and_deferred_invitation(
         )
         for prepared in (packet, sage_packet):
             instructions = prepared["messages"][0]["content"]
-            assert "Build a provisional answer from permitted evidence when feasible" in instructions
-            assert "Ask focused questions early for genuine gaps or later validation" in instructions
-            assert "Address existing incoming requests before asking for another independent check" in instructions
-            assert "answer when able, even while your own check is pending" in instructions
-            assert "read the saved question if only refs appear" in instructions.casefold()
-            assert "For replies to your requests, if report text is absent" in instructions
-            assert "use the supplied read_request with read_context_record directly" in instructions
-            assert "request_capability for it only when absent" in instructions
-            assert "use review_peer_answer to record whether it answers your question" in instructions
-            assert "publication is not a review" in instructions
-            assert "Check pending asks/answers before duplicating" in instructions
+            assert "Build provisional answers from permitted evidence" in instructions
+            assert "For a genuine blocking gap, ask a focused question first" in instructions
+            assert "Answer incoming requests when able" in instructions
+            assert "even while your own check is pending" in instructions
+            assert "Read omissions by exact coordinates" in instructions
+            assert "A fully delivered question has no hidden suffix" in instructions
+            assert "without rereading it" in instructions
+            assert "review_peer_answer and exact IDs" in instructions
+            assert "Check pending asks, answers and source coverage" in instructions
             functions = {item["function"]["name"]: item["function"]
                          for item in prepared["tools"]}
             assert {"peer_request", "publish_result"} <= functions.keys()
@@ -95,12 +95,17 @@ def test_actual_peer_request_names_registered_alias_and_deferred_invitation(
         assert attached == set(call["body"]["exposed_tools"])
         assert {"peer_request", "read_source_window", "search_saved_passages"} <= attached
         assert "read_context_record" in attached
+        assert "next_offset=null ends this saved version" in (
+            {item["function"]["name"]: item["function"] for item in packet["tools"]}
+            ["read_context_record"]["description"]
+        )
         assert "read_context_record" in availability["call_now_local_functions"]
-        assert "read_context_record" not in availability["request_first_local_functions"]
+        assert "read_context_record" not in request_first_names(packet, availability)
         assert "invite_peer" not in attached
-        assert "invite_peer" in availability["request_first_local_functions"]
+        assert "invite_peer" in request_first_names(packet, availability)
         assert availability["peer_routes"] == {
             "registered": ["agent-synthesis"],
+            "display_names": {"agent-synthesis": "Sage"},
             "ask_registered": "peer_request",
             "invite_absent": "request_capability(tool_id=invite_peer)",
         }
@@ -108,6 +113,14 @@ def test_actual_peer_request_names_registered_alias_and_deferred_invitation(
             "actor_id"
         ] not in canonical(availability["peer_routes"])
         assert 0 < _orientation_tokens(packet) <= 101
+        asked, _ = host._peer_request(
+            _spec(host, run.run_id, "agent-critique", "peer-display-name-route"),
+            {"target_instance_id": "Sage", "question": "Check this source-dependent point."},
+        )
+        saved_request = host.store.get("mail_request", asked["request_id"])
+        assert saved_request["body"]["recipient_id"] == host._control(
+            run.run_id, "agent-synthesis",
+        )["body"]["actor_id"]
         deferred_call = {**call, "body": {**call["body"], "exposed_tools": [
             name for name in call["body"]["exposed_tools"] if name != "peer_request"
         ]}}
@@ -159,7 +172,11 @@ def test_saved_old_configuration_and_request_survive_new_instruction_revision(
         assert refreshed["body"]["previous_configuration_id"] == old["id"]
         assert refreshed["body"]["settings"] == old["body"]["settings"]
         assert refreshed["body"]["reasoning_settings"] == old["body"]["reasoning_settings"]
-        assert "use the supplied read_request with read_context_record directly" in (
+        assert current_guidance in refreshed["body"]["instructions"]
+        assert "Read omissions by exact coordinates" in (
+            refreshed["body"]["instructions"]
+        )
+        assert "A fully delivered question has no hidden suffix" in (
             refreshed["body"]["instructions"]
         )
         assert host.store.get("agent_configuration", old["id"], 1)["body"][

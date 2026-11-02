@@ -5,7 +5,13 @@ import hashlib
 import pytest
 
 import ora.evidence.intake as intake_module
-from ora.evidence import EvidenceError, EvidenceLibrary, IntakeService, checked_model_text
+from ora.evidence import (
+    EvidenceError,
+    EvidenceLibrary,
+    IntakeService,
+    checked_model_text,
+    read_source_window,
+)
 from ora.state import StateStore
 
 
@@ -95,6 +101,22 @@ def test_partial_packet_retains_omissions_need_and_review_flags(tmp_path):
     assert flagged["needs_review"]["source_use"]
     assert flagged["passages"][0]["needs_review"]
     assert "-3 points" in flagged["text"]
+
+
+def test_matching_words_at_distinct_source_offsets_remain_distinct(tmp_path):
+    library, publication = _library(tmp_path)
+    saved = _copy(library, publication, "repeat", b"repeat repeat", "text/plain",
+                  "abstract", ["repeat"])
+    first = read_source_window(library, "repeat-first", saved["copy_ref"],
+                               block_offset=0, char_offset=0, char_limit=6)
+    second = read_source_window(library, "repeat-second", saved["copy_ref"],
+                                block_offset=0, char_offset=7, char_limit=6)
+    refs = [*first["passage_refs"], *second["passage_refs"]]
+    packet = checked_model_text(library, saved["copy_ref"], refs)
+
+    assert packet["passage_refs"] == refs
+    assert packet["text"].count("\nrepeat") == 2
+    assert all(packet["text"].count(pointer["id"]) == 1 for pointer in refs)
 
 
 def test_cross_copy_and_forged_passage_are_rejected(tmp_path):

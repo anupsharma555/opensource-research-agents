@@ -32,6 +32,183 @@ class WireModel(BaseModel):
     model_config = ConfigDict(extra="forbid", alias_generator=to_camel, populate_by_name=True)
 
 
+AnalysisNumber = Annotated[float, Field(strict=True, allow_inf_nan=False, ge=-1e12, le=1e12)]
+AnalysisGroup = Annotated[list[AnalysisNumber], Field(min_length=2, max_length=200)]
+PhysicalUnit = Literal[
+    "gram", "milligram", "kilogram", "meter", "centimeter", "millimeter",
+    "second", "millisecond", "minute", "hour", "liter", "milliliter",
+]
+
+
+class AnalyzeValuesInput(WireModel):
+    """Prespecified calculations on supplied values, not source or design validation."""
+
+    operation: Literal["describe", "welch_ttest"]
+    group_a: AnalysisGroup
+    group_b: AnalysisGroup | None = None
+    alternative: Literal["two-sided", "less", "greater"] | None = None
+    units: str | None = Field(default=None, min_length=1, max_length=40)
+
+    @model_validator(mode="after")
+    def explicit_design(self):
+        if self.operation == "describe" and (
+            self.group_b is not None or self.alternative is not None
+        ):
+            raise ValueError("Describe accepts one group without a test alternative")
+        if self.operation == "welch_ttest" and (
+            self.group_b is None or self.alternative is None
+        ):
+            raise ValueError("Welch comparison requires both groups and an explicit alternative")
+        if self.units is not None and (
+            not self.units.strip() or any(ord(char) < 32 for char in self.units)
+        ):
+            raise ValueError("Units must be a short printable label")
+        return self
+
+
+class ConvertUnitsInput(WireModel):
+    """Physical unit conversion using a fixed registry; no clinical equivalence."""
+
+    value: AnalysisNumber
+    from_unit: PhysicalUnit
+    to_unit: PhysicalUnit
+
+
+# Version 2 analysis tools have separate contracts. Keep the original two tools
+# stable for saved missions that carry their earlier schema and receipts.
+AnalysisAlternative = Literal["two-sided", "less", "greater"]
+AnalysisLabel = Annotated[str, Field(min_length=1, max_length=80)]
+AnalysisCount = Annotated[int, Field(strict=True, ge=0, le=1_000_000)]
+AnalysisProbability = Annotated[float, Field(strict=True, allow_inf_nan=False, ge=0, le=1)]
+
+
+class SummaryStatisticsGroup(WireModel):
+    n: Annotated[int, Field(strict=True, ge=2, le=1_000_000)]
+    mean: AnalysisNumber
+    sample_sd: Annotated[float, Field(strict=True, allow_inf_nan=False, ge=0, le=1e12)]
+
+
+class CompareSummaryStatisticsInput(WireModel):
+    group_a: SummaryStatisticsGroup
+    group_b: SummaryStatisticsGroup
+    alternative: AnalysisAlternative
+    units: str | None = Field(default=None, min_length=1, max_length=40)
+
+    @model_validator(mode="after")
+    def valid_units(self):
+        if self.units is not None and (
+            not self.units.strip() or any(ord(char) < 32 for char in self.units)
+        ):
+            raise ValueError("Units must be a short printable label")
+        return self
+
+
+class AnalyzeContingencyInput(WireModel):
+    event_a: AnalysisCount
+    nonevent_a: AnalysisCount
+    event_b: AnalysisCount
+    nonevent_b: AnalysisCount
+    operation: Literal["risk_ratio", "odds_ratio", "risk_difference"]
+    zero_cell_policy: Literal["reject", "add_half"] = Field(
+        description=(
+            "For odds ratio, any zero cell needs add_half; for risk ratio, a zero event "
+            "cell needs add_half but a zero nonevent cell can be valid. Correction adds "
+            "0.5 to all four cells. Risk difference uses raw counts; choose reject."
+        )
+    )
+
+    @model_validator(mode="after")
+    def valid_table(self):
+        if self.event_a + self.nonevent_a == 0 or self.event_b + self.nonevent_b == 0:
+            raise ValueError("Each group needs at least one observed outcome")
+        if self.operation == "risk_difference" and self.zero_cell_policy == "add_half":
+            raise ValueError("Risk difference uses original counts; choose reject policy")
+        return self
+
+
+class PairedObservation(WireModel):
+    pair_id: AnalysisLabel
+    value_a: AnalysisNumber
+    value_b: AnalysisNumber
+
+
+class AnalyzePairedValuesInput(WireModel):
+    pairs: Annotated[list[PairedObservation], Field(min_length=2, max_length=200)]
+    alternative: AnalysisAlternative
+    units: str | None = Field(default=None, min_length=1, max_length=40)
+
+    @model_validator(mode="after")
+    def valid_pairs(self):
+        _validate_analysis_ids([pair.pair_id for pair in self.pairs])
+        _validate_analysis_units(self.units)
+        return self
+
+
+class CorrelateValuesInput(WireModel):
+    pairs: Annotated[list[PairedObservation], Field(min_length=4, max_length=200)]
+    method: Literal["pearson"]
+    alternative: AnalysisAlternative
+
+    @model_validator(mode="after")
+    def valid_pairs(self):
+        _validate_analysis_ids([pair.pair_id for pair in self.pairs])
+        return self
+
+
+class PValueObservation(WireModel):
+    test_id: AnalysisLabel
+    p_value: AnalysisProbability
+
+
+class AdjustPValuesInput(WireModel):
+    tests: Annotated[list[PValueObservation], Field(min_length=2, max_length=200)]
+    method: Literal["benjamini_hochberg", "benjamini_yekutieli"]
+    alpha: Annotated[float, Field(
+        strict=True, allow_inf_nan=False, ge=0, le=1,
+        description="Strictly between 0 and 1; endpoints are rejected by the canonical validator",
+    )]
+    family_id: AnalysisLabel
+
+    @model_validator(mode="after")
+    def valid_tests(self):
+        _validate_analysis_ids([test.test_id for test in self.tests])
+        _validate_analysis_ids([self.family_id])
+        if not 0 < self.alpha < 1:
+            raise ValueError("Alpha must be strictly between zero and one")
+        return self
+
+
+class DescribeValuesInput(WireModel):
+    values: AnalysisGroup
+    quantile_method: Literal["linear"]
+    units: str | None = Field(default=None, min_length=1, max_length=40)
+
+    @model_validator(mode="after")
+    def valid_units(self):
+        _validate_analysis_units(self.units)
+        return self
+
+
+class ConvertValuesUnitsInput(WireModel):
+    values: Annotated[list[AnalysisNumber], Field(min_length=1, max_length=200)]
+    from_unit: PhysicalUnit
+    to_unit: PhysicalUnit
+
+
+def _validate_analysis_ids(ids: list[str]) -> None:
+    if len(ids) != len(set(ids)) or any(
+        not value.strip() or any(ord(char) < 32 for char in value) for value in ids
+    ):
+        raise ValueError("Analysis IDs must be unique, nonblank printable labels")
+
+
+def _validate_analysis_units(units: str | None) -> None:
+    if units is not None and (
+        not units.strip() or any(ord(char) < 32 for char in units)
+    ):
+        raise ValueError("Units must be a short printable label")
+
+
 class SearchWebInput(WireModel):
     """One explicitly chosen round; this is not a lifetime research budget."""
 
@@ -680,6 +857,36 @@ class LiveAgent(WireModel):
     role_template_id: Identifier | None = None
 
 
+class LiveAgentModelChoice(WireModel):
+    """Optional per-alias model choice for a new research run."""
+
+    model_config = ConfigDict(json_schema_extra={
+        "allOf": [{
+            "if": {"properties": {"model": {"const": "openai/gpt-oss-120b"}},
+                   "required": ["model"]},
+            "then": {"properties": {"reasoningEffort": {
+                "anyOf": [
+                    {"enum": ["medium", "high"], "type": "string"},
+                    {"type": "null"},
+                ],
+            }}},
+        }],
+    })
+
+    model: Literal["openai/gpt-oss-120b", "qwen/qwen3.8-27b"]
+    reasoning_effort: Literal["low", "medium", "high"] | None = None
+    max_completion_tokens: Annotated[int, Field(strict=True, ge=1, le=65536)] | None = None
+
+    @model_validator(mode="after")
+    def selected_output_limit(self):
+        if self.model == "openai/gpt-oss-120b" and self.reasoning_effort == "low":
+            raise ValueError("GPT-OSS agent choice supports medium or high reasoning")
+        if self.model == "qwen/qwen3.8-27b" and self.max_completion_tokens is not None \
+                and self.max_completion_tokens > 16384:
+            raise ValueError("Qwen output limit cannot exceed 16384 tokens")
+        return self
+
+
 class LiveStartRequest(WireModel):
     request_id: Identifier
     question: Text
@@ -687,6 +894,7 @@ class LiveStartRequest(WireModel):
     evidence_text: str = ""
     agent_ids: list[Identifier] = Field(min_length=1)
     required_agent_ids: list[Identifier] = Field(default_factory=list)
+    agent_models: dict[Identifier, LiveAgentModelChoice] | None = None
     credential_profile: Literal["primary", "backup"] | None = None
     allow_vision: bool = Field(default=False, description="Explicitly permit auxiliary Groq Qwen figure-reading calls using this run's selected credential profile.")
 

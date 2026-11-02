@@ -35,7 +35,9 @@ def test_minimum_retry_is_bounded_and_complete_size_checked(tmp_path, monkeypatc
                 raise ContextOverflow('Exact minimum', required_tokens=2000)
             assert len(allowances) <= 3
             return SimpleNamespace(estimated_tokens=3000 if len(allowances)==1 else 2000,
-                                   messages=[{'role': 'user', 'content': 'checked-packet'}])
+                                   messages=[{'role': 'user', 'content': canonical({
+                                       'peer_answer_previews': [], 'peer_answer_review_cues': [],
+                                   })}])
 
         def preview(**kwargs):
             preview_sources.append(kwargs['sources'])

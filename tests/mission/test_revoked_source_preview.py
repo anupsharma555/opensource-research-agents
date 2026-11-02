@@ -104,7 +104,10 @@ def test_revoked_a_still_allows_complete_checked_b_first_input(tmp_path, monkeyp
                       in message["content"])
         assert notice["excluded_source_refs"] == [a]
         assert budget["source_turn_mode"] == "all_allowed_sources_fit"
-        assert budget["preview_admission_target_tokens"] == 8000
+        assert budget["rate_input_headroom_tokens"] > 0
+        assert budget["preview_admission_target_tokens"] == (
+            8000 - budget["prior_completion_reservation"] - budget["rate_input_headroom_tokens"]
+        )
         assert budget["source_exclusion_refs"]
         assert notice["decision_refs"] == budget["source_exclusion_refs"]
         assert [item["copy_ref"] for item in intent["body"]["source_decisions"]] == [b]
